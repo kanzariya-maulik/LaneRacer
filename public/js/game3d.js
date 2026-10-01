@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { keyboardStep, gamepadInput, changed } from './input.js';
 import { LEVELS, ratioRange, resolveLevel, autoPick, adaptStep } from './quality.js';
+import { placeScenery, seedOf } from './scenery.js';
 import { SnapshotBuffer, sample, project, decodeFlags, INTERP_S } from './netsync.js';
 
 // World units per metre come from the track JSON (track.scale = 6).
@@ -51,7 +52,7 @@ function applyLevel(l) {
     Q = LEVELS[l];
     window.lanraceQuality.level = l;
     renderer.shadowMap.enabled = Q.shadows > 0;
-    renderer.shadowMap.type = Q.softShadows ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
+    renderer.shadowMap.type = THREE.PCFShadowMap; // PCFSoft removed in three r186
     sun.castShadow = Q.shadows > 0;
     if (Q.shadows) sun.shadow.mapSize.set(Q.shadows, Q.shadows);
     sun.shadow.map?.dispose();
@@ -463,13 +464,54 @@ function buildWorld(t) {
     world.add(strip(path, half, half + kerbW, 0.7, (i) => curvy[i], alternate('#d62828', '#f2f2f2')));
     world.add(strip(path, -half - kerbW, -half, 0.7, (i) => curvy[i], alternate('#d62828', '#f2f2f2')));
 
+    const scen = placeScenery(t, Q.scenery, seedOf(t.id));
+    const onSlow = (side) => {
+        const mark = new Array(n).fill(false);
+        for (const c of scen.slowCorners) if (c.side === side) for (let i = c.from; i !== c.to; i = (i + 1) % n) mark[i] = true;
+        return mark;
+    };
+    const slowOut = { 1: onSlow(1), [-1]: onSlow(-1) };
+    // Gravel traps on the outside of slow corners, between the kerb and the barrier (visual only)
+    for (const dir of [1, -1]) {
+        const from = dir > 0 ? half + kerbW : -(half + WALL_OFFSET - 1 * scale), to = dir > 0 ? half + WALL_OFFSET - 1 * scale : -(half + kerbW);
+        world.add(strip(path, from, to, 0.4, (i) => slowOut[dir][i], solid('#cdb98f')));
+    }
+
     // Barriers exactly where the physics wall is; skipped where another part of the track is closer
     const wallOff = half + WALL_OFFSET;
     for (const dir of [1, -1]) {
         const ok = offsetPoints(path, dir * wallOff).map((p) => distToPath(p, path) > wallOff * 0.95
             && !(t.pit && distToPath(p, t.pit.path, false) < t.pit.width / 2 + (PIT_RUNOFF_M + 2) * scale));
-        world.add(wall(path, dir * wallOff, 1 * scale, (i) => ok[i] && ok[(i + 1) % n], alternate('#d62828', '#f2f2f2')));
+        const redWhite = alternate('#d62828', '#f2f2f2'), tyre = solid('#1b1b1b');
+        world.add(wall(path, dir * wallOff, 1 * scale, (i) => ok[i] && ok[(i + 1) % n], (i) => (slowOut[dir][i] ? tyre(i) : redWhite(i))));
+
     }
+
+    // Trees: trunk + crown, two sizes, one draw each
+    const trunks = [], crowns = [];
+    for (const tr of scen.trees) {
+        const k = tr.size === 2 ? 1.6 : 1;
+        trunks.push({ x: tr.x, y: 2 * scale * k, z: tr.y, sx: k, sy: k, sz: k });
+        crowns.push({ x: tr.x, y: 7 * scale * k, z: tr.y, sx: k, sy: k, sz: k });
+    }
+    world.add(instanced(new THREE.CylinderGeometry(0.4 * scale, 0.5 * scale, 4 * scale, 6), new THREE.MeshStandardMaterial({ color: 0x5b3a1e, roughness: 1 }), trunks));
+    world.add(instanced(new THREE.ConeGeometry(3 * scale, 9 * scale, 7), new THREE.MeshStandardMaterial({ color: 0x2f6b2a, roughness: 1 }), crowns));
+
+    // Grandstands: stepped stand + coloured seats
+    const stands = [], seats = [];
+    for (const g of scen.grandstands) {
+        stands.push({ x: g.x, y: 4 * scale, z: g.y, angle: -g.angle });
+        seats.push({ x: g.x, y: 8.2 * scale, z: g.y, angle: -g.angle });
+    }
+    world.add(instanced(new THREE.BoxGeometry(60 * scale, 8 * scale, 12 * scale), new THREE.MeshStandardMaterial({ color: 0x9aa0a6 }), stands));
+    world.add(instanced(new THREE.BoxGeometry(58 * scale, 0.6 * scale, 10 * scale), new THREE.MeshStandardMaterial({ color: 0x1e5bd8 }), seats));
+
+    // Billboards: one atlas, facing the track
+    const boards = scen.billboards.map((b) => ({
+        text: b.text, x: b.x, y: 2.5 * scale, z: b.y, rotY: b.side > 0 ? -b.angle : Math.PI - b.angle,
+        bg: ['#d62828', '#1e5bd8', '#2a9d3f', '#111827'][b.text.length % 4],
+    }));
+    if (boards.length) world.add(atlasPlanes(boards, 12 * scale, 3 * scale, '#111827'));
 
     world.add(startLine(t.start, t.width));
     gridBoxes(t.startPositions);
