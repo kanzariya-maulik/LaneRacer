@@ -59,3 +59,33 @@ test('a track without pit data still gets a line', () => {
     const rl = RL.compute(t);
     assert.strictEqual(rl.offset.length, t.path.length);
 });
+
+const Game = require('../src/game/Game');
+const Physics = require('../src/game/Physics');
+const quietIo = { emit() {}, volatile: { emit() {} } };
+
+for (const id of Track.TRACK_IDS) {
+    test(`${id}: a car following the line at its speeds laps cleanly with Full assist`, () => {
+        const t = tracks[id], n = t.path.length, sc = t.scale, rl = t.racingLine;
+        const L = RL.linePoints(t.path, rl.offset);
+        const lap = RL.profile(L, sc, t.safeSpeed.map((s) => s * AIM)).lap;
+        const g = new Game(quietIo, [{ id: 'a', username: 'A', teamId: 'redbull', assist: 'full' }], t, { maxLaps: 1, qualifying: false }, () => {});
+        g.frozen = false;
+        const p = g.players.a;
+        let time = 0, walls = 0;
+        while (time < 200 && !p.finished) {
+            const i = Physics.nearestOnTrack(p.x, p.y, t).i, aim = L[(i + 3) % n];
+            let d = Math.atan2(aim.y - p.y, aim.x - p.x) - p.angle;
+            d = Math.atan2(Math.sin(d), Math.cos(d));
+            const v = p.speed / sc, target = rl.speed[(i + 1) % n];
+            p.input = { steer: Math.max(-1, Math.min(1, d * 3)), throttle: v < target ? 1 : 0, brake: v > target + 1 ? 1 : 0 };
+            const v0 = p.speed;
+            g.update();
+            time += g.dt;
+            if (v0 / sc > 15 && p.speed < v0 * 0.7) walls++;
+        }
+        assert.ok(p.finished, `${id}: no lap in 200 s`);
+        assert.strictEqual(walls, 0, `${id}: ${walls} wall hits`);
+        assert.ok(time <= lap + 8, `${id}: ${time.toFixed(1)} s vs profile ${lap.toFixed(1)} s`);
+    });
+}
