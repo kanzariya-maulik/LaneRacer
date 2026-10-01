@@ -175,7 +175,9 @@ class Game {
     }
 
     initPayload() {
-        return { players: this.players, track: this.track, mode: this.mode, index: this.index };
+        // Late joiners also need the quali clock and the session-best sectors (tower colours)
+        const session = this.mode === 'quali' ? { phase: 'QUALIFYING', endsInMs: Math.max(0, (QUALI_MAX_S - this.time) * 1000) } : null;
+        return { players: this.players, track: this.track, mode: this.mode, index: this.index, session, bestSectors: this.bestSectors };
     }
 
     handleInput(id, input) {

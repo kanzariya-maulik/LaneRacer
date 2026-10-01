@@ -85,3 +85,12 @@ test('race time holds while the race clock is frozen (countdown), then runs', ()
     b.push({ s: 3, t: 5.2, g: 0.1, c: [] }, 10.2);
     assert.ok(Math.abs(b.gameTime(5.3) - 0.2) < 1e-9, 'running clock is projected forward');
 });
+
+test('a packet from an old session (much higher seq) does not block the new one', () => {
+    const b = new N.SnapshotBuffer();
+    b.push(pkt(20000, 300, [car(0, 1)]), 1);   // straggler from the finished session
+    assert.ok(b.push(pkt(1, 0, [car(0, 5)]), 1.1), 'new session accepted');
+    assert.ok(b.push(pkt(2, 1 / 60, [car(0, 6)]), 1.12));
+    assert.strictEqual(b.latest().s, 2);
+    assert.deepStrictEqual(b.snaps.map((x) => x.s), [1, 2], 'old session dropped');
+});

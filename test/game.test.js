@@ -883,3 +883,13 @@ test('jump start: a car shunted off its slot by the car behind is not penalised'
     assert.strictEqual(a.penalty, 0);
     assert.strictEqual(events.filter(([ev, d]) => ev === 'track_limits' && d.kind === 'jump').length, 0);
 });
+
+test('late joiner: game_init carries the quali clock and the session-best sectors', () => {
+    const g = new Game(io, [lp('a')], monza, QUALI, () => {}, 'quali');
+    g.time = 100;
+    g.bestSectors = [30.1, 40.2, 25.3];
+    const init = g.initPayload();
+    assert.deepStrictEqual(init.session, { phase: 'QUALIFYING', endsInMs: 260000 });
+    assert.deepStrictEqual(init.bestSectors, [30.1, 40.2, 25.3]);
+    assert.strictEqual(new Game(io, [lp('a')], monza, RACE, () => {}).initPayload().session, null);
+});

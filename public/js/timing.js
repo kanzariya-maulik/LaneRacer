@@ -24,3 +24,11 @@ export function lapDelta(last, best) {
     const d = last - best;
     return d <= 1e-9 ? { text: 'PB', cls: 't-green' } : { text: `+${d.toFixed(3)}`, cls: 't-yellow' };
 }
+
+// Spectator camera: keep following the same driver through overtakes; step ±1 through the running order
+export function stepFollow(ids, current, step) {
+    if (!ids.length) return null;
+    const i = ids.indexOf(current);
+    if (i < 0) return ids[0];
+    return ids[(((i + step) % ids.length) + ids.length) % ids.length];
+}

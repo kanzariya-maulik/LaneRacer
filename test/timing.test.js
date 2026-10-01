@@ -32,3 +32,12 @@ test('lap delta: last lap against best', () => {
     assert.deepStrictEqual(T.lapDelta(90, 90), { text: 'PB', cls: 't-green' });
     assert.deepStrictEqual(T.lapDelta(90.38, 90), { text: '+0.380', cls: 't-yellow' });
 });
+
+test('stepFollow: spectating follows a driver, not a position, and steps through the order', () => {
+    assert.strictEqual(T.stepFollow(['a', 'b', 'c'], null, 0), 'a', 'starts on the leader');
+    assert.strictEqual(T.stepFollow(['b', 'a', 'c'], 'a', 0), 'a', 'same driver after an overtake');
+    assert.strictEqual(T.stepFollow(['b', 'a', 'c'], 'a', 1), 'c');
+    assert.strictEqual(T.stepFollow(['b', 'a', 'c'], 'b', -1), 'c', 'wraps');
+    assert.strictEqual(T.stepFollow(['b', 'c'], 'a', 0), 'b', 'followed driver left: back to the leader');
+    assert.strictEqual(T.stepFollow([], 'a', 0), null);
+});

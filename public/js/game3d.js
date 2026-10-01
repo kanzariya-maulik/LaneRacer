@@ -6,7 +6,7 @@ import { keyboardStep, gamepadInput, changed } from './input.js';
 import { LEVELS, ratioRange, resolveLevel, autoPick, adaptStep, snapLight, frameCapped } from './quality.js';
 import { placeScenery, seedOf } from './scenery.js';
 import { SnapshotBuffer, sample, project, decodeFlags, INTERP_S } from './netsync.js';
-import { gapText, driverCode, lapDelta } from './timing.js';
+import { gapText, driverCode, lapDelta, stepFollow } from './timing.js';
 import { MODES, segmentColor, cornerMask, aheadM, trackIndex, nextMode } from './racingline.js';
 
 // World units per metre come from the track JSON (track.scale = 6).
@@ -53,7 +53,10 @@ Object.assign(sun.shadow.camera, { left: -360, right: 360, top: 360, bottom: -36
 scene.add(sun, sun.target);
 
 // Shadows, fog, draw distance and resolution limits for a level (applied when a track is built)
+let appliedLevel = null;
 function applyLevel(l) {
+    if (l === appliedLevel) return; // same level next session: keep the shadow map and the learned resolution
+    appliedLevel = l;
     level = l;
     Q = LEVELS[l];
     window.lanraceQuality.level = l;
@@ -66,7 +69,8 @@ function applyLevel(l) {
     scene.fog = new THREE.Fog(SKY, 3000, Q.fog);
     camera.far = Q.far;
     camera.updateProjectionMatrix();
-    res = { ...ratioRange(l, window.devicePixelRatio), good: 0, ratio: Math.min(res.ratio, ratioRange(l, window.devicePixelRatio).max) };
+    const range = ratioRange(l, window.devicePixelRatio);
+    res = { ...range, good: 0, ratio: Math.max(range.min, Math.min(res.ratio, range.max)) };
     renderer.setPixelRatio(res.ratio);
 }
 applyLevel(level);
@@ -85,7 +89,7 @@ const KEYMAP = { w: 'up', arrowup: 'up', s: 'down', arrowdown: 'down', a: 'left'
 let input = { throttle: 0, brake: 0, steer: 0, drs: false };
 let touchInput = null;
 let lastSent = null, lastSentAt = 0;
-let spectateIndex = 0;
+let spectateId = null; // spectators follow this driver
 let towerMode = 'interval'; // timing tower gap column: 'interval' (car ahead) or 'leader'
 function toggleTower() {
     towerMode = towerMode === 'interval' ? 'leader' : 'interval';
@@ -98,6 +102,7 @@ let line = null, lineIdx = null, padX = false;
 const lineChoice = () => { const v = store.get('lanrace.line'); return MODES.includes(v) ? v : 'corners'; };
 let lineMode = lineChoice();
 function toggleLine() {
+    if (!line) return; // no line on this track
     lineMode = nextMode(lineMode);
     applyLineMode();
     colourLine();
@@ -114,8 +119,8 @@ function onKey(e, down) {
     if (down && key === 't' && !e.repeat && clientState.status !== 'LOBBY') toggleTower();
     if (down && key === 'r' && !e.repeat && clientState.status !== 'LOBBY') toggleLine();
     if (down && clientState.status !== 'LOBBY' && isSpectator()) {
-        if (key === 'arrowleft') spectateIndex--;
-        if (key === 'arrowright') spectateIndex++;
+        if (key === 'arrowleft') spectateId = stepFollow(rankedCarIds(), spectateId, -1);
+        if (key === 'arrowright') spectateId = stepFollow(rankedCarIds(), spectateId, 1);
     }
     const k = KEYMAP[key];
     if (!k) return;
@@ -551,7 +556,8 @@ function colourLine() {
     if (!line) return;
     const gs = clientState.gameState, me = gs && gs[clientState.me], racing = !!me && !isSpectator();
     line.mesh.visible = lineMode !== 'off' && !(racing && me.inPit);
-    if (!line.mesh.visible) { lineIdx = null; return; } // re-found from scratch when the line comes back
+    if (!line.mesh.visible) { lineIdx = null; line.baseDone = false; return; } // re-found from scratch when the line comes back
+    if (!racing && line.baseDone) return; // spectators see fixed base colours: written once
     const t = clientState.trackData, rl = line.rl, c = line.mesh.geometry.attributes.color;
     let from = null, v = 0;
     if (racing) {
@@ -564,10 +570,26 @@ function colourLine() {
         for (let k = i * 36; k < i * 36 + 36; k += 3) { c.array[k] = col.r; c.array[k + 1] = col.g; c.array[k + 2] = col.b; }
     }
     c.needsUpdate = true;
+    line.baseDone = !racing;
 }
 
 function buildWorld(t) {
     applyLevel(resolveLevel(store.get('lanrace.quality') || 'auto', store.get('lanrace.quality.auto')));
+    // Quali → race on the same track: keep the world (rebuilding recompiles every shader and stalls the lights);
+    // only the cars and the racing line are per session
+    if (world && world.userData.trackId === t.id && world.userData.level === level) {
+        for (const id in cars) {
+            cars[id].root.traverse((o) => { // per-car material clones and name-tag textures (liveries are shared)
+                if (!o.material) return;
+                if (o.isSprite) o.material.map?.dispose();
+                o.material.dispose();
+            });
+            dropCar(id);
+        }
+        if (line) { world.remove(line.mesh); line.mesh.geometry.dispose(); line.mesh.material.dispose(); }
+        buildRacingLine(t);
+        return;
+    }
     if (world) {
         scene.remove(world);
         // Free GPU memory; shared caches (asphalt, blob, env map, liveries) are kept for the next world
@@ -586,6 +608,7 @@ function buildWorld(t) {
 
     scale = t.scale;
     world = new THREE.Group();
+    world.userData = { trackId: t.id, level };
     scene.add(world);
 
     const path = t.path, half = t.width / 2, n = path.length;
@@ -601,9 +624,9 @@ function buildWorld(t) {
     world.add(ground);
 
     world.add(strip(path, -half, half, 0.6, all, solid('#4a505a'), { map: asphaltTexture(), repeatM: 8 }));
-    const inset = 0.5 * scale, line = 0.3 * scale;
-    world.add(strip(path, half - inset - line, half - inset, 0.9, all, solid('#f2f2f2'), { layer: 2 }));
-    world.add(strip(path, -half + inset, -half + inset + line, 0.9, all, solid('#f2f2f2'), { layer: 2 }));
+    const inset = 0.5 * scale, lineW = 0.3 * scale;
+    world.add(strip(path, half - inset - lineW, half - inset, 0.9, all, solid('#f2f2f2'), { layer: 2 }));
+    world.add(strip(path, -half + inset, -half + inset + lineW, 0.9, all, solid('#f2f2f2'), { layer: 2 }));
 
     // Kerbs on corners (visual only), widened by 2 points so they don't flicker on and off
     const turny = path.map((_, i) => turnAngle(path, i) > KERB_TURN);
@@ -872,6 +895,7 @@ function updateWheelBatch() {
         wheelBatch = parts.map((part) => {
             const mesh = new THREE.InstancedMesh(part.geometry, part.material, 4 * 24);
             mesh.frustumCulled = false;
+            mesh.castShadow = true; // tyres shadow the track like the body does
             mesh.count = 0;
             world.add(mesh);
             return mesh;
@@ -897,12 +921,15 @@ function updateWheelBatch() {
 const look = new THREE.Vector3();
 let camHeading = 0;
 
+function rankedCarIds() {
+    const gs = clientState.gameState || {};
+    return Object.keys(gs).filter((id) => cars[id]).sort((a, b) => gs[a].rank - gs[b].rank);
+}
+
 function followedCar() {
     if (!isSpectator()) return cars[clientState.me];
-    const gs = clientState.gameState;
-    const ids = Object.keys(gs).filter((id) => cars[id]).sort((a, b) => gs[a].rank - gs[b].rank);
-    if (!ids.length) return null;
-    return cars[ids[((spectateIndex % ids.length) + ids.length) % ids.length]];
+    spectateId = stepFollow(rankedCarIds(), spectateId, 0);
+    return spectateId ? cars[spectateId] : null;
 }
 
 function updateCamera(dt) {

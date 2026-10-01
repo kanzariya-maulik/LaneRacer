@@ -3,7 +3,8 @@
 export const INTERP_S = 0.05;     // other cars are drawn this far behind server time
 export const EXTRAP_MAX_S = 0.1;  // past the newest snapshot, coast at most this long, then hold
 export const BUFFER_S = 1;
-const OFFSET_DRIFT = 0.05;        // how fast the clock estimate follows packets that arrive later than the best seen
+const OFFSET_DRIFT = 0.05;
+const NEW_SESSION_GAP = 600;      // seq this far below the newest (10 s of ticks) = the server started a new session        // how fast the clock estimate follows packets that arrive later than the best seen
 export const FLAGS = { inPit: 1, limiter: 2, drs: 4, drsAvailable: 8, finished: 16, lapValid: 32, ghost: 64 }; // matches Game.FLAGS
 
 export function decodeFlags(f) {
@@ -24,7 +25,13 @@ export class SnapshotBuffer {
     }
 
     push(pkt, arrivalS) {
-        const newest = this.snaps.at(-1);
+        let newest = this.snaps.at(-1);
+        if (newest && pkt.s < newest.s - NEW_SESSION_GAP) { // seq restarted: a new session, the buffer held a straggler
+            this.snaps = [];
+            this.offset = null;
+            this.lastNow = -Infinity;
+            newest = undefined;
+        }
         if (this.snaps.some((x) => x.s === pkt.s)) return false;
         if (newest && pkt.s < newest.s) {
             if (pkt.t < newest.t - BUFFER_S) return false;

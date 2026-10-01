@@ -5,6 +5,11 @@ try {
     nodeDataChannel.initLogger('WARN');
 } catch (e) {}
 
+// Open and still hearing from the client: a channel that went quiet (WiFi roam, IP change) can take ICE tens of
+// seconds to report as failed, so judge it by traffic instead
+const QUIET_MS = 500;
+const live = (peer) => peer.isOpen && peer.dc && peer.dc.isOpen() && (peer.lastRx === undefined || Date.now() - peer.lastRx < QUIET_MS);
+
 class WebRTCManager {
     constructor() {
         this.peers = {}; // [socketId]: { pc, dc, isOpen: false, pingTime: 0 }
@@ -69,6 +74,7 @@ class WebRTCManager {
             // DataChannel Lifecycle
             dc.onOpen(() => {
                 peerRecord.isOpen = true;
+                peerRecord.lastRx = Date.now();
                 console.log(`[WebRTC] 🚀 UDP DataChannel OPEN for player: ${socket.id}`);
                 // Notify client that UDP is active
                 dc.sendMessage(JSON.stringify({ type: 'UDP_READY', timestamp: Date.now() }));
@@ -85,6 +91,7 @@ class WebRTCManager {
 
             // Handle Incoming UDP Messages from Client (Inputs & Pings)
             dc.onMessage((msg) => {
+                peerRecord.lastRx = Date.now(); // liveness: clients send inputs at least 10 times a second
                 try {
                     const data = JSON.parse(msg);
                     if (data.type === 'INPUT') {
@@ -116,7 +123,7 @@ class WebRTCManager {
         const viaUDP = new Set();
 
         for (const [id, peer] of Object.entries(this.peers)) {
-            if (peer.isOpen && peer.dc && peer.dc.isOpen()) {
+            if (live(peer)) {
                 try {
                     peer.dc.sendMessage(payload);
                     viaUDP.add(id);
@@ -133,7 +140,7 @@ class WebRTCManager {
 
     hasOpenChannel(socketId) {
         const peer = this.peers[socketId];
-        return peer && peer.isOpen && peer.dc && peer.dc.isOpen();
+        return !!peer && live(peer);
     }
 
     cleanup(socketId) {

@@ -59,6 +59,7 @@ function setupWebRTC() {
 
             // ── Handle messages received over UDP ─────────────────────────
             rtcDataChannel.onmessage = (event) => {
+                lastUdpRx = performance.now();
                 try {
                     const msg = JSON.parse(event.data);
 
@@ -139,11 +140,13 @@ socket.on('webrtc_candidate', async (data) => {
 });
 
 // ── Send game input — WebRTC UDP first, socket during handshake ─────────────
+let lastUdpRx = 0;
 window.sendUDPInput = function(inputs) {
     if (udpReady && rtcDataChannel && rtcDataChannel.readyState === 'open') {
         try {
             rtcDataChannel.send(JSON.stringify({ type: 'INPUT', payload: inputs }));
-            return;
+            // Still hearing the server over UDP: done. Quiet for 0.5 s (WiFi roam): send the socket copy too
+            if (performance.now() - lastUdpRx < 500) return;
         } catch (e) {
             udpReady = false;
         }
@@ -228,7 +231,8 @@ socket.on('game_init', (data) => {
     clientState.trackData = data.track;
     clientState.netIndex = data.index || {};
     clientState.netIn = [];
-    clientState.sessionBest = [null, null, null];
+    clientState.sessionBest = data.bestSectors ? [...data.bestSectors] : [null, null, null];
+    if (data.session) clientState.session = { phase: data.session.phase, endsAt: Date.now() + data.session.endsInMs };
     clientState.mySectors = [null, null, null];
     clientState.myBestSectors = [null, null, null];
     if (window.initGameVisuals) window.initGameVisuals();
@@ -260,6 +264,11 @@ socket.on('timing', (t) => {
     if (t.sessionBest) clientState.sessionBest = [...t.sessionBest]; // completed valid laps only
     clientState.lastTiming = t;
     if (t.id === clientState.me) {
+        // Sector bests count only from laps that end valid (same rule as the server), so colour and delta agree
+        if (t.valid) clientState.mySectors.forEach((sec, i) => {
+            const best = clientState.myBestSectors[i];
+            if (sec && (best === null || sec.time < best)) clientState.myBestSectors[i] = sec.time;
+        });
         const el = document.getElementById('lt-last');
         el.classList.remove('t-flash');
         void el.offsetWidth; // restart the animation
@@ -272,7 +281,6 @@ socket.on('sector', (s) => {
     if (s.id !== clientState.me) return;
     const cls = !s.valid ? 'sec-grey' : s.sessionBest ? 'sec-purple' : s.personalBest ? 'sec-green' : 'sec-yellow';
     const prev = clientState.myBestSectors[i];
-    if (s.personalBest) clientState.myBestSectors[i] = s.time;
     if (s.sector === 1) clientState.mySectors = [null, null, null];
     clientState.mySectors[i] = { time: s.time, cls };
     if (window.showSectorFlash) window.showSectorFlash(s.sector, s.time, prev === null ? null : s.time - prev, cls);
