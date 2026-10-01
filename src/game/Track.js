@@ -1,138 +1,70 @@
-class Track {
-    static getTrack(id) {
-        switch (id) {
-            case 1:
-                return this.createOvalTrack();
-            case 2:
-                // Figure 8
-                return this.createFigure8Track();
-            case 3:
-                return this.createComplexTrack();
-            default:
-                return this.createOvalTrack();
-        }
+const fs = require('fs');
+const path = require('path');
+
+const TRACK_IDS = ['monza', 'spa', 'silverstone', 'suzuka', 'sakhir'];
+const DATA_DIR = path.join(__dirname, '..', '..', 'data', 'tracks');
+const CHECKPOINT_COUNT = 16;
+const GRID_SLOTS = 20;
+const GRID_GAP_M = 8;  // metres between consecutive (staggered) grid slots
+const WALL_OFFSET = 80; // matches the invisible wall in Player.js
+
+// cum[i] = distance along the loop to path[i]; cum[n] = full lap length
+function cumulative(pts) {
+    const cum = [0];
+    for (let i = 1; i <= pts.length; i++) {
+        const a = pts[i - 1], b = pts[i % pts.length];
+        cum.push(cum[i - 1] + Math.hypot(b.x - a.x, b.y - a.y));
     }
-
-    static createOvalTrack() {
-        // A simple oval track math path
-        // 2 long straights, 2 half circles
-        const path = [];
-        const resolution = 20;
-
-        // Top straight
-        for(let i = 200; i <= 800; i += 50) path.push({x: i, y: 200});
-        
-        // Right semi-circle
-        for(let a = -Math.PI/2; a <= Math.PI/2; a += Math.PI/resolution) {
-            path.push({ x: 800 + Math.cos(a)*200, y: 400 + Math.sin(a)*200 });
-        }
-
-        // Bottom straight
-        for(let i = 800; i >= 200; i -= 50) path.push({x: i, y: 600});
-
-        // Left semi-circle
-        for(let a = Math.PI/2; a <= 3*Math.PI/2; a += Math.PI/resolution) {
-            path.push({ x: 200 + Math.cos(a)*200, y: 400 + Math.sin(a)*200 });
-        }
-
-        return {
-            id: 1,
-            name: "Beginner Oval",
-            path: path,
-            width: 160,
-            startAngle: 0,
-            startPositions: [
-                {x: 400, y: 160}, {x: 400, y: 240},
-                {x: 350, y: 160}, {x: 350, y: 240},
-                {x: 300, y: 160}, {x: 300, y: 240},
-                {x: 250, y: 160}, {x: 250, y: 240}
-            ],
-            checkpoints: [
-                {x: 500, y: 200, radius: 100},
-                {x: 900, y: 400, radius: 100},
-                {x: 500, y: 600, radius: 100},
-                {x: 100, y: 400, radius: 100}
-            ]
-        };
-    }
-
-    static createFigure8Track() {
-        // Simple figure-8 style track
-        const path = [];
-        const resolution = 30;
-
-        // Right Loop
-        for(let a = -Math.PI; a <= Math.PI; a += Math.PI/resolution) {
-            // we omit the crossing part slightly
-            if (a > 3*Math.PI/4 || a < -3*Math.PI/4) continue;
-            path.push({ x: 700 + Math.cos(a)*250, y: 400 + Math.sin(a)*250 });
-        }
-        
-        // Left Loop
-        for(let a = 0; a <= 2*Math.PI; a += Math.PI/resolution) {
-            if (a < Math.PI/4 || a > 7*Math.PI/4) continue;
-            path.push({ x: 300 + Math.cos(a)*250, y: 400 + Math.sin(a)*250 });
-        }
-
-        return {
-            id: 2,
-            name: "Infinity Loop",
-            path: path,
-            width: 140,
-            startAngle: -Math.PI/2,
-            startPositions: [
-                {x: 700, y: 110}, {x: 700, y: 190},
-                {x: 650, y: 110}, {x: 650, y: 190},
-                {x: 600, y: 110}, {x: 600, y: 190}
-            ],
-            checkpoints: [
-                {x: 700, y: 150, radius: 100},
-                {x: 950, y: 400, radius: 100},
-                {x: 700, y: 650, radius: 100},
-                {x: 300, y: 650, radius: 100},
-                {x: 50, y: 400, radius: 100},
-                {x: 300, y: 150, radius: 100}
-            ]
-        };
-    }
-
-    static createComplexTrack() {
-        const path = [];
-        const MathPI2 = Math.PI * 2;
-        const points = 150;
-        
-        for (let i = 0; i < points; i++) {
-            const angle = (i / points) * MathPI2;
-            // Procedurally generated wobbly circle causing many curves
-            const r = 350 + Math.sin(angle * 5) * 110 + Math.cos(angle * 2) * 60;
-            
-            path.push({
-                x: 600 + Math.cos(angle) * r * 1.2, // stretch horizontal slightly
-                y: 500 + Math.sin(angle) * r
-            });
-        }
-        
-        // At angle 0, r = 350 + 0 + 60 = 410. x = 600 + 410*1.2 = 1092, y = 500.
-        // The path direction at angle 0 moves towards angle > 0 (increases y) so it faces down. (PI/2)
-
-        return {
-            id: 3,
-            name: "Twisty Circuit",
-            path: path,
-            width: 140,
-            startAngle: Math.PI / 2,
-            startPositions: [
-                {x: 1092, y: 500}, {x: 1042, y: 500},
-                {x: 1092, y: 440}, {x: 1042, y: 440},
-                {x: 1092, y: 380}, {x: 1042, y: 380}
-            ],
-            checkpoints: [
-                {x: 600, y: 800, radius: 250},
-                {x: 200, y: 500, radius: 250},
-                {x: 600, y: 200, radius: 250}
-            ]
-        };
-    }
+    return cum;
 }
 
-module.exports = Track;
+// Point and heading at distance s along the loop (s may be negative)
+function pointAt(pts, cum, s) {
+    const total = cum[pts.length];
+    s = ((s % total) + total) % total;
+    let i = 0;
+    while (cum[i + 1] < s) i++;
+    const a = pts[i], b = pts[(i + 1) % pts.length];
+    const t = (s - cum[i]) / (cum[i + 1] - cum[i] || 1);
+    return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, angle: Math.atan2(b.y - a.y, b.x - a.x) };
+}
+
+function build(raw) {
+    const { path: pts, width, scale } = raw;
+    const cum = cumulative(pts);
+    const total = cum[pts.length];
+
+    const checkpoints = [];
+    for (let k = 0; k < CHECKPOINT_COUNT; k++) {
+        const p = k === 0 ? pts[0] : pointAt(pts, cum, (k * total) / CHECKPOINT_COUNT);
+        checkpoints.push({ x: p.x, y: p.y, radius: width / 2 + WALL_OFFSET });
+    }
+
+    // Staggered two-column grid behind the start line
+    const startPositions = [];
+    for (let i = 0; i < GRID_SLOTS; i++) {
+        const p = pointAt(pts, cum, -(i + 1) * GRID_GAP_M * scale);
+        const off = (i % 2 === 0 ? -1 : 1) * (width / 4);
+        startPositions.push({
+            x: p.x - Math.sin(p.angle) * off,
+            y: p.y + Math.cos(p.angle) * off,
+            angle: p.angle,
+        });
+    }
+
+    return { id: raw.id, name: raw.name, scale, width, path: pts, checkpoints, startPositions };
+}
+
+function load(id) {
+    const file = path.join(DATA_DIR, `${id}.json`);
+    if (!fs.existsSync(file)) throw new Error(`Missing track data ${file}. Run: npm run tracks`);
+    return build(JSON.parse(fs.readFileSync(file, 'utf8')));
+}
+
+function loadAll() {
+    const tracks = {};
+    for (const id of TRACK_IDS) tracks[id] = load(id);
+    return tracks;
+}
+
+module.exports = { TRACK_IDS, load, loadAll, build };

@@ -11,6 +11,8 @@ const io = new Server(server);
 
 // Serve static files from the public directory
 app.use(express.static(path.join(__dirname, 'public')));
+// Three.js served locally so LAN play works without internet
+app.use('/vendor/three', express.static(path.join(__dirname, 'node_modules', 'three')));
 
 // Set up socket logic
 setupSocketManager(io);

@@ -1,1 +1,9 @@
 node_modules
+
+# Copyrighted livery reference photos and preview renders (local only)
+refs/
+
+# Regenerable Blender build output (npm run build:car)
+scripts/build/
+
+.DS_Store

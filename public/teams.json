@@ -1,0 +1,13 @@
+[
+  { "id": "redbull", "name": "Red Bull Racing", "car": "RB19", "chatColor": "#3671C6", "maxPlayers": 2 },
+  { "id": "mercedes", "name": "Mercedes", "car": "W14", "chatColor": "#27F4D2", "maxPlayers": 2 },
+  { "id": "ferrari", "name": "Ferrari", "car": "SF-23", "chatColor": "#E8002D", "maxPlayers": 2 },
+  { "id": "mclaren", "name": "McLaren", "car": "MCL60", "chatColor": "#FF8000", "maxPlayers": 2 },
+  { "id": "astonmartin", "name": "Aston Martin", "car": "AMR23", "chatColor": "#229971", "maxPlayers": 2 },
+  { "id": "alpine", "name": "Alpine", "car": "A523", "chatColor": "#FF87BC", "maxPlayers": 2 },
+  { "id": "williams", "name": "Williams", "car": "FW45", "chatColor": "#64C4FF", "maxPlayers": 2 },
+  { "id": "alphatauri", "name": "AlphaTauri", "car": "AT04", "chatColor": "#5E8FAA", "maxPlayers": 2 },
+  { "id": "alfaromeo", "name": "Alfa Romeo", "car": "C43", "chatColor": "#C92D4B", "maxPlayers": 2 },
+  { "id": "haas", "name": "Haas", "car": "VF-23", "chatColor": "#B6BABD", "maxPlayers": 2 },
+  { "id": "redbull-suzuka", "name": "Red Bull — Suzuka Special", "car": "RB21", "chatColor": "#E10600", "maxPlayers": 2 }
+]

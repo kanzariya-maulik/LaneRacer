@@ -6,9 +6,12 @@ let clientState = {
     players: {},
     hostId: null,
     status: 'LOBBY',
-    settings: { trackId: 1, maxLaps: 3, maxSpeed: 400 },
+    settings: { trackId: 'monza', maxLaps: 3, qualiMinutes: 3 },
     gameState: null,
-    trackData: null // static track geometry
+    trackData: null, // static track geometry
+    session: null,      // { phase, endsAt } — endsAt in local ms, null for open-ended
+    qualiResults: null,
+    lastTiming: null,
 };
 
 socket.on('connect', () => {
@@ -21,7 +24,18 @@ socket.on('lobby_state_sync', (state) => {
     clientState.hostId = state.hostId;
     clientState.status = state.status;
     clientState.settings = state.settings;
+    if (state.status === 'LOBBY') {
+        // Drop the finished race so the next countdown doesn't treat its data as current
+        clientState.gameState = null;
+        clientState.trackData = null;
+        clientState.session = null;
+    }
     if (window.updateLobbyUI) window.updateLobbyUI();
+    if (window.updateSettingsUI) window.updateSettingsUI();
+});
+
+socket.on('join_error', (reason) => {
+    if (window.handleJoinError) window.handleJoinError(reason);
 });
 
 socket.on('player_joined', (player) => {
@@ -31,6 +45,7 @@ socket.on('player_joined', (player) => {
 });
 
 socket.on('player_left', (id) => {
+    if (clientState.gameState) delete clientState.gameState[id];
     if (clientState.players[id]) {
         window.appendChat('SYSTEM', '#f43f5e', `${clientState.players[id].username} left.`);
         delete clientState.players[id];
@@ -60,10 +75,6 @@ socket.on('status_change', (status) => {
     if (window.handleStatusChange) window.handleStatusChange(status);
 });
 
-socket.on('countdown', (count) => {
-    const el = document.getElementById('countdown-text');
-    if (el) el.innerText = count > 0 ? count : 'GO!';
-});
 
 socket.on('game_init', (data) => {
     clientState.gameState = data.players;
@@ -78,5 +89,28 @@ socket.on('game_state', (stateSync) => {
         if (clientState.gameState && clientState.gameState[id]) {
             Object.assign(clientState.gameState[id], stateSync[id]);
         }
+    }
+});
+
+socket.on('lights', ({ count }) => {
+    if (window.handleLights) window.handleLights(count);
+});
+
+socket.on('session', ({ phase, endsInMs }) => {
+    clientState.session = { phase, endsAt: endsInMs === null ? null : Date.now() + endsInMs };
+});
+
+socket.on('quali_results', (list) => {
+    clientState.qualiResults = list;
+    if (window.showQualiResults) window.showQualiResults(list);
+});
+
+socket.on('timing', (t) => {
+    clientState.lastTiming = t;
+    if (t.id === clientState.me) {
+        const el = document.getElementById('lt-last');
+        el.classList.remove('t-flash');
+        void el.offsetWidth; // restart the animation
+        el.classList.add('t-flash');
     }
 });

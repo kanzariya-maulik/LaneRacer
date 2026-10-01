@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LAN Race 2D</title>
+    <title>LAN Race</title>
     <link rel="stylesheet" href="css/style.css">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;900&display=swap" rel="stylesheet">
 </head>
@@ -19,19 +19,9 @@
                 <div class="panel profile-panel">
                     <h2>Your Profile</h2>
                     <input type="text" id="username" placeholder="Username" maxlength="15">
-                    
-                    <div class="color-picker-container">
-                        <label style="margin-bottom:10px; display:block;">Car Color</label>
-                        <div id="color-swatches">
-                            <div class="swatch selected" style="background:#ef4444;" data-color="#ef4444"></div>
-                            <div class="swatch" style="background:#3b82f6;" data-color="#3b82f6"></div>
-                            <div class="swatch" style="background:#22c55e;" data-color="#22c55e"></div>
-                            <div class="swatch" style="background:#eab308;" data-color="#eab308"></div>
-                            <div class="swatch" style="background:#a855f7;" data-color="#a855f7"></div>
-                            <div class="custom-color-wrapper">
-                                <input type="color" id="car-color" value="#ff0044" class="custom-swatch">
-                            </div>
-                        </div>
+                    <div class="team-picker">
+                        <label style="margin-bottom:10px; display:block;">Team</label>
+                        <div id="team-grid"></div>
                     </div>
                     
                     <button id="btn-join" class="btn primary">Join Lobby</button>
@@ -43,16 +33,30 @@
                             <h3>Host Settings</h3>
                             <label>Track:
                                 <select id="setting-track">
-                                    <option value="1">Beginner Oval</option>
-                                    <option value="2">Infinity Loop</option>
-                                    <option value="3">Twisty Circuit (Hard)</option>
+                                    <option value="monza">Monza</option>
+                                    <option value="spa">Spa-Francorchamps</option>
+                                    <option value="silverstone">Silverstone</option>
+                                    <option value="suzuka">Suzuka</option>
+                                    <option value="sakhir">Bahrain (Sakhir)</option>
                                 </select>
                             </label>
                             <label>Laps:
                                 <input type="number" id="setting-laps" min="1" max="50" value="3">
                             </label>
-                            <label>Max Speed (KM/H):
-                                <input type="number" id="setting-speed" min="20" max="200" value="80">
+                            <label>Qualifying:
+                                <select id="setting-quali">
+                                    <option value="0">Off</option>
+                                    <option value="1">1 min</option>
+                                    <option value="2">2 min</option>
+                                    <option value="3" selected>3 min</option>
+                                    <option value="4">4 min</option>
+                                    <option value="5">5 min</option>
+                                    <option value="6">6 min</option>
+                                    <option value="7">7 min</option>
+                                    <option value="8">8 min</option>
+                                    <option value="9">9 min</option>
+                                    <option value="10">10 min</option>
+                                </select>
                             </label>
                             <button id="btn-start" class="btn success mt-1">Start Race</button>
                         </div>
@@ -91,12 +95,23 @@
                 <div class="hud-box">Lap: <span id="hud-lap">1</span></div>
             </div>
             <div id="hud-bottom">
+                <div id="lap-times">
+                    <div>LAP <span id="lt-current">--</span></div>
+                    <div>LAST <span id="lt-last">--</span></div>
+                    <div>BEST <span id="lt-best">--</span></div>
+                </div>
                 <div class="hud-speedometer"><span id="hud-speed">0</span> KM/H</div>
             </div>
             
+            <canvas id="minimap" width="220" height="220"></canvas>
+            <div id="session-bar"></div>
+            <div id="lights" class="hidden">
+                <span class="light"></span><span class="light"></span><span class="light"></span><span class="light"></span><span class="light"></span>
+            </div>
+
             <!-- Leaderboard (top right) -->
             <div id="leaderboard">
-                <h3>Standings</h3>
+                <h3>Timing</h3>
                 <ol id="leaderboard-list"></ol>
             </div>
         </div>
@@ -113,13 +128,21 @@
         
         <div id="spectator-overlay" class="hidden">
             <h2>SPECTATING</h2>
-            <p>Race is currently in progress...</p>
+            <p>Race in progress · ← → to switch car</p>
+        </div>
+
+        <div id="quali-results" class="hidden">
+            <h2>QUALIFYING RESULTS</h2>
+            <ol id="quali-results-list"></ol>
         </div>
     </div>
 
+    <script type="importmap">
+        { "imports": { "three": "/vendor/three/build/three.module.js", "three/addons/": "/vendor/three/examples/jsm/" } }
+    </script>
     <script src="/socket.io/socket.io.js"></script>
     <script src="js/socket.js"></script>
-    <script src="js/game.js"></script>
     <script src="js/app.js"></script>
+    <script type="module" src="js/game3d.js"></script>
 </body>
 </html>
