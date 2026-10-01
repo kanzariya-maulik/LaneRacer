@@ -27,9 +27,52 @@ for (const id of Track.TRACK_IDS) {
 
     test(`${id}: 16 checkpoints, first on the start line`, () => {
         assert.strictEqual(t.checkpoints.length, 16);
-        assert.strictEqual(t.checkpoints[0].x, t.path[0].x);
-        assert.strictEqual(t.checkpoints[0].y, t.path[0].y);
+        assert.strictEqual(t.checkpoints[0].x, t.start.x);
+        assert.strictEqual(t.checkpoints[0].y, t.start.y);
         for (const cp of t.checkpoints) assert.strictEqual(cp.radius, t.width / 2 + 80);
+    });
+
+    test(`${id}: start line at circuits.json startLineM`, () => {
+        const p = Track.pointAt(t.path, t.cum, circuits[id].startLineM * t.scale);
+        assert.strictEqual(t.start.x, p.x);
+        assert.strictEqual(t.start.y, p.y);
+    });
+
+    test(`${id}: grid behind the start line, pole on the ${circuits[id].poleSide}, alternating`, () => {
+        const pole = circuits[id].poleSide, other = pole === 'left' ? 'right' : 'left';
+        // y points down the screen, so driver's left has a negative cross product
+        const sideOf = (s) => {
+            const n = Physics.nearestOnTrack(s.x, s.y, t);
+            return Math.cos(s.angle) * (s.y - n.py) - Math.sin(s.angle) * (s.x - n.px) < 0 ? 'left' : 'right';
+        };
+        t.startPositions.forEach((s, i) => assert.strictEqual(sideOf(s), i % 2 === 0 ? pole : other, `slot ${i}`));
+        const s0 = t.startPositions[0];
+        const ahead = Math.cos(t.start.angle) * (s0.x - t.start.x) + Math.sin(t.start.angle) * (s0.y - t.start.y);
+        assert.ok(ahead < -7 * t.scale && ahead > -9 * t.scale, `pole is ${(-ahead / t.scale).toFixed(1)} m behind the line`);
+    });
+
+    test(`${id}: 11 garages × 2 boxes in team order, in the pit lane, inside the limiter zone`, () => {
+        const pit = t.pit;
+        assert.deepStrictEqual(pit.garages.map(g => g.teamId), Track.GARAGE_ORDER);
+        for (let k = 1; k < pit.garages.length; k++) assert.ok(pit.garages[k].s < pit.garages[k - 1].s, 'garage 1 is nearest the pit exit');
+        for (const g of pit.garages) {
+            assert.strictEqual(g.boxes.length, 2);
+            for (const b of g.boxes) {
+                const n = Physics.nearestOnPath(b.x, b.y, pit.path, false);
+                assert.ok(n.dist < pit.width / 2, `${g.teamId} box outside the pit lane`);
+                assert.ok(Physics.nearestOnTrack(b.x, b.y, t).dist > t.width / 2, `${g.teamId} box on the track`);
+                const s = pit.cum[n.i] + n.t * (pit.cum[n.i + 1] - pit.cum[n.i]);
+                assert.ok(s > pit.limStart && s < pit.limEnd, `${g.teamId} box outside the limiter zone`);
+            }
+        }
+    });
+
+    test(`${id}: pit wall clears the track edge and runs past the garages`, () => {
+        const { wall, path: pp, cum, garageSpan } = t.pit;
+        assert.ok(wall.length > 20, `wall only ${wall.length} points`);
+        for (const w of wall) assert.ok(Physics.nearestOnTrack(w.x, w.y, t).dist >= t.width / 2, 'wall on the track');
+        const sOf = (w) => { const n = Physics.nearestOnPath(w.x, w.y, pp, false); return cum[n.i] + n.t * (cum[n.i + 1] - cum[n.i]); };
+        assert.ok(sOf(wall[0]) < garageSpan[0] && sOf(wall.at(-1)) > garageSpan[1], 'wall gap beside the garages');
     });
 
     test(`${id}: 20 grid slots on the asphalt and not overlapping`, () => {
@@ -84,3 +127,11 @@ for (const id of Track.TRACK_IDS) {
         }
     });
 }
+
+test('a track without a pit lane still builds', () => {
+    const pts = Array.from({ length: 100 }, (_, i) => ({ x: Math.cos(i / 50 * Math.PI) * 3000, y: Math.sin(i / 50 * Math.PI) * 3000 }));
+    const t = Track.build({ id: 'ring', name: 'Ring', scale: 6, width: 80, path: pts });
+    assert.strictEqual(t.pit, null);
+    assert.strictEqual(t.start.x, pts[0].x);
+    assert.strictEqual(t.startPositions.length, 20);
+});
