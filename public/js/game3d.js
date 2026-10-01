@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { keyboardStep, gamepadInput, changed } from './input.js';
+import { LEVELS, ratioRange, resolveLevel, autoPick, adaptStep } from './quality.js';
 import { SnapshotBuffer, sample, project, decodeFlags, INTERP_S } from './netsync.js';
 
 // World units per metre come from the track JSON (track.scale = 6).
@@ -19,24 +20,48 @@ const minimap = document.getElementById('minimap');
 const mm = minimap.getContext('2d');
 
 // ---------- renderer / scene ----------
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const store = {
+    get: (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } },
+    set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* storage blocked: not remembered */ } },
+};
+const choice = store.get('lanrace.quality') || 'auto';
+let level = resolveLevel(choice, store.get('lanrace.quality.auto'));
+let Q = LEVELS[level];
+window.lanraceQuality = { choice, level };
+
+// Antialias is fixed for the page's lifetime: it follows the level chosen at load
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: Q.antialias, powerPreference: 'high-performance' });
+let res = { ...ratioRange(level, window.devicePixelRatio), good: 0 };
+res.ratio = res.start;
+renderer.setPixelRatio(res.ratio);
 
 const SKY = 0x9cc8ef;
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(SKY);
-scene.fog = new THREE.Fog(SKY, 3000, 12000);
-
-const camera = new THREE.PerspectiveCamera(60, 1, 2, 20000);
-
+const camera = new THREE.PerspectiveCamera(60, 1, 2, Q.far);
 scene.add(new THREE.HemisphereLight(0xe8f4ff, 0x4f7a2a, 1.4));
 const sun = new THREE.DirectionalLight(0xffffff, 2.2);
-sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
-Object.assign(sun.shadow.camera, { left: -400, right: 400, top: 400, bottom: -400, near: 10, far: 4000 });
+Object.assign(sun.shadow.camera, { left: -360, right: 360, top: 360, bottom: -360, near: 10, far: 4000 }); // ±60 m around your car
 scene.add(sun, sun.target);
+
+// Shadows, fog, draw distance and resolution limits for a level (applied when a track is built)
+function applyLevel(l) {
+    level = l;
+    Q = LEVELS[l];
+    window.lanraceQuality.level = l;
+    renderer.shadowMap.enabled = Q.shadows > 0;
+    renderer.shadowMap.type = Q.softShadows ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
+    sun.castShadow = Q.shadows > 0;
+    if (Q.shadows) sun.shadow.mapSize.set(Q.shadows, Q.shadows);
+    sun.shadow.map?.dispose();
+    sun.shadow.map = null;
+    scene.fog = new THREE.Fog(SKY, 3000, Q.fog);
+    camera.far = Q.far;
+    camera.updateProjectionMatrix();
+    res = { ...ratioRange(l, window.devicePixelRatio), good: 0, ratio: Math.min(res.ratio, ratioRange(l, window.devicePixelRatio).max) };
+    renderer.setPixelRatio(res.ratio);
+}
+applyLevel(level);
 
 function resize() {
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -363,6 +388,7 @@ function buildPit(pit, t) {
 const solid = (hex) => { const c = new THREE.Color(hex); return () => c; };
 
 function buildWorld(t) {
+    applyLevel(resolveLevel(store.get('lanrace.quality') || 'auto', store.get('lanrace.quality.auto')));
     if (world) {
         scene.remove(world);
         world.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
@@ -460,6 +486,25 @@ function nameTag(text, color) {
     return s;
 }
 
+// Low quality: a soft dark patch instead of real shadows
+let blobTex = null;
+function blobShadow() {
+    if (!blobTex) {
+        const c = document.createElement('canvas');
+        c.width = c.height = 64;
+        const g = c.getContext('2d'), grad = g.createRadialGradient(32, 32, 4, 32, 32, 32);
+        grad.addColorStop(0, 'rgba(0,0,0,0.55)');
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+        g.fillStyle = grad;
+        g.fillRect(0, 0, 64, 64);
+        blobTex = new THREE.CanvasTexture(c);
+    }
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(6.4 * scale, 2.8 * scale), new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, depthWrite: false }));
+    m.rotation.x = -Math.PI / 2;
+    m.position.y = 1;
+    return m;
+}
+
 function makeCar(id) {
     const lp = clientState.players[id];
     if (!lp) return null;
@@ -493,6 +538,7 @@ function makeCar(id) {
     // Your own car has no label: it would sit in the middle of the chase-cam view
     const tag = id === clientState.me ? null : nameTag(lp.username, lp.color);
     if (tag) root.add(tag);
+    if (!Q.shadows) root.add(blobShadow());
     return { root, wheels, teamId: lp.teamId, ghost: false, tag };
 }
 
@@ -634,7 +680,7 @@ window.showBanner = (text, good = false) => {
     bannerTimer = setTimeout(() => el.classList.add('hidden'), 3000);
 };
 
-function updateHUD() {
+function updateHUD(withTower = true) {
     const gs = clientState.gameState;
     const me = gs[clientState.me];
     const racing = me && !isSpectator();
@@ -677,41 +723,43 @@ function updateHUD() {
     $('pit-limiter').classList.toggle('hidden', !(racing && me.limiter));
     $('drs-badge').className = !racing ? 'drs-off' : me.drs ? 'drs-open' : me.drsAvailable ? 'drs-avail' : 'drs-off';
 
-    // Timing tower
-    const quali = Object.values(gs).some(p => p.ghost);
-    const ol = $('leaderboard-list');
-    ol.innerHTML = '';
-    Object.entries(gs).sort((a, b) => a[1].rank - b[1].rank).slice(0, 10).forEach(([id, p]) => {
-        const lp = clientState.players[id];
-        if (!lp) return;
-        const li = document.createElement('li');
-        const name = document.createElement('span');
-        name.className = 'tt-name';
-        name.textContent = `${p.rank}. ${lp.username}${p.penalty ? ` +${p.penalty}s` : ''}`;
-        const time = document.createElement('span');
-        if (quali) {
-            time.textContent = p.rank === 1 ? fmtTime(p.bestLap) : p.gap === null ? fmtTime(p.bestLap) : `+${p.gap.toFixed(3)}`;
-            if (p.bestLap !== null && p.bestLap === fastest) time.className = 't-purple';
-        } else if (p.finished && p.rank === 1) {
-            time.textContent = 'WINNER';
-        } else {
-            time.textContent = p.rank === 1 ? 'LEADER' : p.lapsDown > 0 ? `+${p.lapsDown} L` : p.gap === null ? '' : `+${p.gap.toFixed(3)}`;
-        }
-        if (quali) {
-            const bars = document.createElement('span');
-            bars.className = 'tt-sectors';
-            (p.bestLapSectors || [null, null, null]).forEach((s, i) => {
-                const b = document.createElement('i');
-                const best = clientState.sessionBest[i];
-                if (s !== null) b.className = best !== null && s <= best + 1e-9 ? 'sb-purple' : 'sb-yellow';
-                bars.appendChild(b);
-            });
-            li.append(name, bars, time);
-        } else {
-            li.append(name, time);
-        }
-        ol.appendChild(li);
-    });
+    if (withTower) {
+        // Timing tower
+        const quali = Object.values(gs).some(p => p.ghost);
+        const ol = $('leaderboard-list');
+        ol.innerHTML = '';
+        Object.entries(gs).sort((a, b) => a[1].rank - b[1].rank).slice(0, 10).forEach(([id, p]) => {
+            const lp = clientState.players[id];
+            if (!lp) return;
+            const li = document.createElement('li');
+            const name = document.createElement('span');
+            name.className = 'tt-name';
+            name.textContent = `${p.rank}. ${lp.username}${p.penalty ? ` +${p.penalty}s` : ''}`;
+            const time = document.createElement('span');
+            if (quali) {
+                time.textContent = p.rank === 1 ? fmtTime(p.bestLap) : p.gap === null ? fmtTime(p.bestLap) : `+${p.gap.toFixed(3)}`;
+                if (p.bestLap !== null && p.bestLap === fastest) time.className = 't-purple';
+            } else if (p.finished && p.rank === 1) {
+                time.textContent = 'WINNER';
+            } else {
+                time.textContent = p.rank === 1 ? 'LEADER' : p.lapsDown > 0 ? `+${p.lapsDown} L` : p.gap === null ? '' : `+${p.gap.toFixed(3)}`;
+            }
+            if (quali) {
+                const bars = document.createElement('span');
+                bars.className = 'tt-sectors';
+                (p.bestLapSectors || [null, null, null]).forEach((s, i) => {
+                    const b = document.createElement('i');
+                    const best = clientState.sessionBest[i];
+                    if (s !== null) b.className = best !== null && s <= best + 1e-9 ? 'sb-purple' : 'sb-yellow';
+                    bars.appendChild(b);
+                });
+                li.append(name, bars, time);
+            } else {
+                li.append(name, time);
+            }
+            ol.appendChild(li);
+        });
+    }
 }
 
 function drawMinimap() {
@@ -752,6 +800,11 @@ function drawMinimap() {
 
 // ---------- loop ----------
 let last = performance.now();
+let fpsFrames = 0, fpsSince = performance.now(), lastHud = 0, lastTower = 0;
+let autoMs = 0, autoFrames = 0; // auto-pick: frame time while driving
+const stats = new URLSearchParams(location.search).has('stats') ? Object.assign(document.createElement('div'), { id: 'stats' }) : null;
+if (stats) document.body.appendChild(stats);
+
 function frame(now) {
     const dt = Math.min((now - last) / 1000, 0.1);
     last = now;
@@ -762,8 +815,33 @@ function frame(now) {
     updateCars(dt);
     updateCamera(dt);
     renderer.render(scene, camera);
-    updateHUD();
-    drawMinimap();
+
+    if (now - lastHud > 66) { // HUD and minimap at 15 Hz, timing tower at 4 Hz
+        updateHUD(now - lastTower > 250);
+        if (now - lastTower > 250) lastTower = now;
+        drawMinimap();
+        lastHud = now;
+    }
+
+    fpsFrames++;
+    const me = clientState.gameState[clientState.me];
+    if (choice === 'auto' && !store.get('lanrace.quality.auto') && me && Math.abs(me.speed) > 0) {
+        autoMs += dt * 1000;
+        autoFrames++;
+        if (autoMs > 5000) {
+            const picked = autoPick(autoMs / autoFrames, level, window.devicePixelRatio);
+            store.set('lanrace.quality.auto', picked); // used from the next race
+        }
+    }
+    if (now - fpsSince >= 1000) {
+        const fps = (fpsFrames * 1000) / (now - fpsSince);
+        const next = adaptStep(res, fps);
+        if (next.ratio !== res.ratio) renderer.setPixelRatio(next.ratio);
+        res = next;
+        if (stats) stats.textContent = `${fps.toFixed(0)} fps · ${renderer.info.render.calls} calls · ${res.ratio.toFixed(2)}× · ${level}${choice === 'auto' ? ' (auto)' : ''}`;
+        fpsFrames = 0;
+        fpsSince = now;
+    }
 }
 
 window.initGameVisuals = () => {

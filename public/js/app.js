@@ -18,6 +18,14 @@ const hostSettings = document.getElementById('host-settings');
 const setTrack = document.getElementById('setting-track');
 const setLaps = document.getElementById('setting-laps');
 const setQuali = document.getElementById('setting-quali');
+const graphicsSelect = document.getElementById('graphics-select');
+try { graphicsSelect.value = localStorage.getItem('lanrace.quality') || 'auto'; } catch (e) { /* storage blocked: Auto */ }
+if (!graphicsSelect.value) graphicsSelect.value = 'auto';
+graphicsSelect.addEventListener('change', () => {
+    try { localStorage.setItem('lanrace.quality', graphicsSelect.value); } catch (e) { /* not remembered */ }
+    document.getElementById('graphics-note').textContent = graphicsSelect.value === 'high' || window.lanraceQuality?.level === 'high'
+        ? ' Applies next race (anti-aliasing after a page reload)' : ' Applies next race';
+});
 
 let isJoined = false;
 let amReady = false;

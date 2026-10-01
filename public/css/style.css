@@ -435,3 +435,7 @@ input:focus { border: 1px solid var(--primary); }
 #drs-badge.drs-avail { border-color: #22c55e; color: #22c55e; }
 #drs-badge.drs-open { border-color: #22c55e; background: #22c55e; color: #052e16; }
 #race-msg.good { background: rgba(22, 163, 74, 0.9); }
+
+.graphics-picker { display: block; margin: 10px 0; }
+#graphics-note { color: #94a3b8; }
+#stats { position: fixed; left: 8px; bottom: 8px; z-index: 50; background: rgba(0, 0, 0, 0.6); color: #a7f3d0; font: 12px monospace; padding: 4px 8px; border-radius: 4px; }
