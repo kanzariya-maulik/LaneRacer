@@ -3,7 +3,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { keyboardStep, gamepadInput, changed } from './input.js';
-import { LEVELS, ratioRange, resolveLevel, autoPick, adaptStep, snapToTexel, frameCapped } from './quality.js';
+import { LEVELS, ratioRange, resolveLevel, autoPick, adaptStep, snapLight, frameCapped } from './quality.js';
 import { placeScenery, seedOf } from './scenery.js';
 import { SnapshotBuffer, sample, project, decodeFlags, INTERP_S } from './netsync.js';
 import { gapText, driverCode, lapDelta } from './timing.js';
@@ -48,6 +48,7 @@ scene.background = new THREE.Color(SKY);
 const camera = new THREE.PerspectiveCamera(60, 1, 2, Q.far);
 scene.add(new THREE.HemisphereLight(0xe8f4ff, 0x4f7a2a, 1.4));
 const sun = new THREE.DirectionalLight(0xffffff, 2.2);
+const SUN_OFF = { x: 600, y: 1800, z: 400 }; // sun position relative to the shadow target
 Object.assign(sun.shadow.camera, { left: -360, right: 360, top: 360, bottom: -360, near: 10, far: 4000 }); // ±60 m around your car
 scene.add(sun, sun.target);
 
@@ -124,6 +125,14 @@ function onKey(e, down) {
 }
 window.addEventListener('keydown', (e) => onKey(e, true));
 window.addEventListener('keyup', (e) => onKey(e, false));
+// A keyup missed while the window lost focus (alt-tab, tab switch) must not leave throttle or steering held
+function releaseKeys() {
+    for (const k in keys) keys[k] = false;
+    input = { throttle: 0, brake: 0, steer: 0, drs: false };
+    sendInput(performance.now(), true);
+}
+window.addEventListener('blur', releaseKeys);
+document.addEventListener('visibilitychange', () => { if (document.hidden) releaseKeys(); });
 
 function sendInput(now, force = false) {
     // ≤ 30 Hz on change, plus a 10 Hz resend: UDP may drop a packet and a lost "throttle off" must not stick
@@ -829,6 +838,7 @@ function updateCars(dt) {
                 if (!o.material || o.isSprite) return;
                 o.material.transparent = ghost;
                 o.material.opacity = ghost ? 0.5 : 1;
+                o.material.needsUpdate = true; // transparency changes the shader; only runs when ghost flips
             });
         }
     }
@@ -909,9 +919,9 @@ function updateCamera(dt) {
     look.set(p.x + Math.cos(h) * LOOK_AHEAD_M * scale, 1 * scale, p.z + Math.sin(h) * LOOK_AHEAD_M * scale);
     camera.lookAt(look);
     // Moved in whole shadow-map texels so shadow edges don't shimmer as the car drives
-    const sx = snapToTexel(p.x, 720, Q.shadows || 1024), sz = snapToTexel(p.z, 720, Q.shadows || 1024);
-    sun.position.set(sx + 600, 1800, sz + 400);
-    sun.target.position.set(sx, 0, sz);
+    const q = snapLight({ x: p.x, y: 0, z: p.z }, SUN_OFF, 720 / (Q.shadows || 1024));
+    sun.position.set(q.x + SUN_OFF.x, q.y + SUN_OFF.y, q.z + SUN_OFF.z);
+    sun.target.position.set(q.x, q.y, q.z);
 }
 
 // ---------- HUD + minimap ----------
@@ -1141,7 +1151,7 @@ function frame(now) {
         res = next;
         fpsHist.push(fps);
         if (fpsHist.length > 6) fpsHist.shift();
-        if (!capWarned && frameCapped(fpsHist)) {
+        if (!capWarned && res.noDrop && frameCapped(fpsHist)) { // lowering resolution didn't help: a real cap
             capWarned = true;
             window.showBanner?.('30 FPS CAP — plug in the charger or turn off Chrome Energy Saver');
         }

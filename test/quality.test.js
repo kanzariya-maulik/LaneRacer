@@ -31,59 +31,44 @@ test('autoPick: slow → Low, fast → High, otherwise unchanged', () => {
     assert.strictEqual(Q.autoPick(16, 'medium', 1), 'medium');
 });
 
-test('adaptStep: drops fast, recovers only after good seconds (10 after a drop, then 3), stays in range', () => {
-    let st = { ratio: 1, min: 0.6, max: 1, good: 0 };
-    st = Q.adaptStep(st, 10);
-    assert.strictEqual(st.ratio, 0.9);
-    for (let i = 1; i <= 10; i++) st = Q.adaptStep(st, 10 + i * 3); // each drop helps a little, still slow
-    assert.strictEqual(st.ratio, 0.6);
-    st = Q.adaptStep(st, 50); // leaves the probe state
-    for (let i = 0; i < 9; i++) st = Q.adaptStep(st, 60);
-    assert.strictEqual(st.ratio, 0.6, 'not after 9 s');
-    st = Q.adaptStep(st, 60);
-    assert.strictEqual(st.ratio, 0.65);
-    st = Q.adaptStep(st, 60); st = Q.adaptStep(st, 60);
-    assert.strictEqual(st.ratio, 0.65, 'next step not after 2 s');
-    st = Q.adaptStep(st, 60);
-    assert.strictEqual(st.ratio, 0.7);
-    st = { ratio: 1, min: 0.6, max: 1, good: 5 };
-    assert.strictEqual(Q.adaptStep(st, 60).ratio, 1, 'never above max');
-    assert.strictEqual(Q.adaptStep({ ratio: 0.8, min: 0.6, max: 1, good: 2 }, 55).good, 0, '50–58 fps resets the streak');
-});
+const run = (st, seq) => seq.reduce((x, f) => Q.adaptStep(x, f), st);
 
-test('adaptStep: after a drop, raising again needs a longer good streak (no flip-flop)', () => {
-    let st = { ratio: 1, min: 0.6, max: 1, good: 0 };
-    st = Q.adaptStep(st, 60); st = Q.adaptStep(st, 60); st = Q.adaptStep(st, 40); // 0.9, just dropped
-    for (let i = 0; i < 5; i++) st = Q.adaptStep(st, 60);
-    assert.strictEqual(st.ratio, 0.9, 'raised again within 5 s of a drop');
-    for (let i = 0; i < 5; i++) st = Q.adaptStep(st, 60);
-    assert.strictEqual(st.ratio, 0.95, 'recovers after 10 good seconds');
-});
-
-test('adaptStep: when a drop does not raise fps (frame cap), it undoes the drop and stops lowering', () => {
+test('adaptStep: GPU-bound at 30 fps (vsync) probes the minimum, keeps it if it helps, climbs back under a ceiling', () => {
     let st = { ratio: 2, min: 0.75, max: 2, good: 0 };
     st = Q.adaptStep(st, 30);
-    assert.strictEqual(st.ratio, 1.9, 'first drop is tried');
-    st = Q.adaptStep(st, 30);
-    assert.strictEqual(st.ratio, 2, 'no gain: back to where it was');
-    for (let i = 0; i < 20; i++) st = Q.adaptStep(st, 30);
+    assert.strictEqual(st.ratio, 0.75, 'one big probe, not 0.1 steps');
+    st = Q.adaptStep(st, 60);
+    assert.strictEqual(st.ratio, 0.75, 'it helped: kept');
+    assert.ok(!st.noDrop);
+    st = run(st, new Array(9).fill(60));
+    assert.strictEqual(st.ratio, 0.8, 'climbs after 10 good seconds');
+    st = run(st, new Array(200).fill(60));
+    assert.strictEqual(st.ratio, 1.95, 'never back to the ratio that was too slow');
+});
+
+test('adaptStep: a frame cap (no gain at the minimum) restores the ratio and stops lowering', () => {
+    let st = { ratio: 2, min: 0.75, max: 2, good: 0 };
+    st = run(st, [30, 30]);
+    assert.strictEqual(st.ratio, 2);
+    assert.strictEqual(st.noDrop, true);
+    st = run(st, new Array(20).fill(30));
     assert.strictEqual(st.ratio, 2, 'capped frame rate never sinks the resolution');
 });
 
-test('adaptStep: a drop that helps is kept and the next one is tried', () => {
-    let st = { ratio: 1, min: 0.6, max: 1, good: 0 };
-    st = Q.adaptStep(st, 40);   // 0.9
-    st = Q.adaptStep(st, 46);   // helped by 6 fps, still slow → 0.8
-    assert.strictEqual(st.ratio, 0.8);
+test('adaptStep: when the ceiling ratio is too slow again, it probes again with a lower ceiling', () => {
+    let st = run({ ratio: 1, min: 0.6, max: 1, good: 0 }, [40, 60]);
+    assert.strictEqual(st.ratio, 0.6);
+    st = run(st, new Array(10).fill(60));        // 0.65
+    st = run(st, [45, 60]);                       // too slow at 0.65 → min, ceiling 0.6
+    assert.strictEqual(st.ratio, 0.6);
+    st = run(st, new Array(50).fill(60));
+    assert.strictEqual(st.ratio, 0.6, 'stays under the new ceiling');
 });
 
-test('snapToTexel: shadow camera moves in whole shadow-map texels (no shimmer)', () => {
-    const step = 720 / 2048;
-    for (const v of [0, 12.34, -987.6, 5000.01]) {
-        const s = Q.snapToTexel(v, 720, 2048);
-        assert.ok(Math.abs(s / step - Math.round(s / step)) < 1e-6, `${v} → ${s} not on the grid`);
-        assert.ok(Math.abs(s - v) <= step / 2 + 1e-9);
-    }
+test('adaptStep: 50–58 fps holds, never above max, never below min', () => {
+    assert.strictEqual(Q.adaptStep({ ratio: 0.8, min: 0.6, max: 1, good: 2 }, 55).good, 0);
+    assert.strictEqual(Q.adaptStep({ ratio: 1, min: 0.6, max: 1, good: 5 }, 60).ratio, 1);
+    assert.strictEqual(Q.adaptStep({ ratio: 0.6, min: 0.6, max: 1, good: 0 }, 30).ratio, 0.6);
 });
 
 test('frameCapped: a steady 30 fps (Energy Saver) is detected, real slowness is not', () => {
@@ -91,4 +76,21 @@ test('frameCapped: a steady 30 fps (Energy Saver) is detected, real slowness is 
     assert.strictEqual(Q.frameCapped([30, 30, 30]), false, 'needs 6 seconds');
     assert.strictEqual(Q.frameCapped([24, 31, 27, 35, 29, 33]), false, 'jittery = GPU load, not a cap');
     assert.strictEqual(Q.frameCapped([60, 60, 60, 60, 60, 60]), false);
+});
+
+test('snapLight: the shadow camera lands on the light-space texel grid for an oblique sun', () => {
+    const off = { x: 600, y: 1800, z: 400 }, step = 720 / 2048;
+    // three.js lookAt basis for a camera at target+off looking at target, up (0,1,0)
+    const n = Math.hypot(off.x, off.y, off.z), z = { x: off.x / n, y: off.y / n, z: off.z / n };
+    const xl = Math.hypot(z.z, z.x), x = { x: z.z / xl, y: 0, z: -z.x / xl };
+    const y = { x: z.y * x.z - z.z * x.y, y: z.z * x.x - z.x * x.z, z: z.x * x.y - z.y * x.x };
+    const dot = (a, b) => a.x * b.x + a.y * b.y + a.z * b.z;
+    for (const p of [{ x: 0, y: 0, z: 0 }, { x: 123.4, y: 0, z: -987.6 }, { x: 5012.3, y: 3, z: 77.7 }]) {
+        const s = Q.snapLight(p, off, step);
+        for (const axis of [x, y]) {
+            const u = dot(s, axis) / step;
+            assert.ok(Math.abs(u - Math.round(u)) < 1e-6, `off-grid by ${(u - Math.round(u)).toFixed(3)} texel`);
+        }
+        assert.ok(Math.hypot(s.x - p.x, s.y - p.y, s.z - p.z) < step * 2, 'stays next to the car');
+    }
 });
