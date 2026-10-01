@@ -4,7 +4,8 @@ const { pointAt } = require('./Track');
 
 const TICK_RATE = 60;
 const WALL_OFFSET = 80;     // world units past the track edge; Track.js checkpoints use the same
-const QUALI_CUTOFF_S = 150; // after the flag, laps in progress get this long to finish
+const QUALI_LAPS = 2;       // flying laps after the out-lap
+const QUALI_MAX_S = 360;    // quali ends at this session time even if someone never finishes
 const PIT_LIMIT_KMH = 80;
 const PIT_RUNOFF_M = 2;     // barrier this far outside the pit lane edge
 
@@ -32,8 +33,6 @@ class Game {
         this.dt = 1 / TICK_RATE;
         this.time = 0;                     // session clock (s); race clock starts at lights out
         this.frozen = mode === 'race';     // race cars wait for lights out
-        this.flagAt = mode === 'quali' ? settings.qualiMinutes * 60 : Infinity;
-        this.flagShown = false;
         this.loopPath = null;
         this.winnerCount = 0;
 
@@ -125,7 +124,7 @@ class Game {
 
     start() {
         this.io.emit('game_init', this.initPayload());
-        if (this.mode === 'quali') this.io.emit('session', { phase: 'QUALIFYING', endsInMs: this.flagAt * 1000 });
+        if (this.mode === 'quali') this.io.emit('session', { phase: 'QUALIFYING', endsInMs: QUALI_MAX_S * 1000 });
         this.loopPath = setInterval(() => this.update(), 1000 / TICK_RATE);
     }
 
@@ -205,7 +204,7 @@ class Game {
             this.time += this.dt;
             for (const id of ids) {
                 const p = this.players[id];
-                if (this.mode === 'race' && p.finished) continue;
+                if (p.finished) continue; // finished race cars and parked quali cars stay put
                 this.drive(p);
                 this.checkLapProgress(p);
             }
@@ -217,16 +216,6 @@ class Game {
                     }
                 }
             }
-        }
-
-        // After the flag a car with no lap running can't set a time: its session is over
-        if (this.mode === 'quali' && this.time >= this.flagAt) {
-            for (const id of ids) if (this.players[id].lapStart === null) this.players[id].finished = true;
-        }
-
-        if (this.mode === 'quali' && !this.flagShown && this.time >= this.flagAt) {
-            this.flagShown = true;
-            this.io.emit('session', { phase: 'QUALI_FLAG', endsInMs: QUALI_CUTOFF_S * 1000 });
         }
 
         this.updateRanks();
@@ -247,7 +236,7 @@ class Game {
         const active = ids.filter(id => !this.players[id].finished).length;
         const over = this.mode === 'race'
             ? active === 0
-            : active === 0 || this.time >= this.flagAt + QUALI_CUTOFF_S;
+            : active === 0 || this.time >= QUALI_MAX_S;
         if (over) {
             this.stop();
             if (this.mode === 'quali') {
@@ -309,15 +298,16 @@ class Game {
             }
             return;
         }
-        if (p.finished) return; // already took the chequered flag
+        if (p.finished) return;
         if (p.lapStart !== null) {
             p.lap++;
             this.recordLap(p);
-        }
-        if (this.time >= this.flagAt) {
-            p.finished = true;     // chequered flag: session over for this car
-            p.lapStart = null;
-            return;
+            if (p.lap >= QUALI_LAPS) { // run complete: park the car
+                p.finished = true;
+                p.lapStart = null;
+                p.vx = p.vy = p.speed = 0;
+            }
+            return; // recordLap already started the next flying lap at the line
         }
         p.lapStart = p.inPit ? null : this.time; // out-lap: timing starts at the first crossing after pit exit
     }

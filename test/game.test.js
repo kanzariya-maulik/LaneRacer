@@ -8,7 +8,7 @@ const CarPhysics = require('../src/game/CarPhysics');
 const io = { emit() {}, volatile: { emit() {} } };
 const monza = Track.load('monza');
 const lp = (id, teamId = 'ferrari') => ({ id, username: id.toUpperCase(), teamId });
-const RACE = { maxLaps: 3, qualiMinutes: 0 };
+const RACE = { maxLaps: 3, qualifying: false };
 const close = (a, b) => assert.ok(Math.abs(a - b) < 1e-9, `${a} vs ${b}`);
 
 // Teleport p through checkpoints in order; each call to lap() ends on the start line
@@ -94,7 +94,7 @@ test('initPayload carries players, track and mode', () => {
 
 test('quali cars are ghosts; race cars collide; finished race cars are not pushed', () => {
     for (const [mode, expectMoved] of [['quali', false], ['race', true]]) {
-        const g = new Game(io, [lp('a'), lp('b')], monza, { maxLaps: 1, qualiMinutes: 1 }, () => {}, mode);
+        const g = new Game(io, [lp('a'), lp('b')], monza, { maxLaps: 1, qualifying: true }, () => {}, mode);
         g.release();
         const { a, b } = g.players;
         b.x = a.x + 1; b.y = a.y; b.angle = a.angle;
@@ -143,7 +143,7 @@ test('race lap times are recorded from lights out', () => {
 });
 
 test('race gap = time difference at the last checkpoint both passed; lapped cars show laps down', () => {
-    const g = new Game(io, [lp('a'), lp('b'), lp('c')], monza, { maxLaps: 5, qualiMinutes: 0 }, () => {});
+    const g = new Game(io, [lp('a'), lp('b'), lp('c')], monza, { maxLaps: 5, qualifying: false }, () => {});
     const { a, b, c } = g.players;
     Object.assign(a, { lap: 1, checkpoint: 3, progress: 19, passTimes: { 18: 96, 19: 100 } });
     Object.assign(b, { lap: 1, checkpoint: 2, progress: 18, passTimes: { 18: 97.5 } });
@@ -157,7 +157,7 @@ test('race gap = time difference at the last checkpoint both passed; lapped cars
 });
 
 test('quali: best lap sets order, no-time drivers last in join order', () => {
-    const g = new Game(io, [lp('a'), lp('b'), lp('c'), lp('d')], monza, { maxLaps: 3, qualiMinutes: 3 }, () => {}, 'quali');
+    const g = new Game(io, [lp('a'), lp('b'), lp('c'), lp('d')], monza, { maxLaps: 3, qualifying: true }, () => {}, 'quali');
     const P = g.players;
     crossLine(g, P.a, 10); lap(g, P.a, 10, 95); lap(g, P.a, 105, 92);
     crossLine(g, P.b, 12); lap(g, P.b, 12, 90);
@@ -165,40 +165,6 @@ test('quali: best lap sets order, no-time drivers last in join order', () => {
     close(P.a.bestLap, 92);
     g.updateRanks();
     close(P.a.gap, 2);
-});
-
-test('quali: lap started before the flag counts, then that car is done', () => {
-    const g = new Game(io, [lp('a')], monza, { maxLaps: 3, qualiMinutes: 1 }, () => {}, 'quali'); // flag at 60 s
-    const a = g.players.a;
-    crossLine(g, a, 5);
-    lap(g, a, 5, 50);          // ends at 55 s, before the flag
-    assert.strictEqual(a.finished, false);
-    lap(g, a, 55, 40);         // started before the flag, ends at 95 s
-    close(a.lastLap, 40);
-    assert.strictEqual(a.finished, true);
-    lap(g, a, 95, 30);         // after taking the flag nothing is timed
-    close(a.bestLap, 40);
-});
-
-test('quali ends when everyone has taken the flag, or 150 s after it', () => {
-    let results = null;
-    const g = new Game(io, [lp('a'), lp('b')], monza, { maxLaps: 3, qualiMinutes: 1 }, (r) => { results = r; }, 'quali');
-    g.players.a.finished = true;
-    g.players.b.checkpoint = 7; // keep b mid-lap so it doesn't take the flag
-    Object.assign(g.players.b, { x: monza.start.x, y: monza.start.y, lapStart: 90 }); // on track, on a timed lap when the flag falls
-    g.time = 100;
-    g.update();
-    assert.strictEqual(results, null);
-    g.time = 60 + 150 - g.dt / 2;
-    g.update();
-    assert.deepStrictEqual(results.map(r => r.id), ['a', 'b']);
-
-    let all = null;
-    const g2 = new Game(io, [lp('a'), lp('b')], monza, { maxLaps: 3, qualiMinutes: 1 }, (r) => { all = r; }, 'quali');
-    g2.players.a.finished = true;
-    g2.players.b.finished = true;
-    g2.update();
-    assert.ok(all);
 });
 
 test('grazing the wall at a shallow angle keeps most of the speed; head-on does not', () => {
@@ -322,7 +288,7 @@ test('tracks without a pit lane still drive', () => {
     assert.strictEqual(g.players.a.inPit, false);
 });
 
-const QUALI = { maxLaps: 3, qualiMinutes: 1 };
+const QUALI = { maxLaps: 3, qualifying: true };
 
 test('quali cars start in their own garage box, at rest, facing pit exit', () => {
     const g = new Game(io, [lp('a'), lp('b'), lp('c', 'haas')], monza, QUALI, () => {}, 'quali');
@@ -406,13 +372,50 @@ test('car just off the straight before the pit wall starts is not limited', () =
     assert.strictEqual(p.lapStart, 3);
 });
 
-test('quali: after the flag, a car that can no longer start a lap is done', () => {
+test('quali: out-lap, then two timed laps, then the car is parked', () => {
+    const g = new Game(io, [lp('a')], monza, QUALI, () => {}, 'quali');
+    const a = g.players.a;
+    crossLine(g, a, 10);                    // end of the out-lap: timing starts
+    assert.strictEqual(a.lapStart, 10);
+    lap(g, a, 10, 90);
+    close(a.lastLap, 90);
+    assert.strictEqual(a.finished, false);
+    lap(g, a, 100, 88);
+    close(a.lastLap, 88);
+    assert.strictEqual(a.finished, true, 'two flying laps should end the run');
+    assert.strictEqual(a.lap, 2);
+    close(a.bestLap, 88);
+    a.input = { throttle: 1, brake: 0, steer: 0 };
+    const x = a.x;
+    g.update();
+    assert.strictEqual(a.x, x, 'parked car moved');
+    assert.strictEqual(a.speed, 0);
+});
+
+test('quali ends when every car is done, or 6 minutes after the start', () => {
     let results = null;
     const g = new Game(io, [lp('a'), lp('b')], monza, QUALI, (r) => { results = r; }, 'quali');
-    Object.assign(g.players.b, { x: monza.start.x, y: monza.start.y, checkpoint: 7, lapStart: 50 }); // b on track, mid-lap
-    g.time = g.flagAt;
-    g.update();                     // a sits in its garage: no lap running
-    assert.strictEqual(g.players.a.finished, true);
-    assert.strictEqual(g.players.b.finished, false);
+    g.players.a.finished = true;
+    g.time = 300;
+    g.update();
     assert.strictEqual(results, null);
+    g.time = 360;
+    g.update();
+    assert.deepStrictEqual(results.map(r => r.id), ['a', 'b']);
+
+    let all = null;
+    const g2 = new Game(io, [lp('a'), lp('b')], monza, QUALI, (r) => { all = r; }, 'quali');
+    g2.players.a.finished = true;
+    g2.players.b.finished = true;
+    g2.update();
+    assert.ok(all);
+});
+
+test('quali session clock is the 6-minute cap', () => {
+    const sessions = [];
+    const io2 = { emit(ev, d) { if (ev === 'session') sessions.push(d); }, volatile: { emit() {} } };
+    const g = new Game(io2, [lp('a')], monza, QUALI, () => {}, 'quali');
+    g.start();
+    g.stop();
+    assert.deepStrictEqual(sessions, [{ phase: 'QUALIFYING', endsInMs: 360000 }]);
 });

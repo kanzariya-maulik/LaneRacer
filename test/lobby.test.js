@@ -3,7 +3,7 @@ const assert = require('node:assert');
 const lobby = require('../src/lobby');
 
 const TRACK_IDS = ['monza', 'spa'];
-const DEFAULTS = { trackId: 'monza', maxLaps: 3, qualiMinutes: 3 };
+const DEFAULTS = { trackId: 'monza', maxLaps: 3, qualifying: true };
 
 test('teams.json has 11 liveries capped at 2', () => {
     assert.strictEqual(lobby.TEAMS.length, 11);
@@ -28,16 +28,16 @@ test('sanitizeChat', () => {
 test('sanitizeSettings clamps and ignores garbage', () => {
     assert.deepStrictEqual(lobby.sanitizeSettings(DEFAULTS, null, TRACK_IDS), DEFAULTS);
     assert.deepStrictEqual(
-        lobby.sanitizeSettings(DEFAULTS, { trackId: 'monaco', maxLaps: '7', qualiMinutes: 99, maxSpeedKmh: 300, evil: 1 }, TRACK_IDS),
-        { trackId: 'monza', maxLaps: 3, qualiMinutes: 10 },
+        lobby.sanitizeSettings(DEFAULTS, { trackId: 'monaco', maxLaps: '7', qualifying: 'yes', maxSpeedKmh: 300, evil: 1 }, TRACK_IDS),
+        { trackId: 'monza', maxLaps: 3, qualifying: true },
     );
     assert.deepStrictEqual(
-        lobby.sanitizeSettings(DEFAULTS, { trackId: 'spa', maxLaps: 0, qualiMinutes: -2 }, TRACK_IDS),
-        { trackId: 'spa', maxLaps: 1, qualiMinutes: 0 },
+        lobby.sanitizeSettings(DEFAULTS, { trackId: 'spa', maxLaps: 0, qualifying: false }, TRACK_IDS),
+        { trackId: 'spa', maxLaps: 1, qualifying: false },
     );
     assert.deepStrictEqual(
-        lobby.sanitizeSettings(DEFAULTS, { maxLaps: 4.6, qualiMinutes: NaN }, TRACK_IDS),
-        { trackId: 'monza', maxLaps: 5, qualiMinutes: 3 },
+        lobby.sanitizeSettings(DEFAULTS, { maxLaps: 4.6, qualiMinutes: 5 }, TRACK_IDS),
+        { trackId: 'monza', maxLaps: 5, qualifying: true },
     );
 });
 

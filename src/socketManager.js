@@ -10,7 +10,7 @@ const state = {
     status: 'LOBBY', // LOBBY, QUALIFYING, QUALI_RESULTS, COUNTDOWN, RACE, FINISHED
     players: {},
     hostId: null,
-    settings: { trackId: 'monza', maxLaps: 3, qualiMinutes: 3 }
+    settings: { trackId: 'monza', maxLaps: 3, qualifying: true }
 };
 
 let gameInstance = null;
@@ -98,7 +98,7 @@ function setupSocketManager(io) {
             overflow.forEach((p) => { p.isSpectating = true; });
             if (overflow.length) io.emit('lobby_state_sync', lobbySnapshot());
 
-            if (state.settings.qualiMinutes > 0) startQuali(io, racers);
+            if (state.settings.qualifying) startQuali(io, racers);
             else startRace(io, racers);
         });
 

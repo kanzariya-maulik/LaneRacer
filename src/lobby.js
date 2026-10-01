@@ -20,7 +20,7 @@ function sanitizeSettings(current, incoming, trackIds) {
     const next = { ...current };
     if (trackIds.includes(incoming.trackId)) next.trackId = incoming.trackId;
     if (Number.isFinite(incoming.maxLaps)) next.maxLaps = clamp(Math.round(incoming.maxLaps), 1, 50);
-    if (Number.isFinite(incoming.qualiMinutes)) next.qualiMinutes = clamp(Math.round(incoming.qualiMinutes), 0, 10);
+    if (typeof incoming.qualifying === 'boolean') next.qualifying = incoming.qualifying;
     return next;
 }
 

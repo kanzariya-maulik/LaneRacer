@@ -31,10 +31,10 @@ function fakeIo() {
 }
 
 // Each test leaves the shared server state empty by disconnecting everyone
-function join(io, id, teamId, qualiMinutes) {
+function join(io, id, teamId, quali) {
     const s = io.connect(id);
     s.fire('join_lobby', { username: id.toUpperCase(), teamId });
-    if (qualiMinutes !== undefined) s.fire('update_settings', { trackId: 'monza', maxLaps: 1, qualiMinutes });
+    if (quali !== undefined) s.fire('update_settings', { trackId: 'monza', maxLaps: 1, qualifying: !!quali });
     else s.fire('toggle_ready', true);
     return s;
 }
@@ -112,7 +112,7 @@ test('no quali times → join-order grid', (t) => {
     const a = join(io, 'a', 'ferrari', 1);
     const b = join(io, 'b', 'haas');
     a.fire('start_game');
-    t.mock.timers.tick((60 + 150) * 1000 + 100); // nobody ever crosses the line
+    t.mock.timers.tick(360 * 1000 + 100); // nobody ever crosses the line: the 6-minute cap ends quali
     t.mock.timers.tick(8000);
     const race = io.events('game_init').at(-1);
     assert.strictEqual(race.mode, 'race');
@@ -167,7 +167,7 @@ test('empty grid at lights out does not leave the server stuck in RACE', (t) => 
     t.mock.timers.tick(6000); // node's mock timers run timeouts scheduled inside an interval callback on the next tick() call
     assert.strictEqual(io.events('lobby_state_sync').at(-1).status, 'LOBBY');
     assert.ok(!io.events('status_change').includes('RACE'), 'stale lights timer flipped status to RACE');
-    c.fire('update_settings', { qualiMinutes: 0 });
+    c.fire('update_settings', { qualifying: false });
     c.fire('start_game');
     assert.strictEqual(io.events('status_change').at(-1), 'COUNTDOWN', 'new host could not start');
     c.fire('disconnect');
