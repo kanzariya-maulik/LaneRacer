@@ -4,6 +4,8 @@ const setupSocketManager = require('../src/socketManager');
 const Track = require('../src/game/Track');
 
 const monza = Track.load('monza');
+// No real WebRTC in tests: game_state goes over the fake Socket.IO
+const noNet = { setupPeer() {}, hasOpenChannel: () => false, cleanup() {}, broadcastGameState: (s, io) => io.volatile.emit('game_state', s) };
 
 function fakeIo() {
     const io = {
@@ -42,7 +44,7 @@ function join(io, id, teamId, quali) {
 test('everyone leaving during countdown cancels it, so a new host gets exactly one race', (t) => {
     t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
     const io = fakeIo();
-    setupSocketManager(io);
+    setupSocketManager(io, noNet);
     const a = join(io, 'a', 'ferrari', 0);
     a.fire('start_game');
     t.mock.timers.tick(2000);
@@ -58,7 +60,7 @@ test('everyone leaving during countdown cancels it, so a new host gets exactly o
 test('lights: 1..5 one per second, out 0.5–2.5 s later; cars held until then', (t) => {
     t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
     const io = fakeIo();
-    setupSocketManager(io);
+    setupSocketManager(io, noNet);
     const a = join(io, 'a', 'ferrari', 0);
     a.fire('start_game');
     a.fire('input', { throttle: 1, brake: 0, steer: 0 });
@@ -81,7 +83,7 @@ test('lights: 1..5 one per second, out 0.5–2.5 s later; cars held until then',
 test('qualifying → results → race grid in best-lap order', (t) => {
     t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
     const io = fakeIo();
-    setupSocketManager(io);
+    setupSocketManager(io, noNet);
     const a = join(io, 'a', 'ferrari', 1);
     const b = join(io, 'b', 'haas');
     a.fire('start_game');
@@ -108,7 +110,7 @@ test('qualifying → results → race grid in best-lap order', (t) => {
 test('no quali times → join-order grid', (t) => {
     t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
     const io = fakeIo();
-    setupSocketManager(io);
+    setupSocketManager(io, noNet);
     const a = join(io, 'a', 'ferrari', 1);
     const b = join(io, 'b', 'haas');
     a.fire('start_game');
@@ -125,7 +127,7 @@ test('no quali times → join-order grid', (t) => {
 test('disconnect during results drops driver from the grid', (t) => {
     t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
     const io = fakeIo();
-    setupSocketManager(io);
+    setupSocketManager(io, noNet);
     const a = join(io, 'a', 'ferrari', 1);
     const b = join(io, 'b', 'haas');
     a.fire('start_game');
@@ -144,7 +146,7 @@ test('disconnect during results drops driver from the grid', (t) => {
 test('late joiner during qualifying gets the running session', (t) => {
     t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
     const io = fakeIo();
-    setupSocketManager(io);
+    setupSocketManager(io, noNet);
     const a = join(io, 'a', 'ferrari', 1);
     a.fire('start_game');
     const c = io.connect('c');
@@ -157,7 +159,7 @@ test('late joiner during qualifying gets the running session', (t) => {
 test('empty grid at lights out does not leave the server stuck in RACE', (t) => {
     t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
     const io = fakeIo();
-    setupSocketManager(io);
+    setupSocketManager(io, noNet);
     const a = join(io, 'a', 'ferrari', 0);
     a.fire('start_game');                       // COUNTDOWN, a is the only racer
     const c = io.connect('c');
@@ -175,7 +177,7 @@ test('empty grid at lights out does not leave the server stuck in RACE', (t) => 
 
 test('assist chosen on join and changed in the lobby; garbage becomes off', () => {
     const io = fakeIo();
-    setupSocketManager(io);
+    setupSocketManager(io, noNet);
     const s = io.connect('a');
     s.fire('join_lobby', { username: 'A', teamId: 'ferrari', assist: 'full' });
     assert.strictEqual(io.events('lobby_state_sync').at(-1).players.a.assist, 'full');

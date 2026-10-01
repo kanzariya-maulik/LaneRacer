@@ -74,8 +74,9 @@ window.addEventListener('keydown', (e) => onKey(e, true));
 window.addEventListener('keyup', (e) => onKey(e, false));
 
 function sendInput(now, force = false) {
-    if (!force && (now - lastSentAt < 33 || !changed(input, lastSent))) return; // ≤ 30 Hz, only on change
-    socket.emit('input', input);
+    // ≤ 30 Hz on change, plus a 10 Hz resend: UDP may drop a packet and a lost "throttle off" must not stick
+    if (!force && (now - lastSentAt < 33 || (!changed(input, lastSent) && now - lastSentAt < 100))) return;
+    window.sendUDPInput(input);
     lastSent = { ...input };
     lastSentAt = now;
 }

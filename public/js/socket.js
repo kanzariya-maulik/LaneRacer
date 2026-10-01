@@ -17,8 +17,190 @@ let clientState = {
     lastTiming: null,
 };
 
+// ---------- WebRTC UDP DataChannel (game_state in, inputs out); Socket.IO is signalling + fallback ----------
+let rtcPeerConnection = null;
+let rtcDataChannel = null;
+let udpReady = false;
+let pendingCandidates = []; // ICE candidates queued before remote desc is set
+
+function setupWebRTC() {
+    try {
+        if (rtcPeerConnection) {
+            try { rtcPeerConnection.close(); } catch (e) {}
+        }
+        udpReady = false;
+        window.isUDPReady = false;
+        rtcPeerConnection = new RTCPeerConnection({
+            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        });
+
+        // When the server creates a DataChannel, this fires
+        rtcPeerConnection.ondatachannel = (event) => {
+            rtcDataChannel = event.channel;
+
+            // ── CRITICAL: unordered + maxRetransmits:0 = pure UDP semantics ─
+            rtcDataChannel.onopen = () => {
+                udpReady = true;
+                window.isUDPReady = true;
+                console.log('[WebRTC] 🚀 UDP DataChannel OPEN — game traffic now over UDP!');
+                updateTransportBadge(true);
+                sendUDPPing();
+            };
+
+            rtcDataChannel.onclose = () => {
+                udpReady = false;
+                window.isUDPReady = false;
+                console.warn('[WebRTC] UDP DataChannel closed — falling back to Socket.IO');
+                updateTransportBadge(false);
+            };
+
+            rtcDataChannel.onerror = (err) => {
+                console.warn('[WebRTC] DataChannel error:', err);
+            };
+
+            // ── Handle messages received over UDP ─────────────────────────
+            rtcDataChannel.onmessage = (event) => {
+                try {
+                    const msg = JSON.parse(event.data);
+
+                    if (msg.type === 'STATE') {
+                        // 60 Hz game state arriving over UDP
+                        mergeGameState(msg.data);
+                    } else if (msg.type === 'PONG') {
+                        // Round-trip latency display
+                        const rtt = Date.now() - msg.clientTime;
+                        updateLatencyBadge(rtt);
+                    } else if (msg.type === 'UDP_READY') {
+                        sendUDPPing();
+                    }
+                } catch (e) {}
+            };
+        };
+
+        // Send ICE candidates to server via Socket.IO
+        rtcPeerConnection.onicecandidate = (event) => {
+            if (event.candidate) {
+                socket.emit('webrtc_candidate', {
+                    candidate: event.candidate.candidate,
+                    mid: event.candidate.sdpMid
+                });
+            }
+        };
+
+        rtcPeerConnection.onconnectionstatechange = () => {
+            console.log('[WebRTC] Connection state:', rtcPeerConnection.connectionState);
+            if (rtcPeerConnection.connectionState === 'connected') {
+                updateTransportBadge(true);
+            }
+        };
+
+    } catch (err) {
+        console.warn('[WebRTC] RTCPeerConnection error:', err);
+    }
+}
+
+// Server sends us its offer → we answer
+socket.on('webrtc_offer', async (data) => {
+    console.log('[WebRTC] Received offer from server');
+    if (!rtcPeerConnection) setupWebRTC();
+    try {
+        await rtcPeerConnection.setRemoteDescription(
+            new RTCSessionDescription({ type: data.type, sdp: data.sdp })
+        );
+
+        const answer = await rtcPeerConnection.createAnswer();
+        await rtcPeerConnection.setLocalDescription(answer);
+
+        // Flush any ICE candidates that arrived before remote description
+        for (const c of pendingCandidates) {
+            try {
+                await rtcPeerConnection.addIceCandidate(new RTCIceCandidate(c));
+            } catch (e) {}
+        }
+        pendingCandidates = [];
+
+        socket.emit('webrtc_answer', {
+            sdp: answer.sdp,
+            type: answer.type
+        });
+        console.log('[WebRTC] Sent SDP answer to server');
+    } catch (err) {
+        console.warn('[WebRTC] Error handling offer:', err);
+    }
+});
+
+// Server relays ICE candidates
+socket.on('webrtc_candidate', async (data) => {
+    try {
+        if (data && data.candidate) {
+            const candidate = { candidate: data.candidate, sdpMid: data.mid };
+            if (rtcPeerConnection && rtcPeerConnection.remoteDescription) {
+                await rtcPeerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+            } else {
+                // Queue it — remote description or connection not set yet
+                pendingCandidates.push(candidate);
+            }
+        }
+    } catch (err) {
+        console.warn('[WebRTC] addIceCandidate error:', err);
+    }
+});
+
+// ── Send game input — WebRTC UDP first, socket during handshake ─────────────
+window.sendUDPInput = function(inputs) {
+    if (udpReady && rtcDataChannel && rtcDataChannel.readyState === 'open') {
+        try {
+            rtcDataChannel.send(JSON.stringify({ type: 'INPUT', payload: inputs }));
+            return;
+        } catch (e) {
+            udpReady = false;
+        }
+    }
+    // Fallback to socket while UDP channel is establishing
+    socket.emit('input', inputs);
+};
+
+function sendUDPPing() {
+    if (!udpReady || !rtcDataChannel) return;
+    try {
+        rtcDataChannel.send(JSON.stringify({ type: 'PING', clientTime: Date.now() }));
+        // Keep pinging every 2 seconds for live latency display
+        setTimeout(sendUDPPing, 2000);
+    } catch (e) {}
+}
+
+
+// ── Transport badge (UDP vs TCP) ─────────────────────────────────────────────
+function updateTransportBadge(isUDP) {
+    const el = document.getElementById('transport-badge');
+    if (!el) return;
+    if (isUDP) {
+        el.className = 'transport-badge udp';
+        el.textContent = '⚡ UDP';
+    } else {
+        el.className = 'transport-badge tcp';
+        el.textContent = '🔌 CONNECTING...';
+    }
+}
+window.updateTransportBadge = updateTransportBadge;
+
+// ── Latency badge (RTT over UDP) ─────────────────────────────────────────────
+function updateLatencyBadge(rttMs) {
+    const el = document.getElementById('latency-badge');
+    if (!el) return;
+    el.textContent = `${rttMs}ms`;
+    el.style.color = rttMs < 10 ? '#10b981' : rttMs < 30 ? '#f59e0b' : '#ef4444';
+}
+
+function mergeGameState(stateSync) {
+    for (const id in stateSync) {
+        if (clientState.gameState && clientState.gameState[id]) Object.assign(clientState.gameState[id], stateSync[id]);
+    }
+}
+
 socket.on('connect', () => {
     clientState.me = socket.id;
+    setupWebRTC(); // negotiate UDP right away so it's open before the race
 });
 
 // LOBBY SYNCS
@@ -85,17 +267,14 @@ socket.on('game_init', (data) => {
     clientState.sessionBest = [null, null, null];
     clientState.mySectors = [null, null, null];
     clientState.myBestSectors = [null, null, null];
+    updateTransportBadge(udpReady);
     if (window.initGameVisuals) window.initGameVisuals();
 });
 
 // This comes in 60 times a second
+// Socket.IO game_state: fallback until the UDP channel is open
 socket.on('game_state', (stateSync) => {
-    // Merge updates into local state
-    for(let id in stateSync) {
-        if (clientState.gameState && clientState.gameState[id]) {
-            Object.assign(clientState.gameState[id], stateSync[id]);
-        }
-    }
+    if (!udpReady) mergeGameState(stateSync);
 });
 
 socket.on('lights', ({ count }) => {

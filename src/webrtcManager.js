@@ -1,0 +1,152 @@
+const nodeDataChannel = require('node-datachannel');
+
+// Optional: reduce logging noise
+try {
+    nodeDataChannel.initLogger('WARN');
+} catch (e) {}
+
+class WebRTCManager {
+    constructor() {
+        this.peers = {}; // [socketId]: { pc, dc, isOpen: false, pingTime: 0 }
+    }
+
+    setupPeer(socket, onInput) {
+        try {
+            const pc = new nodeDataChannel.PeerConnection(socket.id, {
+                iceServers: [
+                    'stun:stun.l.google.com:19302' // STUN fallback for WAN, works directly on LAN
+                ]
+            });
+
+            // CRITICAL: Register callbacks BEFORE creating the DataChannel.
+            // In node-datachannel, createDataChannel triggers offer creation immediately;
+            // if onLocalDescription is registered after createDataChannel, the offer is missed!
+            pc.onLocalDescription((sdp, type) => {
+                console.log(`[WebRTC] Server generated ${type} for player ${socket.id}`);
+                socket.emit('webrtc_offer', { sdp, type });
+            });
+
+            pc.onLocalCandidate((candidate, mid) => {
+                socket.emit('webrtc_candidate', { candidate, mid });
+            });
+
+            // Client Answer
+            socket.on('webrtc_answer', (data) => {
+                try {
+                    pc.setRemoteDescription(data.sdp, data.type);
+                    console.log(`[WebRTC] Server applied SDP answer from ${socket.id}`);
+                } catch (err) {
+                    console.warn(`[WebRTC] setRemoteDescription error for ${socket.id}:`, err.message);
+                }
+            });
+
+            // Client ICE Candidate
+            socket.on('webrtc_candidate', (data) => {
+                try {
+                    if (data && data.candidate) {
+                        pc.addRemoteCandidate(data.candidate, data.mid);
+                    }
+                } catch (err) {
+                    console.warn(`[WebRTC] addRemoteCandidate error for ${socket.id}:`, err.message);
+                }
+            });
+
+            // Create UDP DataChannel: unordered & zero retransmissions (Pure UDP semantics)
+            const dc = pc.createDataChannel('gameDataUDP', {
+                ordered: false,
+                maxRetransmits: 0
+            });
+
+            const peerRecord = {
+                pc,
+                dc,
+                isOpen: false,
+                socket
+            };
+
+            this.peers[socket.id] = peerRecord;
+
+            // DataChannel Lifecycle
+            dc.onOpen(() => {
+                peerRecord.isOpen = true;
+                console.log(`[WebRTC] 🚀 UDP DataChannel OPEN for player: ${socket.id}`);
+                // Notify client that UDP is active
+                dc.sendMessage(JSON.stringify({ type: 'UDP_READY', timestamp: Date.now() }));
+            });
+
+            dc.onClosed(() => {
+                peerRecord.isOpen = false;
+                console.log(`[WebRTC] UDP DataChannel closed for player: ${socket.id}`);
+            });
+
+            dc.onError((err) => {
+                console.warn(`[WebRTC] DataChannel error for ${socket.id}:`, err);
+            });
+
+            // Handle Incoming UDP Messages from Client (Inputs & Pings)
+            dc.onMessage((msg) => {
+                try {
+                    const data = JSON.parse(msg);
+                    if (data.type === 'INPUT') {
+                        if (onInput) onInput(socket.id, data.payload);
+                    } else if (data.type === 'PING') {
+                        // Echo ping back immediately for latency calculation
+                        dc.sendMessage(JSON.stringify({ type: 'PONG', clientTime: data.clientTime }));
+                    }
+                } catch (e) {
+                    // Fast path: if raw inputs object sent
+                    if (typeof msg === 'string' && msg.startsWith('{') && onInput) {
+                        try {
+                            const parsed = JSON.parse(msg);
+                            if (parsed.up !== undefined) {
+                                onInput(socket.id, parsed);
+                            }
+                        } catch (err) {}
+                    }
+                }
+            });
+
+        } catch (err) {
+            console.error(`[WebRTC] Failed to initialize peer for ${socket.id}:`, err);
+        }
+    }
+
+    broadcastGameState(stateSync, io) {
+        const payload = JSON.stringify({ type: 'STATE', data: stateSync });
+        let sentOverUDP = 0;
+
+        for (const [id, peer] of Object.entries(this.peers)) {
+            if (peer.isOpen && peer.dc && peer.dc.isOpen()) {
+                try {
+                    peer.dc.sendMessage(payload);
+                    sentOverUDP++;
+                } catch (err) {
+                    peer.isOpen = false;
+                }
+            }
+        }
+
+        // If any peer has not yet finished UDP handshake, emit via Socket.IO volatile so car is never frozen
+        if (io && (sentOverUDP === 0 || sentOverUDP < Object.keys(this.peers).length)) {
+            io.volatile.emit('game_state', stateSync);
+        }
+    }
+
+    hasOpenChannel(socketId) {
+        const peer = this.peers[socketId];
+        return peer && peer.isOpen && peer.dc && peer.dc.isOpen();
+    }
+
+    cleanup(socketId) {
+        const peer = this.peers[socketId];
+        if (peer) {
+            try {
+                if (peer.dc) peer.dc.close();
+                if (peer.pc) peer.pc.close();
+            } catch (e) {}
+            delete this.peers[socketId];
+        }
+    }
+}
+
+module.exports = new WebRTCManager();

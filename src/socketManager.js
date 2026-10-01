@@ -35,9 +35,16 @@ function setStatus(io, status) {
     io.emit('status_change', status);
 }
 
-function setupSocketManager(io) {
+let net = null; // WebRTC UDP transport (src/webrtcManager.js); tests pass a stub
+
+function setupSocketManager(io, transport = require('./webrtcManager')) {
+    net = transport;
     io.on('connection', (socket) => {
         console.log(`Player connected: ${socket.id}`);
+        // WebRTC signalling over Socket.IO; inputs arriving on the UDP DataChannel go to the game like socket inputs
+        net.setupPeer(socket, (id, inputData) => {
+            if (gameInstance) gameInstance.handleInput(id, lobby.sanitizeInput(inputData));
+        });
         // Visitors see live team counts before they join
         socket.emit('lobby_state_sync', lobbySnapshot());
 
@@ -111,12 +118,14 @@ function setupSocketManager(io) {
         });
 
         socket.on('input', (inputData) => {
-            // Accepted in every session phase; a frozen race keeps it until lights out
+            // Fallback while the UDP channel isn't open. Accepted in every session phase; a frozen race keeps it until lights out
+            if (net.hasOpenChannel(socket.id)) return;
             if (gameInstance) gameInstance.handleInput(socket.id, lobby.sanitizeInput(inputData));
         });
 
         socket.on('disconnect', () => {
             console.log(`Player disconnected: ${socket.id}`);
+            net.cleanup(socket.id);
             if (!state.players[socket.id]) return;
 
             delete state.players[socket.id];
@@ -153,13 +162,13 @@ function startQuali(io, racers) {
             const grid = results.map(r => state.players[r.id]).filter(Boolean);
             startRace(io, grid);
         }, RESULTS_MS);
-    }, 'quali');
+    }, 'quali', net);
     gameInstance.start();
 }
 
 function startRace(io, grid) {
     setStatus(io, 'COUNTDOWN');
-    const race = new Game(io, grid, TRACKS[state.settings.trackId], state.settings, () => finishRace(io), 'race');
+    const race = new Game(io, grid, TRACKS[state.settings.trackId], state.settings, () => finishRace(io), 'race', net);
     gameInstance = race;
     race.start(); // cars are drawn on the grid, frozen until lights out
 

@@ -31,8 +31,10 @@ function bounce(p, nx, ny) {
 
 
 class Game {
-    constructor(io, players, track, settings, onFinish, mode = 'race') {
+    // net: optional transport (src/webrtcManager.js) that sends game_state over the UDP DataChannel
+    constructor(io, players, track, settings, onFinish, mode = 'race', net = null) {
         this.io = io;
+        this.net = net;
         this.track = track;
         this.settings = settings;
         this.onFinish = onFinish;
@@ -253,7 +255,8 @@ class Game {
                 ghost: this.mode === 'quali'
             };
         }
-        this.io.volatile.emit('game_state', stateSync);
+        if (this.net) this.net.broadcastGameState(stateSync, this.io); // UDP, Socket.IO until a peer's channel opens
+        else this.io.volatile.emit('game_state', stateSync);
 
         const active = ids.filter(id => !this.players[id].finished).length;
         const over = this.mode === 'race'
