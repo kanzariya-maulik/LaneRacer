@@ -43,15 +43,12 @@ function setupWebRTC() {
                 udpReady = true;
                 window.isUDPReady = true;
                 console.log('[WebRTC] 🚀 UDP DataChannel OPEN — game traffic now over UDP!');
-                updateTransportBadge(true);
-                sendUDPPing();
             };
 
             rtcDataChannel.onclose = () => {
                 udpReady = false;
                 window.isUDPReady = false;
                 console.warn('[WebRTC] UDP DataChannel closed — falling back to Socket.IO');
-                updateTransportBadge(false);
             };
 
             rtcDataChannel.onerror = (err) => {
@@ -66,12 +63,6 @@ function setupWebRTC() {
                     if (msg.type === 'STATE') {
                         // 60 Hz game state arriving over UDP
                         mergeGameState(msg.data);
-                    } else if (msg.type === 'PONG') {
-                        // Round-trip latency display
-                        const rtt = Date.now() - msg.clientTime;
-                        updateLatencyBadge(rtt);
-                    } else if (msg.type === 'UDP_READY') {
-                        sendUDPPing();
                     }
                 } catch (e) {}
             };
@@ -90,7 +81,6 @@ function setupWebRTC() {
         rtcPeerConnection.onconnectionstatechange = () => {
             console.log('[WebRTC] Connection state:', rtcPeerConnection.connectionState);
             if (rtcPeerConnection.connectionState === 'connected') {
-                updateTransportBadge(true);
             }
         };
 
@@ -160,37 +150,6 @@ window.sendUDPInput = function(inputs) {
     socket.emit('input', inputs);
 };
 
-function sendUDPPing() {
-    if (!udpReady || !rtcDataChannel) return;
-    try {
-        rtcDataChannel.send(JSON.stringify({ type: 'PING', clientTime: Date.now() }));
-        // Keep pinging every 2 seconds for live latency display
-        setTimeout(sendUDPPing, 2000);
-    } catch (e) {}
-}
-
-
-// ── Transport badge (UDP vs TCP) ─────────────────────────────────────────────
-function updateTransportBadge(isUDP) {
-    const el = document.getElementById('transport-badge');
-    if (!el) return;
-    if (isUDP) {
-        el.className = 'transport-badge udp';
-        el.textContent = '⚡ UDP';
-    } else {
-        el.className = 'transport-badge tcp';
-        el.textContent = '🔌 CONNECTING...';
-    }
-}
-window.updateTransportBadge = updateTransportBadge;
-
-// ── Latency badge (RTT over UDP) ─────────────────────────────────────────────
-function updateLatencyBadge(rttMs) {
-    const el = document.getElementById('latency-badge');
-    if (!el) return;
-    el.textContent = `${rttMs}ms`;
-    el.style.color = rttMs < 10 ? '#10b981' : rttMs < 30 ? '#f59e0b' : '#ef4444';
-}
 
 function mergeGameState(stateSync) {
     for (const id in stateSync) {
@@ -267,7 +226,6 @@ socket.on('game_init', (data) => {
     clientState.sessionBest = [null, null, null];
     clientState.mySectors = [null, null, null];
     clientState.myBestSectors = [null, null, null];
-    updateTransportBadge(udpReady);
     if (window.initGameVisuals) window.initGameVisuals();
 });
 

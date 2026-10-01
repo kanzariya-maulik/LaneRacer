@@ -175,15 +175,11 @@ test('empty grid at lights out does not leave the server stuck in RACE', (t) => 
     c.fire('disconnect');
 });
 
-test('assist chosen on join and changed in the lobby; garbage becomes off', () => {
+test('everyone drives with full assist, whatever the client asks for', () => {
     const io = fakeIo();
     setupSocketManager(io, noNet);
     const s = io.connect('a');
-    s.fire('join_lobby', { username: 'A', teamId: 'ferrari', assist: 'full' });
+    s.fire('join_lobby', { username: 'A', teamId: 'ferrari', assist: 'off' });
     assert.strictEqual(io.events('lobby_state_sync').at(-1).players.a.assist, 'full');
-    s.fire('set_assist', 'bogus');
-    assert.strictEqual(io.events('lobby_state_sync').at(-1).players.a.assist, 'off');
-    s.fire('set_assist', 'steering');
-    assert.strictEqual(io.events('lobby_state_sync').at(-1).players.a.assist, 'steering');
     s.fire('disconnect');
 });

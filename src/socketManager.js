@@ -59,7 +59,7 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
                 username: lobby.sanitizeUsername(data.username),
                 teamId: check.team.id,
                 color: check.team.chatColor,
-                assist: lobby.sanitizeAssist(data.assist),
+                assist: 'full', // everyone drives with steering + braking assist
                 isReady: false,
                 isSpectating: state.status !== 'LOBBY'
             };
@@ -84,13 +84,6 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
             if (state.status !== 'LOBBY' || !state.players[socket.id]) return;
             state.players[socket.id].isReady = !!isReady;
             io.emit('player_ready_sync', { id: socket.id, isReady: !!isReady });
-        });
-
-        socket.on('set_assist', (assist) => {
-            const player = state.players[socket.id];
-            if (!player || state.status !== 'LOBBY') return;
-            player.assist = lobby.sanitizeAssist(assist);
-            io.emit('lobby_state_sync', lobbySnapshot());
         });
 
         socket.on('update_settings', (settings) => {

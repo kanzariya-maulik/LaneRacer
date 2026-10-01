@@ -78,8 +78,3 @@ test('pickRacers caps at 20 and skips spectators', () => {
     assert.deepStrictEqual(overflow.map(p => p.id), ['p20', 'p21']);
     assert.ok(!racers.some(p => p.id === 'spec'));
 });
-
-test('sanitizeAssist', () => {
-    for (const a of ['off', 'steering', 'full']) assert.strictEqual(lobby.sanitizeAssist(a), a);
-    for (const bad of [undefined, null, 'FULL', 'auto', 3, {}]) assert.strictEqual(lobby.sanitizeAssist(bad), 'off');
-});

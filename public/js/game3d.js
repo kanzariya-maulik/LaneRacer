@@ -592,7 +592,7 @@ window.showQualiResults = (list) => {
         const lp = clientState.players[r.id];
         const li = document.createElement('li');
         const gap = r.position > 1 && r.bestLap !== null && pole !== null ? `  +${(r.bestLap - pole).toFixed(3)}` : '';
-        li.textContent = `P${r.position}  ${lp ? lp.username + window.assistBadge(lp) : '—'}  ${r.bestLap === null ? 'no time' : fmtTime(r.bestLap)}${gap}`;
+        li.textContent = `P${r.position}  ${lp ? lp.username : '—'}  ${r.bestLap === null ? 'no time' : fmtTime(r.bestLap)}${gap}`;
         ol.appendChild(li);
     }
 };
@@ -665,7 +665,7 @@ function updateHUD() {
         const li = document.createElement('li');
         const name = document.createElement('span');
         name.className = 'tt-name';
-        name.textContent = `${p.rank}. ${lp.username}${window.assistBadge(lp)}${p.penalty ? ` +${p.penalty}s` : ''}`;
+        name.textContent = `${p.rank}. ${lp.username}${p.penalty ? ` +${p.penalty}s` : ''}`;
         const time = document.createElement('span');
         if (quali) {
             time.textContent = p.rank === 1 ? fmtTime(p.bestLap) : p.gap === null ? fmtTime(p.bestLap) : `+${p.gap.toFixed(3)}`;
