@@ -1,9 +1,10 @@
 const Game = require('./game/Game');
+const webrtcManager = require('./webrtcManager');
 
 // Global game state
 const state = {
     status: 'LOBBY', // LOBBY, COUNTDOWN, RACE, FINISHED
-    players: {}, 
+    players: {},
     hostId: null,
     settings: {
         trackId: 1,
@@ -18,13 +19,22 @@ function setupSocketManager(io) {
     io.on('connection', (socket) => {
         console.log(`Player connected: ${socket.id}`);
 
+        // ── WebRTC Signaling ─────────────────────────────────────────────────
+        // Set up a WebRTC peer for this socket; inputs from the UDP channel are
+        // forwarded into the game engine exactly like Socket.IO inputs.
+        webrtcManager.setupPeer(socket, (id, inputData) => {
+            if (gameInstance && state.status === 'RACE') {
+                gameInstance.handleInput(id, inputData);
+            }
+        });
+
         // Handle joining the lobby
         socket.on('join_lobby', (data) => {
             const isFirstPlayer = Object.keys(state.players).length === 0;
-            
+
             state.players[socket.id] = {
                 id: socket.id,
-                username: data.username.slice(0, 15), // Max 15 chars
+                username: data.username.slice(0, 15),
                 color: data.color || '#ff0000',
                 isReady: false,
                 isSpectating: state.status !== 'LOBBY'
@@ -34,7 +44,6 @@ function setupSocketManager(io) {
                 state.hostId = socket.id;
             }
 
-            // Sync full state to the new player
             socket.emit('lobby_state_sync', {
                 players: state.players,
                 hostId: state.hostId,
@@ -42,19 +51,17 @@ function setupSocketManager(io) {
                 settings: state.settings
             });
 
-            // Tell others
             socket.broadcast.emit('player_joined', state.players[socket.id]);
         });
 
-        // Chat functionality
+        // Chat
         socket.on('chat_msg', (msg) => {
             const player = state.players[socket.id];
             if (!player) return;
-            // Broadcast to everyone
             io.emit('chat_msg', {
                 username: player.username,
                 color: player.color,
-                msg: msg.slice(0, 100) // limit length
+                msg: msg.slice(0, 100)
             });
         });
 
@@ -65,7 +72,7 @@ function setupSocketManager(io) {
             io.emit('player_ready_sync', { id: socket.id, isReady });
         });
 
-        // Host settings changes
+        // Host settings
         socket.on('update_settings', (settings) => {
             if (socket.id !== state.hostId || state.status !== 'LOBBY') return;
             state.settings = { ...state.settings, ...settings };
@@ -75,8 +82,7 @@ function setupSocketManager(io) {
         // Start Game
         socket.on('start_game', () => {
             if (socket.id !== state.hostId || state.status !== 'LOBBY') return;
-            
-            // Check if everyone else is ready
+
             let allReady = true;
             for (let id in state.players) {
                 if (id !== state.hostId && !state.players[id].isReady && !state.players[id].isSpectating) {
@@ -89,10 +95,9 @@ function setupSocketManager(io) {
                 return;
             }
 
-            // Start countdown
             state.status = 'COUNTDOWN';
             io.emit('status_change', 'COUNTDOWN');
-            
+
             let countdown = 3;
             const timer = setInterval(() => {
                 io.emit('countdown', countdown);
@@ -103,22 +108,27 @@ function setupSocketManager(io) {
                 }
             }, 1000);
         });
-        
-        // Handle Game Inputs
+
+        // Input fallback: only active if UDP channel is not yet open
         socket.on('input', (inputData) => {
-            if (gameInstance && state.status === 'RACE') {
-                gameInstance.handleInput(socket.id, inputData);
+            if (!webrtcManager.hasOpenChannel(socket.id)) {
+                if (gameInstance && state.status === 'RACE') {
+                    gameInstance.handleInput(socket.id, inputData);
+                }
             }
         });
 
         // Disconnect
         socket.on('disconnect', () => {
             console.log(`Player disconnected: ${socket.id}`);
+
+            // Clean up WebRTC peer
+            webrtcManager.cleanup(socket.id);
+
             if (state.players[socket.id]) {
                 delete state.players[socket.id];
                 io.emit('player_left', socket.id);
 
-                // Auto-reassign host
                 if (socket.id === state.hostId) {
                     const remainingPlayers = Object.keys(state.players);
                     if (remainingPlayers.length > 0) {
@@ -130,7 +140,7 @@ function setupSocketManager(io) {
                             gameInstance.stop();
                             gameInstance = null;
                         }
-                        state.status = 'LOBBY'; // Reset when empty
+                        state.status = 'LOBBY';
                     }
                 }
             }
@@ -140,8 +150,7 @@ function setupSocketManager(io) {
 
 function startGame(io) {
     state.status = 'RACE';
-    
-    // Clear old spectating statuses except for those who joined naturally as spectators
+
     const activePlayers = [];
     for (const [id, player] of Object.entries(state.players)) {
         if (!player.isSpectating) {
@@ -149,18 +158,15 @@ function startGame(io) {
         }
     }
 
-    // Initialize Game engine
-    gameInstance = new Game(io, activePlayers, state.settings, () => {
-        // Callback when game finishes
+    gameInstance = new Game(io, activePlayers, state.settings, webrtcManager, () => {
         state.status = 'FINISHED';
         io.emit('status_change', 'FINISHED');
-        
-        // Reset to lobby after 5 seconds
+
         setTimeout(() => {
             state.status = 'LOBBY';
-            for(let id in state.players) {
+            for (let id in state.players) {
                 state.players[id].isReady = false;
-                state.players[id].isSpectating = false; // Reset spec state
+                state.players[id].isSpectating = false;
             }
             io.emit('lobby_state_sync', state);
             gameInstance = null;

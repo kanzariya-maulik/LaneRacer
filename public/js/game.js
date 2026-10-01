@@ -15,7 +15,7 @@ window.addEventListener('keydown', (e) => {
         case 'a': case 'arrowleft': inputs.left = true; break;
         case 'd': case 'arrowright': inputs.right = true; break;
     }
-    emitInput();
+    sendInput();
 });
 
 window.addEventListener('keyup', (e) => {
@@ -26,11 +26,15 @@ window.addEventListener('keyup', (e) => {
         case 'a': case 'arrowleft': inputs.left = false; break;
         case 'd': case 'arrowright': inputs.right = false; break;
     }
-    emitInput();
+    sendInput();
 });
 
-function emitInput() {
-    socket.emit('input', inputs);
+function sendInput() {
+    // window.sendUDPInput is defined in socket.js:
+    // sends exclusively over WebRTC UDP DataChannel
+    if (window.sendUDPInput) {
+        window.sendUDPInput(inputs);
+    }
 }
 
 // Window resizing
@@ -73,7 +77,7 @@ joyBase.addEventListener('touchend', (e) => {
     isTouching = false;
     joyKnob.style.transform = `translate(-50%, -50%)`;
     inputs.up = false; inputs.down = false; inputs.left = false; inputs.right = false;
-    emitInput();
+    sendInput();
 }, {passive: false});
 
 function updateJoystick(touch) {
@@ -91,7 +95,7 @@ function updateJoystick(touch) {
     inputs.left  = dx < -threshold;
     inputs.down  = dy > threshold;
     inputs.up    = dy < -threshold;
-    emitInput();
+    sendInput();
 }
 
 // Exposed to app.js and socket.js
@@ -328,6 +332,9 @@ function updateHUD() {
     const me = players ? players[clientState.me] : null;
     
     // 1. Player specific stats
+    if (window.updateTransportBadge && window.isUDPReady !== undefined) {
+        window.updateTransportBadge(window.isUDPReady);
+    }
     if (me && !clientState.players[clientState.me]?.isSpectating) {
         document.getElementById('hud-speed').innerText = Math.abs(Math.floor(me.speed / 5)); // Scaled visual speed back to X / 5
         document.getElementById('hud-lap').innerText = me.lap + 1;

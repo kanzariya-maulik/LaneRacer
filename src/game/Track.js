@@ -1,6 +1,6 @@
 class Track {
     static getTrack(id) {
-        switch (id) {
+        switch (Number(id)) {
             case 1:
                 return this.createOvalTrack();
             case 2:
@@ -8,131 +8,210 @@ class Track {
                 return this.createFigure8Track();
             case 3:
                 return this.createComplexTrack();
+            case 4:
+                return this.createStraightTrack();
             default:
                 return this.createOvalTrack();
         }
     }
 
-    static createOvalTrack() {
-        // A simple oval track math path
-        // 2 long straights, 2 half circles
-        const path = [];
-        const resolution = 20;
+  static createOvalTrack() {
+    // A simple oval track math path
+    // 2 long straights, 2 half circles
+    const path = [];
+    const resolution = 20;
 
-        // Top straight
-        for(let i = 200; i <= 800; i += 50) path.push({x: i, y: 200});
-        
-        // Right semi-circle
-        for(let a = -Math.PI/2; a <= Math.PI/2; a += Math.PI/resolution) {
-            path.push({ x: 800 + Math.cos(a)*200, y: 400 + Math.sin(a)*200 });
-        }
+    // Top straight
+    for (let i = 200; i <= 800; i += 50) path.push({ x: i, y: 200 });
 
-        // Bottom straight
-        for(let i = 800; i >= 200; i -= 50) path.push({x: i, y: 600});
-
-        // Left semi-circle
-        for(let a = Math.PI/2; a <= 3*Math.PI/2; a += Math.PI/resolution) {
-            path.push({ x: 200 + Math.cos(a)*200, y: 400 + Math.sin(a)*200 });
-        }
-
-        return {
-            id: 1,
-            name: "Beginner Oval",
-            path: path,
-            width: 160,
-            startAngle: 0,
-            startPositions: [
-                {x: 400, y: 160}, {x: 400, y: 240},
-                {x: 350, y: 160}, {x: 350, y: 240},
-                {x: 300, y: 160}, {x: 300, y: 240},
-                {x: 250, y: 160}, {x: 250, y: 240}
-            ],
-            checkpoints: [
-                {x: 500, y: 200, radius: 100},
-                {x: 900, y: 400, radius: 100},
-                {x: 500, y: 600, radius: 100},
-                {x: 100, y: 400, radius: 100}
-            ]
-        };
+    // Right semi-circle
+    for (let a = -Math.PI / 2; a <= Math.PI / 2; a += Math.PI / resolution) {
+      path.push({ x: 800 + Math.cos(a) * 200, y: 400 + Math.sin(a) * 200 });
     }
 
-    static createFigure8Track() {
-        // Simple figure-8 style track
-        const path = [];
-        const resolution = 30;
+    // Bottom straight
+    for (let i = 800; i >= 200; i -= 50) path.push({ x: i, y: 600 });
 
-        // Right Loop
-        for(let a = -Math.PI; a <= Math.PI; a += Math.PI/resolution) {
-            // we omit the crossing part slightly
-            if (a > 3*Math.PI/4 || a < -3*Math.PI/4) continue;
-            path.push({ x: 700 + Math.cos(a)*250, y: 400 + Math.sin(a)*250 });
-        }
-        
-        // Left Loop
-        for(let a = 0; a <= 2*Math.PI; a += Math.PI/resolution) {
-            if (a < Math.PI/4 || a > 7*Math.PI/4) continue;
-            path.push({ x: 300 + Math.cos(a)*250, y: 400 + Math.sin(a)*250 });
-        }
-
-        return {
-            id: 2,
-            name: "Infinity Loop",
-            path: path,
-            width: 140,
-            startAngle: -Math.PI/2,
-            startPositions: [
-                {x: 700, y: 110}, {x: 700, y: 190},
-                {x: 650, y: 110}, {x: 650, y: 190},
-                {x: 600, y: 110}, {x: 600, y: 190}
-            ],
-            checkpoints: [
-                {x: 700, y: 150, radius: 100},
-                {x: 950, y: 400, radius: 100},
-                {x: 700, y: 650, radius: 100},
-                {x: 300, y: 650, radius: 100},
-                {x: 50, y: 400, radius: 100},
-                {x: 300, y: 150, radius: 100}
-            ]
-        };
+    // Left semi-circle
+    for (
+      let a = Math.PI / 2;
+      a <= (3 * Math.PI) / 2;
+      a += Math.PI / resolution
+    ) {
+      path.push({ x: 200 + Math.cos(a) * 200, y: 400 + Math.sin(a) * 200 });
     }
 
-    static createComplexTrack() {
-        const path = [];
-        const MathPI2 = Math.PI * 2;
-        const points = 150;
-        
-        for (let i = 0; i < points; i++) {
-            const angle = (i / points) * MathPI2;
-            // Procedurally generated wobbly circle causing many curves
-            const r = 350 + Math.sin(angle * 5) * 110 + Math.cos(angle * 2) * 60;
-            
-            path.push({
-                x: 600 + Math.cos(angle) * r * 1.2, // stretch horizontal slightly
-                y: 500 + Math.sin(angle) * r
-            });
-        }
-        
-        // At angle 0, r = 350 + 0 + 60 = 410. x = 600 + 410*1.2 = 1092, y = 500.
-        // The path direction at angle 0 moves towards angle > 0 (increases y) so it faces down. (PI/2)
+    return {
+      id: 1,
+      name: "Beginner Oval",
+      path: path,
+      width: 160,
+      startAngle: 0,
+      startPositions: [
+        { x: 400, y: 160 },
+        { x: 400, y: 240 },
+        { x: 350, y: 160 },
+        { x: 350, y: 240 },
+        { x: 300, y: 160 },
+        { x: 300, y: 240 },
+        { x: 250, y: 160 },
+        { x: 250, y: 240 },
+      ],
+      checkpoints: [
+        { x: 500, y: 200, radius: 100 },
+        { x: 900, y: 400, radius: 100 },
+        { x: 500, y: 600, radius: 100 },
+        { x: 100, y: 400, radius: 100 },
+      ],
+    };
+  }
 
-        return {
-            id: 3,
-            name: "Twisty Circuit",
-            path: path,
-            width: 140,
-            startAngle: Math.PI / 2,
-            startPositions: [
-                {x: 1092, y: 500}, {x: 1042, y: 500},
-                {x: 1092, y: 440}, {x: 1042, y: 440},
-                {x: 1092, y: 380}, {x: 1042, y: 380}
-            ],
-            checkpoints: [
-                {x: 600, y: 800, radius: 250},
-                {x: 200, y: 500, radius: 250},
-                {x: 600, y: 200, radius: 250}
-            ]
-        };
+  static createFigure8Track() {
+    // Simple figure-8 style track
+    const path = [];
+    const resolution = 30;
+
+    // Right Loop
+    for (let a = -Math.PI; a <= Math.PI; a += Math.PI / resolution) {
+      // we omit the crossing part slightly
+      if (a > (3 * Math.PI) / 4 || a < (-3 * Math.PI) / 4) continue;
+      path.push({ x: 700 + Math.cos(a) * 250, y: 400 + Math.sin(a) * 250 });
     }
+
+    // Left Loop
+    for (let a = 0; a <= 2 * Math.PI; a += Math.PI / resolution) {
+      if (a < Math.PI / 4 || a > (7 * Math.PI) / 4) continue;
+      path.push({ x: 300 + Math.cos(a) * 250, y: 400 + Math.sin(a) * 250 });
+    }
+
+    return {
+      id: 2,
+      name: "Infinity Loop",
+      path: path,
+      width: 140,
+      startAngle: -Math.PI / 2,
+      startPositions: [
+        { x: 700, y: 110 },
+        { x: 700, y: 190 },
+        { x: 650, y: 110 },
+        { x: 650, y: 190 },
+        { x: 600, y: 110 },
+        { x: 600, y: 190 },
+      ],
+      checkpoints: [
+        { x: 700, y: 150, radius: 100 },
+        { x: 950, y: 400, radius: 100 },
+        { x: 700, y: 650, radius: 100 },
+        { x: 300, y: 650, radius: 100 },
+        { x: 50, y: 400, radius: 100 },
+        { x: 300, y: 150, radius: 100 },
+      ],
+    };
+  }
+
+  static createComplexTrack() {
+    const path = [];
+    const MathPI2 = Math.PI * 2;
+    const points = 150;
+
+    for (let i = 0; i < points; i++) {
+      const angle = (i / points) * MathPI2;
+      // Procedurally generated wobbly circle causing many curves
+      const r = 350 + Math.sin(angle * 5) * 110 + Math.cos(angle * 2) * 60;
+
+      path.push({
+        x: 600 + Math.cos(angle) * r * 1.2, // stretch horizontal slightly
+        y: 500 + Math.sin(angle) * r,
+      });
+    }
+
+    // At angle 0, r = 350 + 0 + 60 = 410. x = 600 + 410*1.2 = 1092, y = 500.
+    // The path direction at angle 0 moves towards angle > 0 (increases y) so it faces down. (PI/2)
+
+    return {
+      id: 3,
+      name: "Twisty Circuit",
+      path: path,
+      width: 140,
+      startAngle: Math.PI / 2,
+      startPositions: [
+        { x: 1092, y: 500 },
+        { x: 1042, y: 500 },
+        { x: 1092, y: 440 },
+        { x: 1042, y: 440 },
+        { x: 1092, y: 380 },
+        { x: 1042, y: 380 },
+      ],
+      checkpoints: [
+        { x: 600, y: 800, radius: 250 },
+        { x: 200, y: 500, radius: 250 },
+        { x: 600, y: 200, radius: 250 },
+      ],
+    };
+  }
+  
+  static createStraightTrack() {
+    const path = [];
+    const length = 25000; // 25,000 pixels long testing highway
+    const yEast = 400;
+    const yWest = 750;
+    const centerY = (yEast + yWest) / 2;
+    const radius = (yWest - yEast) / 2; // 175
+    const resolution = 16;
+
+    // Long straight eastward lane
+    for (let x = 200; x <= length; x += 400) {
+      path.push({ x, y: yEast });
+    }
+
+    // Far East turnaround
+    for (let a = -Math.PI / 2; a <= Math.PI / 2; a += Math.PI / resolution) {
+      path.push({
+        x: length + Math.cos(a) * radius,
+        y: centerY + Math.sin(a) * radius,
+      });
+    }
+
+    // Long straight westward lane
+    for (let x = length; x >= 200; x -= 400) {
+      path.push({ x, y: yWest });
+    }
+
+    // Far West turnaround (completing the loop)
+    for (let a = Math.PI / 2; a <= (3 * Math.PI) / 2; a += Math.PI / resolution) {
+      path.push({
+        x: 200 + Math.cos(a) * radius,
+        y: centerY + Math.sin(a) * radius,
+      });
+    }
+
+    return {
+      id: 4,
+      name: "Straight Highway (Testing)",
+      path: path,
+      width: 240,
+      startAngle: 0, // facing East
+      startPositions: [
+        { x: 400, y: yEast - 45 },
+        { x: 400, y: yEast + 45 },
+        { x: 300, y: yEast - 45 },
+        { x: 300, y: yEast + 45 },
+        { x: 200, y: yEast - 45 },
+        { x: 200, y: yEast + 45 },
+        { x: 100, y: yEast - 45 },
+        { x: 100, y: yEast + 45 },
+      ],
+      checkpoints: [
+        { x: 4000, y: yEast, radius: 350 },
+        { x: 12000, y: yEast, radius: 350 },
+        { x: 20000, y: yEast, radius: 350 },
+        { x: length, y: centerY, radius: 450 },
+        { x: 16000, y: yWest, radius: 350 },
+        { x: 8000, y: yWest, radius: 350 },
+        { x: 200, y: centerY, radius: 450 },
+      ],
+    };
+  }
 }
 
 module.exports = Track;

@@ -1,15 +1,16 @@
 class Game {
-    constructor(io, players, settings, onFinish) {
+    constructor(io, players, settings, webrtcManager, onFinish) {
         this.io = io;
+        this.webrtcManager = webrtcManager;
         this.settings = settings;
         this.onFinish = onFinish;
-        
-        this.TickRate = 60;
+
+        this.TickRate = 120;
         this.dt = 1 / this.TickRate;
-        
-        this.players = {}; // Game player representations
+
+        this.players = {};
         this.track = this.loadTrack(settings.trackId);
-        
+
         // Initialize player entities
         players.forEach((p, index) => {
             this.players[p.id] = {
@@ -33,7 +34,6 @@ class Game {
     }
 
     loadTrack(trackId) {
-        // Detailed math based tracks will be implemented in Track.js
         const Track = require('./Track');
         return Track.getTrack(trackId);
     }
@@ -46,7 +46,7 @@ class Game {
 
     start() {
         this.io.emit('game_init', { players: this.players, track: this.track });
-        
+
         this.loopPath = setInterval(() => {
             this.update();
         }, 1000 / this.TickRate);
@@ -63,7 +63,7 @@ class Game {
         const Collision = require('./Physics');
 
         let activePlayers = 0;
-        
+
         const playerIds = Object.keys(this.players);
         for (let i = 0; i < playerIds.length; i++) {
             let p = this.players[playerIds[i]];
@@ -84,7 +84,7 @@ class Game {
             this.checkLapProgress(p);
         }
 
-        // Send state to clients
+        // Build state snapshot
         const stateSync = {};
         for (let id in this.players) {
             stateSync[id] = {
@@ -97,7 +97,8 @@ class Game {
             };
         }
 
-        this.io.volatile.emit('game_state', stateSync);
+        // ── Broadcast via WebRTC UDP DataChannel (with connect-phase fallback) ──
+        this.webrtcManager.broadcastGameState(stateSync, this.io);
 
         if (activePlayers === 0 && playerIds.length > 0) {
             this.stop();
@@ -112,9 +113,8 @@ class Game {
 
         const dx = p.x - cp.x;
         const dy = p.y - cp.y;
-        const dist = Math.sqrt(dx*dx + dy*dy);
+        const dist = Math.sqrt(dx * dx + dy * dy);
 
-        // Simple circle-based checkpoint zone
         if (dist < cp.radius) {
             p.checkpoint = targetCp;
             if (targetCp === 0) {
@@ -124,7 +124,11 @@ class Game {
                     p.finished = true;
                     this.winnerCount++;
                     p.rank = this.winnerCount;
-                    this.io.emit('chat_msg', { username: 'SYSTEM', color: '#ff0000', msg: `${p.username} finished in rank ${p.rank}!` });
+                    this.io.emit('chat_msg', {
+                        username: 'SYSTEM',
+                        color: '#ff0000',
+                        msg: `${p.username} finished in rank ${p.rank}!`
+                    });
                 }
             }
         }

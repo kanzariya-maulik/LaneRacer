@@ -246,6 +246,41 @@ input:focus { border: 1px solid var(--primary); }
     position: absolute;
     bottom: 30px; right: 30px;
 }
+
+/* Network transport indicator */
+.hud-net {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    align-items: center;
+}
+.transport-badge {
+    background: #0f172a;
+    padding: 6px 14px;
+    border-radius: 30px;
+    font-size: 0.9rem;
+    font-weight: 800;
+    border: 2px solid #fff;
+    box-shadow: 0 3px 0 #000;
+    color: #fff;
+    transition: background 0.3s;
+}
+.transport-badge.udp {
+    background: #064e3b;
+    border-color: #10b981;
+    color: #6ee7b7;
+}
+.transport-badge.tcp {
+    background: #1e1b4b;
+    border-color: #818cf8;
+    color: #c7d2fe;
+}
+.latency-badge {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: #94a3b8;
+    text-align: center;
+}
 .hud-speedometer {
     font-size: 2.2rem;
     font-weight: 900;
