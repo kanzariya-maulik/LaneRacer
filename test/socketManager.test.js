@@ -172,3 +172,16 @@ test('empty grid at lights out does not leave the server stuck in RACE', (t) => 
     assert.strictEqual(io.events('status_change').at(-1), 'COUNTDOWN', 'new host could not start');
     c.fire('disconnect');
 });
+
+test('assist chosen on join and changed in the lobby; garbage becomes off', () => {
+    const io = fakeIo();
+    setupSocketManager(io);
+    const s = io.connect('a');
+    s.fire('join_lobby', { username: 'A', teamId: 'ferrari', assist: 'full' });
+    assert.strictEqual(io.events('lobby_state_sync').at(-1).players.a.assist, 'full');
+    s.fire('set_assist', 'bogus');
+    assert.strictEqual(io.events('lobby_state_sync').at(-1).players.a.assist, 'off');
+    s.fire('set_assist', 'steering');
+    assert.strictEqual(io.events('lobby_state_sync').at(-1).players.a.assist, 'steering');
+    s.fire('disconnect');
+});

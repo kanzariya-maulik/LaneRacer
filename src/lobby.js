@@ -49,4 +49,9 @@ function pickRacers(players, max = MAX_RACERS) {
     return { racers: eligible.slice(0, max), overflow: eligible.slice(max) };
 }
 
-module.exports = { TEAMS, MAX_RACERS, sanitizeUsername, sanitizeChat, sanitizeSettings, sanitizeInput, canJoinTeam, pickRacers };
+const ASSISTS = ['off', 'steering', 'full'];
+function sanitizeAssist(assist) {
+    return ASSISTS.includes(assist) ? assist : 'off';
+}
+
+module.exports = { TEAMS, MAX_RACERS, sanitizeUsername, sanitizeChat, sanitizeSettings, sanitizeInput, canJoinTeam, pickRacers, ASSISTS, sanitizeAssist };

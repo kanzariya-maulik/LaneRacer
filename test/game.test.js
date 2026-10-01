@@ -621,3 +621,9 @@ test('leaving the pit exit onto the track is not a track-limits violation', () =
     }
     assert.strictEqual(p.limits, 0);
 });
+
+test('assist choice reaches the car', () => {
+    const g = new Game(io, [{ ...lp('a'), assist: 'full' }, lp('b', 'haas')], monza, RACE, () => {});
+    assert.strictEqual(g.players.a.assist, 'full');
+    assert.strictEqual(g.players.b.assist, 'off');
+});

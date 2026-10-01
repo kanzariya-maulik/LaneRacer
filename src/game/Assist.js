@@ -21,4 +21,27 @@ function safeSpeeds(path, scale) {
     });
 }
 
-module.exports = { DOWN, MAX_SAFE, safeSpeeds };
+const BRAKE_MARGIN = 0.7;  // brake when a corner ahead needs this share of the car's braking grip at the corner speed
+const LOOK_EXTRA_M = 30;
+const AIM = 0.95;          // aim a little under the limit: a margin for the driver's line
+
+// Full assist: lift and brake when a corner ahead can't be made at this speed; the driver still steers
+function brakeAssist(car, input, track, near) {
+    const { path, cum, safeSpeed, scale } = track;
+    const v = car.speed / scale;
+    if (v < 5 || input.brake >= 1) return input;
+    const reach = (v * v) / (2 * BRAKE_MARGIN * C.MU * C.G) + LOOK_EXTRA_M;
+    const n = path.length, total = cum[n];
+    const here = cum[near.i] + near.t * (cum[near.i + 1] - cum[near.i]);
+    for (let k = 1; k <= n; k++) {
+        const j = (near.i + k) % n;
+        const d = ((((cum[j] - here) % total) + total) % total) / scale;
+        if (d > reach) break;
+        const s = safeSpeed[j] * AIM;
+        // Downforce fades as the car slows, so judge against the grip left at the corner speed
+        if (v > s && (v * v - s * s) / (2 * Math.max(d, 1)) > BRAKE_MARGIN * C.MU * (C.G + DOWN * s * s)) return { throttle: 0, brake: 1, steer: input.steer };
+    }
+    return input;
+}
+
+module.exports = { DOWN, MAX_SAFE, safeSpeeds, brakeAssist };

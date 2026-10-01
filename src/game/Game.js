@@ -1,5 +1,6 @@
 const CarPhysics = require('./CarPhysics');
 const Physics = require('./Physics');
+const Assist = require('./Assist');
 const { pointAt } = require('./Track');
 
 const TICK_RATE = 60;
@@ -49,6 +50,7 @@ class Game {
                 id: p.id,
                 username: p.username,
                 teamId: p.teamId,
+                assist: p.assist || 'off',
                 x: slot.x, y: slot.y, angle: slot.angle,
                 vx: 0, vy: 0, speed: 0, steer: 0,
                 inPit: false, limiter: false, pitS: 0,
@@ -155,7 +157,8 @@ class Game {
         const nearPit = (x, y) => (pit ? Physics.nearestOnPath(x, y, pit.path, false) : null);
         const before = Physics.nearestOnTrack(p.x, p.y, t), beforePit = nearPit(p.x, p.y);
         const grass = before.dist > t.width / 2 + KERB_M * scale && !(beforePit && beforePit.dist <= pit.width / 2);
-        CarPhysics.step(p, p.input, this.dt, scale, grass);
+        const input = p.assist === 'full' && !p.inPit ? Assist.brakeAssist(p, p.input, t, before) : p.input;
+        CarPhysics.step(p, input, this.dt, scale, grass, p.assist);
 
         // Pit wall: a move across it is undone
         const hit = pit && (Physics.crossWall(x0, y0, p.x, p.y, pit.wall) || Physics.crossWall(x0, y0, p.x, p.y, pit.closeWall));
