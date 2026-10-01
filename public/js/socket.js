@@ -270,9 +270,14 @@ socket.on('sector', (s) => {
     if (window.showSectorFlash) window.showSectorFlash(s.sector, s.time, prev === null ? null : s.time - prev, cls);
 });
 
+socket.on('reaction', (r) => {
+    if (r.id === clientState.me && window.showBanner) window.showBanner(`REACTION ${r.time.toFixed(3)} s`, true);
+});
+
 socket.on('track_limits', (e) => {
     if (e.id !== clientState.me || !window.showBanner) return;
     window.showBanner(e.kind === 'deleted' ? 'TRACK LIMITS — LAP DELETED'
         : e.kind === 'warning' ? `TRACK LIMITS — WARNING ${e.count}/2`
+        : e.kind === 'jump' ? 'JUMP START — +5s PENALTY'
         : `+5s PENALTY (total +${e.penalty}s)`);
 });

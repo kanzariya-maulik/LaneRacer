@@ -46,9 +46,9 @@ window.addEventListener('resize', resize);
 resize();
 
 // ---------- input ----------
-const keys = { up: false, down: false, left: false, right: false };
-const KEYMAP = { w: 'up', arrowup: 'up', s: 'down', arrowdown: 'down', a: 'left', arrowleft: 'left', d: 'right', arrowright: 'right' };
-let input = { throttle: 0, brake: 0, steer: 0 };
+const keys = { up: false, down: false, left: false, right: false, drs: false };
+const KEYMAP = { w: 'up', arrowup: 'up', s: 'down', arrowdown: 'down', a: 'left', arrowleft: 'left', d: 'right', arrowright: 'right', e: 'drs' };
+let input = { throttle: 0, brake: 0, steer: 0, drs: false };
 let touchInput = null;
 let lastSent = null, lastSentAt = 0;
 let spectateIndex = 0;
@@ -608,10 +608,10 @@ window.showSectorFlash = (n, time, delta, cls) => {
     clearTimeout(flashTimer);
     flashTimer = setTimeout(() => el.classList.add('hidden'), 2000);
 };
-window.showBanner = (text) => {
+window.showBanner = (text, good = false) => {
     const el = $('race-msg');
     el.textContent = text;
-    el.classList.remove('hidden');
+    el.className = good ? 'good' : '';
     clearTimeout(bannerTimer);
     bannerTimer = setTimeout(() => el.classList.add('hidden'), 3000);
 };
@@ -657,6 +657,7 @@ function updateHUD() {
     }
     $('session-bar').textContent = bar;
     $('pit-limiter').classList.toggle('hidden', !(racing && me.limiter));
+    $('drs-badge').className = !racing ? 'drs-off' : me.drs ? 'drs-open' : me.drsAvailable ? 'drs-avail' : 'drs-off';
 
     // Timing tower
     const quali = Object.values(gs).some(p => p.ghost);

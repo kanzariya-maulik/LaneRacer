@@ -51,3 +51,13 @@ test('changed() ignores tiny jitter', () => {
     assert.strictEqual(input.changed(a, { throttle: 0.505, brake: 0, steer: 0.2 }), false);
     assert.strictEqual(input.changed(a, { throttle: 0.6, brake: 0, steer: 0.2 }), true);
 });
+
+test('DRS button: keyboard E and gamepad Y, and a press counts as a change', async () => {
+    const { keyboardStep, gamepadInput, changed } = input;
+    const prev = { throttle: 1, brake: 0, steer: 0, drs: false };
+    const next = keyboardStep(prev, { up: true, down: false, left: false, right: false, drs: true }, 1 / 60);
+    assert.strictEqual(next.drs, true);
+    assert.ok(changed(next, prev));
+    const pad = { axes: [0], buttons: Array.from({ length: 8 }, (_, i) => ({ value: i === 7 ? 1 : 0, pressed: i === 3 || i === 7 })) };
+    assert.strictEqual(gamepadInput(pad).drs, true);
+});
