@@ -44,4 +44,4 @@ function brakeAssist(car, input, track, near) {
     return input;
 }
 
-module.exports = { DOWN, MAX_SAFE, safeSpeeds, brakeAssist };
+module.exports = { DOWN, MAX_SAFE, AIM, BRAKE_MARGIN, safeSpeeds, brakeAssist };

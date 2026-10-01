@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const Physics = require('./Physics');
 const Assist = require('./Assist');
+const RacingLine = require('./RacingLine');
 
 const TRACK_IDS = ['monza', 'spa', 'silverstone', 'suzuka', 'sakhir'];
 const DATA_DIR = path.join(__dirname, '..', '..', 'data', 'tracks');
@@ -135,6 +136,7 @@ function build(raw, circuit = {}) {
 
     const track = { id: raw.id, name: raw.name, scale, width, path: pts, cum, start, startS, drsZones, checkpoints, sectorCps, startPositions, safeSpeed: Assist.safeSpeeds(pts, scale), pit: null };
     if (raw.pit) track.pit = buildPit(raw, circuit, track);
+    track.racingLine = RacingLine.compute(track); // visual guide, sent to clients in game_init
     return track;
 }
 
