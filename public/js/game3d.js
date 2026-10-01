@@ -539,11 +539,11 @@ function colourLine() {
     if (!line) return;
     const gs = clientState.gameState, me = gs && gs[clientState.me], racing = !!me && !isSpectator();
     line.mesh.visible = lineMode !== 'off' && !(racing && me.inPit);
-    if (!line.mesh.visible) return;
+    if (!line.mesh.visible) { lineIdx = null; return; } // re-found from scratch when the line comes back
     const t = clientState.trackData, rl = line.rl, c = line.mesh.geometry.attributes.color;
     let from = null, v = 0;
     if (racing) {
-        lineIdx = trackIndex(t.path, me.x, me.y, lineIdx);
+        lineIdx = trackIndex(t.path, me.x, me.y, lineIdx, t.width);
         from = lineIdx;
         v = Math.abs(me.speed) / scale;
     }

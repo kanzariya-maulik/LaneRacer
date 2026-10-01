@@ -46,7 +46,8 @@ function cornerSpeed(k) {
 }
 
 // Speed along a line: corner limits, then forward (drive) and backward (brake) passes, twice round so the lap wraps
-function profile(L, scale, cap) {
+// assist (optional): { cum, safe } — also hold each point to the Full braking assist's own rule, so red starts where it brakes
+function profile(L, scale, cap, assist) {
     const n = L.length, k = curvatures(L, scale);
     const vmax = k.map((x, i) => Math.min(cornerSpeed(x), cap ? cap[i] : Infinity));
     const v = vmax.slice();
@@ -62,12 +63,29 @@ function profile(L, scale, cap) {
         const a = BRAKE_MARGIN * C.MU * (C.G + DOWN * vj * vj) * rem(j, vj) + drag(vj); // where the braking assist starts
         v[i] = Math.min(v[i], Math.sqrt(vj * vj + 2 * a * ds[i]));
     }
+    if (assist) holdToAssist(v, assist, scale);
     const phase = v.map((vi, i) => {
         const drop = vi - v[(i + 1) % n];
-        return drop > 1 ? 2 : vi >= 0.97 * vmax[i] || drop > 0 ? 1 : 0;
+        const cornerLimited = vi >= 0.97 * vmax[i] && vmax[i] < MAX_SAFE * AIM - 0.1; // not the straight-line speed cap
+        return drop > 1 ? 2 : cornerLimited || drop > 0 ? 1 : 0;
     });
     const lap = ds.reduce((s, d, i) => s + d / Math.max((v[i] + v[(i + 1) % n]) / 2, 0.1), 0);
     return { speed: v, phase, vmax, lap };
+}
+
+// Mirror of Assist.brakeAssist: it brakes when some point j ahead needs more than BRAKE_MARGIN of the grip at its
+// target speed s_j (centreline distance, at least 1 m). Keep v[i] under that limit for every j within reach.
+function holdToAssist(v, { cum, safe }, scale) {
+    const n = v.length, total = cum[n];
+    for (let i = 0; i < n; i++) {
+        const reach = (v[i] * v[i]) / (2 * BRAKE_MARGIN * C.MU * C.G) + 30;
+        for (let k = 1; k <= n; k++) {
+            const j = (i + k) % n, d = ((((cum[j] - cum[i]) % total) + total) % total) / scale;
+            if (d > reach) break;
+            const s = safe[j] * AIM;
+            v[i] = Math.min(v[i], Math.sqrt(s * s + 2 * Math.max(d, 1) * BRAKE_MARGIN * C.MU * (C.G + DOWN * s * s)) - 0.05);
+        }
+    }
 }
 
 // Track points in the 60 m before the closed pit entry, and which offset sign faces the pit lane
@@ -108,7 +126,7 @@ function compute(t) {
         }
     }
     const offset = o.map((x) => Math.round(x * 10) / 10);
-    const prof = profile(linePoints(P, offset), t.scale, t.safeSpeed.map((s) => s * AIM));
+    const prof = profile(linePoints(P, offset), t.scale, t.safeSpeed.map((s) => s * AIM), { cum: t.cum, safe: t.safeSpeed });
     return { offset, speed: prof.speed.map((v) => Math.floor(v * 10) / 10), phase: prof.phase };
 }
 

@@ -89,3 +89,19 @@ for (const id of Track.TRACK_IDS) {
         assert.ok(time <= lap + 8, `${id}: ${time.toFixed(1)} s vs profile ${lap.toFixed(1)} s`);
     });
 }
+
+const { brakeAssist, MAX_SAFE } = require('../src/game/Assist');
+for (const id of Track.TRACK_IDS) {
+    test(`${id}: at the line's speed the Full braking assist never has to brake (red starts where it would)`, () => {
+        const t = tracks[id], rl = t.racingLine, input = { throttle: 1, brake: 0, steer: 0 };
+        const braked = [];
+        rl.speed.forEach((v, i) => { if (brakeAssist({ speed: v * t.scale }, input, t, { i, t: 0 }) !== input) braked.push(i); });
+        assert.deepStrictEqual(braked, [], `assist brakes at ${braked.length} points`);
+    });
+
+    test(`${id}: flat out at the speed cap on a straight is green, not lift`, () => {
+        const t = tracks[id], rl = t.racingLine, n = rl.speed.length, top = MAX_SAFE * AIM - 0.2;
+        const wrong = rl.speed.map((v, i) => (v >= top && rl.speed[(i + 1) % n] >= v && rl.phase[i] !== 0 ? i : -1)).filter((i) => i >= 0);
+        assert.deepStrictEqual(wrong, [], `${wrong.length} straight points marked lift/brake`);
+    });
+}

@@ -38,10 +38,10 @@ An F1-game-style driving line on every track. It shows the fast path (out-in-out
   - drive: `min(POWER / v, TRACTION·grip) / MASS` minus drag.
 - Step 1, corner speed: the curvature of the *line* (three-point circle, spanning ±2 points) gives a grip limit for every point, capped at `MAX_SAFE`. `vmax[i]` is the lower of that and `safeSpeed[i] × 0.95`, the speed the Full braking assist holds the car to (`Assist` AIM).
 - Step 2, forward pass, run twice around the loop so the lap wraps: `v[i+1] = min(vmax[i+1], sqrt(v[i]² + 2·a_drive·ds))`. The drive force is reduced by the friction circle: `a_drive · sqrt(1 − (a_lat / a_lat_max)²)`.
-- Step 3, backward pass, run twice around the loop: `v[i] = min(v[i], sqrt(v[i+1]² + 2·a_brake·ds))`, reduced by the friction circle in the same way. `a_brake` uses `BRAKE_MARGIN` (0.7) × grip: this is where the braking assist starts braking, so red appears where the car would brake anyway.
+- Step 3, backward pass, run twice around the loop: `v[i] = min(v[i], sqrt(v[i+1]² + 2·a_brake·ds))`, reduced by the friction circle in the same way. `a_brake` uses `BRAKE_MARGIN` (0.7) × grip. Then each point is also held to the braking assist's own rule: for every point j within braking reach, `v[i] ≤ sqrt(s_j² + 2·BRAKE_MARGIN·MU·(g + DOWN·s_j²)·d_ij)`, where `s_j = safeSpeed[j] × AIM` and `d_ij` is the centreline distance. So at the line's speed the assist never needs to brake, and red appears exactly where it would.
 - **Phase:**
   - `brake` where the backward pass limited the speed and the speed falls by more than 1 m/s over the next point;
-  - `lift` where `v` is within 3% of `vmax` (the car is at the corner limit) or the speed falls by up to 1 m/s;
+  - `lift` where `v` is within 3% of a corner-limited `vmax` (not the straight-line speed cap) or the speed falls by up to 1 m/s;
   - otherwise `flat`.
 
 ### Delivery

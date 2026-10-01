@@ -54,3 +54,10 @@ test('nextMode cycles off → corners → full → off', () => {
     assert.strictEqual(R.nextMode('corners'), 'full');
     assert.strictEqual(R.nextMode('full'), 'off');
 });
+
+test('trackIndex recovers from a stale index far from the car', () => {
+    const path = [];
+    for (let i = 0; i < 200; i++) path.push({ x: Math.cos(i / 200 * 2 * Math.PI) * 1000, y: Math.sin(i / 200 * 2 * Math.PI) * 1000 });
+    assert.strictEqual(R.trackIndex(path, path[120].x, path[120].y, 10, 50), 120, 'full search when the window is far off');
+    assert.strictEqual(R.trackIndex(path, path[12].x, path[12].y, 10, 50), 12);
+});

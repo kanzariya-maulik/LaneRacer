@@ -28,8 +28,9 @@ export function cornerMask(phase, cum, scale) {
     return mark;
 }
 
-// Nearest path point, searched near the last one so a crossover can't jump to the other leg
-export function trackIndex(path, x, y, last) {
+// Nearest path point, searched near the last one so a crossover can't jump to the other leg;
+// a full search if the window's best is further than `far` (stale index after the line was hidden)
+export function trackIndex(path, x, y, last, far = Infinity) {
     const n = path.length;
     const from = last === null || last === undefined ? 0 : last - SEARCH_BACK;
     const count = last === null || last === undefined ? n : SEARCH_BACK + SEARCH_AHEAD + 1;
@@ -38,7 +39,7 @@ export function trackIndex(path, x, y, last) {
         const i = (((from + k) % n) + n) % n, d = (path[i].x - x) ** 2 + (path[i].y - y) ** 2;
         if (d < bd) { bd = d; best = i; }
     }
-    return best;
+    return bd > far * far && last !== null && last !== undefined ? trackIndex(path, x, y, null) : best;
 }
 
 export function nextMode(mode) {
