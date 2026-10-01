@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { keyboardStep, gamepadInput, changed } from './input.js';
 import { LEVELS, ratioRange, resolveLevel, autoPick, adaptStep } from './quality.js';
 import { SnapshotBuffer, sample, project, decodeFlags, INTERP_S } from './netsync.js';
@@ -307,19 +308,60 @@ function flat(w, d, color, opacity = 1) {
     return new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color, transparent: opacity < 1, opacity }));
 }
 
+// Many copies of one mesh in one draw call; p: { x, y (height), z, angle, sx, sy, sz, color }
+function instanced(geometry, material, placements) {
+    const m = new THREE.InstancedMesh(geometry, material, Math.max(1, placements.length));
+    const o = new THREE.Object3D();
+    placements.forEach((p, i) => {
+        o.position.set(p.x, p.y ?? 0, p.z);
+        o.rotation.set(0, p.angle ?? 0, 0);
+        o.scale.set(p.sx ?? 1, p.sy ?? 1, p.sz ?? 1);
+        o.updateMatrix();
+        m.setMatrixAt(i, o.matrix);
+        if (p.color) m.setColorAt(i, new THREE.Color(p.color));
+    });
+    m.count = placements.length;
+    return m;
+}
+
+// Many text planes, one texture atlas, one draw call; items: { text, x, y (height), z, rotY, flat, bg }
+function atlasPlanes(items, w, h, bg, fg = '#fff') {
+    const cell = 64, cols = 8, rows = Math.ceil(items.length / cols), aspect = w / h;
+    const c = document.createElement('canvas');
+    c.width = cols * cell * aspect; c.height = rows * cell;
+    const g = c.getContext('2d');
+    items.forEach((it, i) => {
+        const cx = (i % cols) * cell * aspect, cy = Math.floor(i / cols) * cell;
+        g.fillStyle = it.bg || bg; g.fillRect(cx, cy, cell * aspect, cell);
+        g.fillStyle = fg; g.font = `bold ${cell * 0.6}px sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
+        g.fillText(it.text, cx + (cell * aspect) / 2, cy + cell / 2, cell * aspect * 0.9);
+    });
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const geos = items.map((it, i) => {
+        const geo = new THREE.PlaneGeometry(w, h);
+        const u0 = (i % cols) / cols, v1 = 1 - Math.floor(i / cols) / rows, du = 1 / cols, dv = 1 / rows;
+        const uv = geo.attributes.uv;
+        for (let k = 0; k < uv.count; k++) uv.setXY(k, u0 + uv.getX(k) * du, v1 - dv + uv.getY(k) * dv);
+        if (it.flat) geo.rotateX(-Math.PI / 2);
+        geo.rotateY(it.rotY);
+        geo.translate(it.x, it.y, it.z);
+        return geo;
+    });
+    return new THREE.Mesh(mergeGeometries(geos), new THREE.MeshStandardMaterial({ map: tex, side: THREE.DoubleSide, transparent: true }));
+}
+
 function gridBoxes(slots) {
+    const bars = [], nums = [];
     slots.forEach((g, i) => {
         const fx = Math.cos(g.angle), fy = Math.sin(g.angle);
-        const bar = flat(0.4 * scale, 2.6 * scale, 0xf2f2f2);
-        bar.position.set(g.x + fx * 3 * scale, 0.9, g.y + fy * 3 * scale);
-        bar.rotation.y = -g.angle;
-        world.add(bar);
-        const num = textPlane(String(i + 1), 1.6 * scale, 1.6 * scale, 'rgba(0,0,0,0)');
-        num.geometry.rotateX(-Math.PI / 2);
-        num.position.set(g.x + fx * 4.6 * scale, 0.95, g.y + fy * 4.6 * scale);
-        num.rotation.y = facing(g.angle);
-        world.add(num);
+        bars.push({ x: g.x + fx * 3 * scale, y: 0.9, z: g.y + fy * 3 * scale, angle: -g.angle });
+        nums.push({ text: String(i + 1), x: g.x + fx * 4.6 * scale, y: 0.95, z: g.y + fy * 4.6 * scale, rotY: facing(g.angle), flat: true });
     });
+    const barGeo = new THREE.PlaneGeometry(0.4 * scale, 2.6 * scale);
+    barGeo.rotateX(-Math.PI / 2);
+    world.add(instanced(barGeo, new THREE.MeshStandardMaterial({ color: 0xf2f2f2 }), bars));
+    world.add(atlasPlanes(nums, 1.6 * scale, 1.6 * scale, 'rgba(0,0,0,0)'));
 }
 
 function buildPit(pit, t) {
@@ -363,26 +405,23 @@ function buildPit(pit, t) {
         world.add(m);
     }
 
+    const buildings = [], signs = [], marks = [];
     for (const g of pit.garages) {
         const info = teamInfo[g.teamId] || { name: g.teamId, chatColor: '#888888' };
         const c = side(g, g.angle, -s * (back + 2.5 * scale));
-        const building = new THREE.Mesh(new THREE.BoxGeometry(18 * scale, 6 * scale, 5 * scale), new THREE.MeshStandardMaterial({ color: 0x2b2f36 }));
-        building.position.set(c.x, 3 * scale, c.y);
-        building.rotation.y = -g.angle;
-        building.castShadow = true;
-        world.add(building);
+        buildings.push({ x: c.x, y: 3 * scale, z: c.y, angle: -g.angle });
         const f = side(g, g.angle, -s * (back - 0.1 * scale));
-        const sign = textPlane(info.name.toUpperCase(), 17 * scale, 1.6 * scale, info.chatColor);
-        sign.position.set(f.x, 5 * scale, f.y);
-        sign.rotation.y = s > 0 ? -g.angle : Math.PI - g.angle; // face the pit lane
-        world.add(sign);
-        for (const b of g.boxes) {
-            const mark = flat(6 * scale, 2.6 * scale, info.chatColor, 0.45);
-            mark.position.set(b.x, 0.8, b.y);
-            mark.rotation.y = -b.angle;
-            world.add(mark);
-        }
+        signs.push({ text: info.name.toUpperCase(), x: f.x, y: 5 * scale, z: f.y, rotY: s > 0 ? -g.angle : Math.PI - g.angle, bg: info.chatColor });
+        for (const b of g.boxes) marks.push({ x: b.x, y: 0.8, z: b.y, angle: -b.angle, color: info.chatColor });
     }
+    const bGeo = new THREE.BoxGeometry(18 * scale, 6 * scale, 5 * scale);
+    const garagesMesh = instanced(bGeo, new THREE.MeshStandardMaterial({ color: 0x2b2f36 }), buildings);
+    garagesMesh.castShadow = true;
+    world.add(garagesMesh);
+    world.add(atlasPlanes(signs, 17 * scale, 1.6 * scale, '#888888'));
+    const mGeo = new THREE.PlaneGeometry(6 * scale, 2.6 * scale);
+    mGeo.rotateX(-Math.PI / 2);
+    world.add(instanced(mGeo, new THREE.MeshStandardMaterial({ transparent: true, opacity: 0.45 }), marks));
 }
 
 const solid = (hex) => { const c = new THREE.Color(hex); return () => c; };
@@ -394,6 +433,7 @@ function buildWorld(t) {
         world.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
     }
     for (const id in cars) delete cars[id];
+    wheelBatch = null; // rebuilt in the new world
 
     scale = t.scale;
     world = new THREE.Group();
@@ -525,7 +565,10 @@ function makeCar(id) {
         });
         for (const name of ['wheel_FL', 'wheel_FR', 'wheel_RL', 'wheel_RR']) {
             const w = model.getObjectByName(name);
-            if (w) wheels.push(w);
+            if (!w) continue;
+            wheels.push(w);
+            // Drawn by the shared wheel batches instead (tyre + rim for every car = 2 draws)
+            w.traverse((o) => { if (o.isMesh) { o.visible = false; o.castShadow = false; } });
         }
         model.scale.setScalar(scale);
         root.add(model);
@@ -560,6 +603,8 @@ function updateCars(dt) {
         r.position.x = s.x;
         r.position.z = s.y;
         r.rotation.y = -s.angle;
+        const far = camera.position.distanceTo(r.position) > 300 * scale; // wheels unreadable that far: 4 fewer draws per car
+        for (const w of car.wheels) w.userData.show = !far;
         for (const w of car.wheels) w.rotation.z -= (s.speed / (WHEEL_RADIUS_M * scale)) * dt;
         // +steer turns toward +z (right); a +y rotation points the wheel toward -z, so negate
         car.wheels[0] && (car.wheels[0].rotation.y = -(s.steer || 0)); // wheel_FL
@@ -598,6 +643,37 @@ function applyNet(nowS) {
         Object.assign(p, { x: pose.x, y: pose.y, angle: pose.angle, speed: pose.speed, steer: pose.steer }, decodeFlags(pose.flags));
         p.curLap = p.lapStart === null || p.lapStart === undefined || p.finished ? null : Math.max(0, serverT - p.lapStart);
     }
+}
+
+// All wheels of all cars in two instanced draws (tyre, rim); each frame copies every wheel part's world matrix
+let wheelBatch = null; // [{ mesh: InstancedMesh }] per wheel sub-mesh, built from the car model
+function updateWheelBatch() {
+    if (!carTemplate) return;
+    if (!wheelBatch) {
+        const parts = [];
+        carTemplate.getObjectByName('wheel_FL')?.traverse((o) => { if (o.isMesh) parts.push(o); });
+        wheelBatch = parts.map((part) => {
+            const mesh = new THREE.InstancedMesh(part.geometry, part.material, 4 * 24);
+            mesh.frustumCulled = false;
+            mesh.count = 0;
+            world.add(mesh);
+            return mesh;
+        });
+    }
+    world.updateMatrixWorld();
+    const counts = wheelBatch.map(() => 0);
+    for (const id in cars) {
+        for (const w of cars[id].wheels) {
+            if (!w.parent || !w.userData.show) continue;
+            let k = 0;
+            w.traverse((o) => {
+                if (!o.isMesh || k >= wheelBatch.length) return;
+                const mesh = wheelBatch[k++];
+                if (counts[k - 1] < mesh.instanceMatrix.count) mesh.setMatrixAt(counts[k - 1]++, o.matrixWorld);
+            });
+        }
+    }
+    wheelBatch.forEach((mesh, k) => { mesh.count = counts[k]; mesh.instanceMatrix.needsUpdate = true; });
 }
 
 // ---------- camera ----------
@@ -813,6 +889,7 @@ function frame(now) {
     if (!world || !clientState.gameState) return;
     applyNet(now / 1000);
     updateCars(dt);
+    updateWheelBatch();
     updateCamera(dt);
     renderer.render(scene, camera);
 
