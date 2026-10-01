@@ -295,14 +295,17 @@ function gridBoxes(slots) {
     });
 }
 
-function buildPit(pit) {
+function buildPit(pit, t) {
     const n = pit.path.length, ph = pit.width / 2, s = pit.trackSide;
     const inner = (i) => i >= 1 && i <= n - 3; // end segments would use wrapped normals
     const open = (i) => inner(i) && pit.cum[i] >= pit.closeS; // nothing drawn on the closed pit entry
     world.add(strip(pit.path, -ph, ph, 0.55, open, solid('#3a3f47')));
     const line = 0.3 * scale;
-    world.add(strip(pit.path, ph - line, ph, 0.85, open, solid('#f2f2f2')));
-    world.add(strip(pit.path, -ph, -ph + line, 0.85, open, solid('#f2f2f2')));
+    // Edge lines only off the track: where the pit lane merges, they'd be painted across the racing surface
+    const offTrack = (off) => offsetPoints(pit.path, off).map((q) => distToPath(q, t.path) > t.width / 2);
+    const outL = offTrack(ph - line / 2), outR = offTrack(-ph + line / 2);
+    world.add(strip(pit.path, ph - line, ph, 0.85, (i) => open(i) && outL[i] && outL[i + 1], solid('#f2f2f2')));
+    world.add(strip(pit.path, -ph, -ph + line, 0.85, (i) => open(i) && outR[i] && outR[i + 1], solid('#f2f2f2')));
 
     // Pit wall on the track side; outer wall behind the lane except where the garages open onto it
     world.add(wall(pit.wall, 0, 1 * scale, (i) => i < pit.wall.length - 1, solid('#9aa0a6')));
@@ -402,7 +405,7 @@ function buildWorld(t) {
 
     world.add(startLine(t.start, t.width));
     gridBoxes(t.startPositions);
-    if (t.pit) buildPit(t.pit);
+    if (t.pit) buildPit(t.pit, t);
     snapCamera = true;
 }
 
