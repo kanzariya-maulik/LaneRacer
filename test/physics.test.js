@@ -58,3 +58,23 @@ test('nearestOnTrack finds the closest point on the loop', () => {
     close(n.px, 50);
     close(n.py, 0);
 });
+
+test('nearestOnPath: open path does not wrap back to the first point', () => {
+    const line = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }];
+    const open = Physics.nearestOnPath(10, 60, line, false);
+    assert.strictEqual(open.dist, 60);
+    assert.strictEqual(open.i, 0);
+    assert.ok(Math.abs(open.t - 0.1) < 1e-9);
+    assert.ok(Physics.nearestOnPath(10, 60, line).dist < 36, 'closed path should use the closing segment');
+});
+
+test('crossWall: crossing reports the normal back toward the side the car came from', () => {
+    const wall = [{ x: 0, y: 0 }, { x: 100, y: 0 }];
+    const down = Physics.crossWall(50, 10, 50, -10, wall);
+    assert.ok(Math.abs(down.nx) < 1e-9 && Math.abs(down.ny - 1) < 1e-9);
+    const up = Physics.crossWall(50, -10, 50, 10, wall);
+    assert.ok(Math.abs(up.nx) < 1e-9 && Math.abs(up.ny + 1) < 1e-9);
+    assert.strictEqual(Physics.crossWall(50, 10, 50, 5, wall), null, 'same side');
+    assert.strictEqual(Physics.crossWall(150, 10, 150, -10, wall), null, 'past the wall end');
+    assert.strictEqual(Physics.crossWall(50, 10, 50, -10, []), null, 'no wall');
+});

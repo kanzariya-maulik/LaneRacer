@@ -37,19 +37,40 @@ class Physics {
         return (v.x - w.x)*(v.x - w.x) + (v.y - w.y)*(v.y - w.y);
     }
 
-    static nearestOnTrack(x, y, track) {
-        const path = track.path;
-        let best = { d2: Infinity, px: x, py: y };
-        for (let i = 0; i < path.length; i++) {
+    // Nearest point on a polyline; closed = the last point joins back to the first
+    static nearestOnPath(x, y, path, closed = true) {
+        const n = closed ? path.length : path.length - 1;
+        let best = { d2: Infinity, px: x, py: y, i: 0, t: 0 };
+        for (let i = 0; i < n; i++) {
             const v = path[i], w = path[(i + 1) % path.length];
             const l2 = this.distSquared(v, w);
             let t = l2 ? ((x - v.x) * (w.x - v.x) + (y - v.y) * (w.y - v.y)) / l2 : 0;
             t = Math.max(0, Math.min(1, t));
             const px = v.x + t * (w.x - v.x), py = v.y + t * (w.y - v.y);
             const d2 = (x - px) ** 2 + (y - py) ** 2;
-            if (d2 < best.d2) best = { d2, px, py };
+            if (d2 < best.d2) best = { d2, px, py, i, t };
         }
-        return { dist: Math.sqrt(best.d2), px: best.px, py: best.py };
+        return { dist: Math.sqrt(best.d2), px: best.px, py: best.py, i: best.i, t: best.t };
+    }
+
+    static nearestOnTrack(x, y, track) {
+        return this.nearestOnPath(x, y, track.path);
+    }
+
+    // First wall segment the move a→b crosses; n points back to a's side
+    static crossWall(ax, ay, bx, by, wall) {
+        for (let i = 0; i + 1 < wall.length; i++) {
+            const p = wall[i], q = wall[i + 1];
+            const ex = q.x - p.x, ey = q.y - p.y;
+            const sa = ex * (ay - p.y) - ey * (ax - p.x);
+            const sb = ex * (by - p.y) - ey * (bx - p.x);
+            if (sa === 0 || sa * sb > 0) continue;
+            const fx = bx - ax, fy = by - ay;
+            if ((fx * (p.y - ay) - fy * (p.x - ax)) * (fx * (q.y - ay) - fy * (q.x - ax)) > 0) continue;
+            const k = (sa > 0 ? 1 : -1) / (Math.hypot(ex, ey) || 1);
+            return { nx: -ey * k, ny: ex * k };
+        }
+        return null;
     }
 
     // Separating-axis test for two oriented car rectangles; normal points from b to a
