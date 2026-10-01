@@ -11,9 +11,9 @@ const COAST_LOCK = { throttle: 0, brake: 0, steer: 1 };
 const vDir = (c) => Math.atan2(c.vy, c.vx);
 const slipAngle = (c) => Math.abs(Math.atan2(-c.vx * Math.sin(c.angle) + c.vy * Math.cos(c.angle), c.vx * Math.cos(c.angle) + c.vy * Math.sin(c.angle)));
 // Path radius from how fast the velocity (not the nose) turns, over `seconds` at full lock
-function pathRadius(v, seconds, input = COAST_LOCK) {
+function pathRadius(v, seconds, input = COAST_LOCK, assist = 'off') {
     const c = mk(v), d0 = vDir(c), n = Math.round(seconds / DT);
-    for (let i = 0; i < n; i++) step(c, input, DT, S);
+    for (let i = 0; i < n; i++) step(c, input, DT, S, false, assist);
     return (Math.hypot(c.vx, c.vy) / S) / ((vDir(c) - d0) / seconds);
 }
 
@@ -122,4 +122,33 @@ test('high-speed steering is progressive: a light tap at 290 km/h is well below 
     };
     const ratio = yawRate(0.35) / yawRate(1);
     assert.ok(ratio < 0.5, `35% steer gives ${(ratio * 100).toFixed(0)}% of full-lock rotation`);
+});
+
+test('grass: a 30 m cut at 150 km/h on full throttle loses more than 20 km/h', () => {
+    const c = mk(150 / 3.6);
+    while (c.x / S < 30) step(c, FULL, DT, S, true);
+    assert.ok(150 - kmh(c) > 20, `lost ${(150 - kmh(c)).toFixed(1)} km/h`);
+});
+
+test('grass: full throttle levels off below 110 km/h, and a stopped car can still drive away', () => {
+    const fast = mk(150 / 3.6);
+    for (let i = 0; i < 120; i++) step(fast, FULL, DT, S, true);
+    assert.ok(kmh(fast) < 110, `${kmh(fast).toFixed(0)} km/h after 2 s`);
+    const stopped = mk(0);
+    for (let i = 0; i < 300; i++) step(stopped, FULL, DT, S, true);
+    assert.ok(kmh(stopped) > 20, `${kmh(stopped).toFixed(0)} km/h after 5 s from rest`);
+});
+
+test('steering assist: chicane at 100 km/h ≤ 16 m, hairpin at 60 km/h ≤ 10 m', () => {
+    const chicane = pathRadius(100 / 3.6, 0.5, { throttle: 0.3, brake: 0, steer: 1 }, 'steering');
+    assert.ok(chicane <= 16, `chicane radius ${chicane} m`);
+    const hairpin = pathRadius(60 / 3.6, 0.5, COAST_LOCK, 'steering');
+    assert.ok(hairpin <= 10, `hairpin radius ${hairpin} m`);
+});
+
+test('steering assist changes nothing above 250 km/h', () => {
+    const a = mk(260 / 3.6), b = mk(260 / 3.6);
+    const input = { throttle: 1, brake: 0, steer: 0.4 };
+    for (let i = 0; i < 30; i++) { step(a, input, DT, S, false, 'off'); step(b, input, DT, S, false, 'full'); }
+    assert.deepStrictEqual([b.x, b.y, b.angle, b.vx, b.vy], [a.x, a.y, a.angle, a.vx, a.vy]);
 });
