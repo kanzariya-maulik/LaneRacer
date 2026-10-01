@@ -73,6 +73,27 @@ class Physics {
         return null;
     }
 
+    // How far the car's half-extent reaches along unit normal n (rectangle support distance)
+    static carReach(car, nx, ny, scale) {
+        const fx = Math.cos(car.angle), fy = Math.sin(car.angle);
+        return scale * (CAR_HALF_LENGTH_M * Math.abs(fx * nx + fy * ny) + CAR_HALF_WIDTH_M * Math.abs(-fy * nx + fx * ny));
+    }
+
+    // Car rectangle against a wall polyline: deepest poke-through and the way out (n from wall to car)
+    static wallOverlap(car, wall, scale) {
+        let best = null;
+        for (let i = 0; i + 1 < wall.length; i++) {
+            const a = wall[i], b = wall[i + 1], ex = b.x - a.x, ey = b.y - a.y, l2 = ex * ex + ey * ey;
+            if (!l2) continue;
+            const t = Math.max(0, Math.min(1, ((car.x - a.x) * ex + (car.y - a.y) * ey) / l2));
+            const dx = car.x - (a.x + t * ex), dy = car.y - (a.y + t * ey), d = Math.hypot(dx, dy);
+            if (d < 1e-9) continue;
+            const nx = dx / d, ny = dy / d, depth = this.carReach(car, nx, ny, scale) - d;
+            if (depth > 0 && (!best || depth > best.depth)) best = { nx, ny, depth };
+        }
+        return best;
+    }
+
     // Separating-axis test for two oriented car rectangles; normal points from b to a
     static carOverlap(a, b, scale) {
         const hl = CAR_HALF_LENGTH_M * scale, hw = CAR_HALF_WIDTH_M * scale;

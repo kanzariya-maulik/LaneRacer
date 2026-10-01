@@ -172,6 +172,10 @@ class Game {
             p.y = y0 + hit.ny * 0.5;
             bounce(p, hit.nx, hit.ny);
         }
+        // …and the pit entry barrier stops the whole car body, not just its centre
+        // ponytail: the pit wall stays centre-only — on the 1.5×-wide tracks it sits ~0.6 m past the line, inside the kerb
+        const o = pit && Physics.wallOverlap(p, pit.closeWall, scale);
+        if (o) { p.x += o.nx * o.depth; p.y += o.ny * o.depth; bounce(p, o.nx, o.ny); }
 
         // Barrier: outside both the track's run-off and the pit lane's
         const wallDist = t.width / 2 + WALL_OFFSET;
@@ -185,6 +189,17 @@ class Game {
             const nx = (p.x - near.px) / near.dist, ny = (p.y - near.py) / near.dist;
             p.x = near.px + nx * (lim - 1);
             p.y = near.py + ny * (lim - 1);
+            bounce(p, -nx, -ny);
+        }
+        // Barrier stops the car body: pull the centre in by how far the rectangle reaches toward it
+        const edge = Physics.nearestOnTrack(p.x, p.y, t), edgePit = nearPit(p.x, p.y);
+        const reach = (n) => n.dist > 1e-9 ? Physics.carReach(p, (p.x - n.px) / n.dist, (p.y - n.py) / n.dist, scale) : 0;
+        const inTrack = edge.dist + reach(edge) <= wallDist;
+        const inPitLane = edgePit && pitAlong(pit, edgePit) >= pit.closeS && edgePit.dist + reach(edgePit) <= pitDist;
+        if (!inTrack && !inPitLane && edge.dist <= wallDist && !(edgePit && edgePit.dist <= pitDist && pitAlong(pit, edgePit) >= pit.closeS)) {
+            const nx = (p.x - edge.px) / edge.dist, ny = (p.y - edge.py) / edge.dist;
+            const lim = wallDist - reach(edge);
+            p.x = edge.px + nx * lim; p.y = edge.py + ny * lim;
             bounce(p, -nx, -ny);
         }
 
@@ -298,8 +313,8 @@ class Game {
         if (p.offLimits || p.inPit || near.dist <= t.width / 2 + Physics.CAR_HALF_WIDTH_M * t.scale) return;
         if (this.mode === 'quali' && (p.lapStart === null || p.finished)) return;
         p.offLimits = true;
-        p.lapValid = false;
         if (this.mode === 'quali') {
+            p.lapValid = false; // quali: lap deleted (race: warnings / penalties only)
             this.io.emit('track_limits', { id: p.id, kind: 'deleted' });
             return;
         }

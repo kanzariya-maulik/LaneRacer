@@ -683,3 +683,27 @@ test('a sector from a lap deleted later is never a best', () => {
     const timing = events.filter(([ev]) => ev === 'timing').map(([, d]) => d).at(-1);
     assert.deepStrictEqual(timing.sessionBest, [null, null, null]);
 });
+
+test('race: track limits warn or penalise but never delete the lap', () => {
+    const g = new Game(io, [lp('a')], monza, RACE, () => {});
+    g.release();
+    const p = g.players.a;
+    excursion(g, p);
+    assert.strictEqual(p.limits, 1);
+    assert.strictEqual(p.lapValid, true);
+});
+
+test('walls stop the car body, not just its centre: nothing pokes through the pit entry barrier', () => {
+    const g = new Game(io, [lp('a')], monza, RACE, () => {});
+    const p = g.players.a, [a, b] = monza.pit.closeWall;
+    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    const ex = b.x - a.x, ey = b.y - a.y, len = Math.hypot(ex, ey);
+    const nx = -ey / len, ny = ex / len;           // one side of the barrier
+    const angle = Math.atan2(-ny, -nx);             // facing the barrier head-on
+    const start = 12 * monza.scale;
+    place(p, { x: mx + nx * start, y: my + ny * start, angle }, 15);
+    p.input = FULL;
+    for (let k = 0; k < 120; k++) g.drive(p);
+    const d = (p.x - mx) * nx + (p.y - my) * ny;   // centre's distance in front of the barrier
+    assert.ok(d >= Physics.CAR_HALF_LENGTH_M * monza.scale - 1, `nose ${((Physics.CAR_HALF_LENGTH_M * monza.scale - d) / monza.scale).toFixed(2)} m through the barrier`);
+});
