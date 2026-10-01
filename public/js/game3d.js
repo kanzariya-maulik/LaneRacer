@@ -7,6 +7,7 @@ import { LEVELS, ratioRange, resolveLevel, autoPick, adaptStep } from './quality
 import { placeScenery, seedOf } from './scenery.js';
 import { SnapshotBuffer, sample, project, decodeFlags, INTERP_S } from './netsync.js';
 import { gapText, driverCode, lapDelta } from './timing.js';
+import { MODES, segmentColor, cornerMask, aheadM, trackIndex, nextMode } from './racingline.js';
 
 // World units per metre come from the track JSON (track.scale = 6).
 const WHEEL_RADIUS_M = 0.36;  // scripts/car_parts.py WHEEL_RADIUS
@@ -91,6 +92,16 @@ function toggleTower() {
     lastTower = 0; // redraw on the next HUD tick
 }
 document.getElementById('tt-head').addEventListener('click', toggleTower);
+// Racing line: one chevron mesh per world, recoloured with the HUD
+let line = null, lineIdx = null, padX = false;
+const lineChoice = () => { const v = store.get('lanrace.line'); return MODES.includes(v) ? v : 'corners'; };
+let lineMode = lineChoice();
+function toggleLine() {
+    lineMode = nextMode(lineMode);
+    applyLineMode();
+    colourLine();
+    window.showBanner?.(`RACING LINE: ${lineMode.toUpperCase()}`, true);
+}
 
 function isSpectator() {
     return !!clientState.players[clientState.me]?.isSpectating || !clientState.gameState?.[clientState.me];
@@ -100,6 +111,7 @@ function onKey(e, down) {
     if (document.activeElement === chatInput) return;
     const key = e.key.toLowerCase();
     if (down && key === 't' && !e.repeat && clientState.status !== 'LOBBY') toggleTower();
+    if (down && key === 'r' && !e.repeat && clientState.status !== 'LOBBY') toggleLine();
     if (down && clientState.status !== 'LOBBY' && isSpectator()) {
         if (key === 'arrowleft') spectateIndex--;
         if (key === 'arrowright') spectateIndex++;
@@ -124,6 +136,9 @@ function sendInput(now, force = false) {
 function pollInput(dt, now) {
     const pads = navigator.getGamepads ? [...navigator.getGamepads()] : [];
     const pad = gamepadInput(pads.find(Boolean));
+    const x = !!pads.find(Boolean)?.buttons[2]?.pressed; // gamepad X / Square
+    if (x && !padX && clientState.status !== 'LOBBY') toggleLine();
+    padX = x;
     input = pad || touchInput || keyboardStep(input, keys, dt);
     sendInput(now);
 }
@@ -471,6 +486,74 @@ function buildPit(pit, t) {
 
 const solid = (hex) => { const c = new THREE.Color(hex); return () => c; };
 
+const LINE_RGB = { green: new THREE.Color('#22c55e'), yellow: new THREE.Color('#facc15'), red: new THREE.Color('#ef4444') };
+
+function buildRacingLine(t) {
+    line = null;
+    lineIdx = null;
+    lineMode = lineChoice(); // each session starts from the lobby choice
+    const rl = t.racingLine;
+    if (!rl) return;
+    const P = t.path, n = P.length, w = 0.5 * scale, y = 0.75;
+    const L = P.map((p, i) => {
+        const a = P[(i - 1 + n) % n], b = P[(i + 1) % n], len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+        return { x: p.x - ((b.y - a.y) / len) * rl.offset[i], y: p.y + ((b.x - a.x) / len) * rl.offset[i] };
+    });
+    // One chevron per segment, pointing along the lap: 4 triangles = 12 vertices
+    const pos = new Float32Array(n * 36);
+    for (let i = 0; i < n; i++) {
+        const a = L[i], b = L[(i + 1) % n], len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+        const tx = (b.x - a.x) / len, ty = (b.y - a.y) / len;
+        const at = (f, s) => ({ x: a.x + tx * len * f - ty * w * s, y: a.y + ty * len * f + tx * w * s });
+        const BL = at(0, 1), BR = at(0, -1), NOTCH = at(0.35, 0), FL = at(0.6, 1), FR = at(0.6, -1), TIP = at(0.95, 0);
+        [BL, FL, NOTCH, FL, TIP, NOTCH, TIP, FR, NOTCH, FR, BR, NOTCH].forEach((p, v) => {
+            const k = i * 36 + v * 3;
+            pos[k] = p.x; pos[k + 1] = y; pos[k + 2] = p.y;
+        });
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos.slice(), 3));
+    g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 36), 3));
+    const mesh = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.75, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true }));
+    mesh.renderOrder = 1;        // over the tyre marks
+    mesh.frustumCulled = false;  // hidden segments collapse to the origin, so the bounds are meaningless
+    world.add(mesh);
+    line = { mesh, full: pos, mask: cornerMask(rl.phase, t.cum, scale), rl, n };
+    applyLineMode();
+    colourLine();
+}
+
+// Corners-only hides segments by collapsing them; rewritten only when the mode changes
+function applyLineMode() {
+    if (!line) return;
+    const p = line.mesh.geometry.attributes.position;
+    for (let i = 0; i < line.n; i++) {
+        const show = lineMode === 'full' || (lineMode === 'corners' && line.mask[i]);
+        for (let k = i * 36; k < i * 36 + 36; k++) p.array[k] = show ? line.full[k] : 0;
+    }
+    p.needsUpdate = true;
+}
+
+// Base colours by phase; within 250 m ahead, from your own speed
+function colourLine() {
+    if (!line) return;
+    const gs = clientState.gameState, me = gs && gs[clientState.me], racing = !!me && !isSpectator();
+    line.mesh.visible = lineMode !== 'off' && !(racing && me.inPit);
+    if (!line.mesh.visible) return;
+    const t = clientState.trackData, rl = line.rl, c = line.mesh.geometry.attributes.color;
+    let from = null, v = 0;
+    if (racing) {
+        lineIdx = trackIndex(t.path, me.x, me.y, lineIdx);
+        from = lineIdx;
+        v = Math.abs(me.speed) / scale;
+    }
+    for (let i = 0; i < line.n; i++) {
+        const col = LINE_RGB[segmentColor(rl.phase[i], rl.speed[i], v, from === null ? null : aheadM(t.cum, from, i, scale))];
+        for (let k = i * 36; k < i * 36 + 36; k += 3) { c.array[k] = col.r; c.array[k + 1] = col.g; c.array[k + 2] = col.b; }
+    }
+    c.needsUpdate = true;
+}
+
 function buildWorld(t) {
     applyLevel(resolveLevel(store.get('lanrace.quality') || 'auto', store.get('lanrace.quality.auto')));
     if (world) {
@@ -542,6 +625,7 @@ function buildWorld(t) {
     // Thin dark outer edge on the kerbs so they read at speed
     world.add(strip(path, half + kerbW - 0.2 * scale, half + kerbW, 0.72, (i) => curvy[i], solid('#5a1414')));
     world.add(strip(path, -half - kerbW, -half - kerbW + 0.2 * scale, 0.72, (i) => curvy[i], solid('#5a1414')));
+    buildRacingLine(t);
 
     // Barriers exactly where the physics wall is; skipped where another part of the track is closer
     const wallOff = half + WALL_OFFSET;
@@ -1027,6 +1111,7 @@ function frame(now) {
         updateHUD(now - lastTower > 250);
         if (now - lastTower > 250) lastTower = now;
         drawMinimap();
+        colourLine();
         lastHud = now;
     }
 

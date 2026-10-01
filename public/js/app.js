@@ -27,6 +27,13 @@ graphicsSelect.addEventListener('change', () => {
     document.getElementById('graphics-note').textContent = graphicsSelect.value === 'high' || window.lanraceQuality?.level === 'high'
         ? ' Applies next race (anti-aliasing after a page reload)' : ' Applies next race';
 });
+const lineSelect = document.getElementById('line-select');
+try { lineSelect.value = localStorage.getItem('lanrace.line') || 'corners'; } catch (e) { /* storage blocked: default */ }
+if (!lineSelect.value) lineSelect.value = 'corners';
+lineSelect.addEventListener('change', () => {
+    (window.lanraceMem ||= {})['lanrace.line'] = lineSelect.value; // applies even when storage is blocked
+    try { localStorage.setItem('lanrace.line', lineSelect.value); } catch (e) { /* not remembered */ }
+});
 
 let isJoined = false;
 let amReady = false;
