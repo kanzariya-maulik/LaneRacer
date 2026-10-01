@@ -76,7 +76,7 @@ function step(car, input, dt, scale, offTrack = false, assist = 'off') {
     let vl = -vx * fy + vy * fx;
     vl -= Math.sign(vl) * Math.min(Math.abs(vl), latAccel * dt);
 
-    const drag = 0.5 * C.RHO * C.CDA * v * v;
+    const drag = 0.5 * C.RHO * C.CDA * (car.dragMul ?? 1) * v * v; // dragMul: DRS / slipstream
     const before = vf;
     vf += (ft / C.MASS - (drag / C.MASS + roll) * Math.sign(vf)) * dt;
     if (input.brake > 0 && before > 0 && vf < 0) vf = 0;                                         // brakes stop, don't reverse

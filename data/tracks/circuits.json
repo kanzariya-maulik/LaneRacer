@@ -4,49 +4,54 @@
     "poleSide": "left",
     "limiterStartM": 60,
     "limiterEndM": 677,
-    "sources": ["start line: TUMFTM row 0 (assumed)", "pole side: web search 2026-10-01", "limiter: 60 m inside each end of OSM way 38168747", "sectors: by landmark from F1 circuit maps (S2 after Curva Grande before Roggia, S3 on the Serraglio straight before Ascari)"],
-    "unconfirmed": ["startLineM", "poleSide", "limiterStartM", "limiterEndM", "garage order direction", "sector2M", "sector3M"],
+    "sources": ["start line: TUMFTM row 0 (assumed)", "pole side: web search 2026-10-01", "limiter: 60 m inside each end of OSM way 38168747", "sectors: by landmark from F1 circuit maps (S2 after Curva Grande before Roggia, S3 on the Serraglio straight before Ascari)", "DRS: main straight from Parabolica exit (detect before Parabolica); Serraglio straight to Ascari (detect after Lesmo 2) — [detectM, startM, endM] from the start line"],
+    "unconfirmed": ["startLineM", "poleSide", "limiterStartM", "limiterEndM", "garage order direction", "sector2M", "sector3M", "drs"],
     "sector2M": 2000,
-    "sector3M": 3900
+    "sector3M": 3900,
+    "drs": [[5000, 5400, 800], [3000, 3150, 3800]]
   },
   "spa": {
     "startLineM": 0,
     "poleSide": "left",
     "limiterStartM": 60,
     "limiterEndM": 657,
-    "sources": ["start line: TUMFTM row 0 (assumed; OSM start node is 1414 m off and ignored)", "pole side: web search 2026-10-01 (conflicts with the inside-of-La-Source rule, which gives right)", "limiter: 60 m inside each end of OSM way 323851541", "sectors: by landmark (S2 end of Kemmel before Les Combes, S3 after Stavelot before Blanchimont)"],
-    "unconfirmed": ["startLineM", "poleSide", "limiterStartM", "limiterEndM", "garage order direction", "sector2M", "sector3M"],
+    "sources": ["start line: TUMFTM row 0 (assumed; OSM start node is 1414 m off and ignored)", "pole side: web search 2026-10-01 (conflicts with the inside-of-La-Source rule, which gives right)", "limiter: 60 m inside each end of OSM way 323851541", "sectors: by landmark (S2 end of Kemmel before Les Combes, S3 after Stavelot before Blanchimont)", "DRS: Kemmel straight (detect before Eau Rouge); main straight after the Bus Stop — [detectM, startM, endM] from the start line"],
+    "unconfirmed": ["startLineM", "poleSide", "limiterStartM", "limiterEndM", "garage order direction", "sector2M", "sector3M", "drs"],
     "sector2M": 2300,
-    "sector3M": 5300
+    "sector3M": 5300,
+    "drs": [[900, 1400, 2300], [6650, 6880, 250]]
   },
   "silverstone": {
     "startLineM": 135,
     "poleSide": "left",
     "limiterStartM": 430,
     "limiterEndM": 1075,
-    "sources": ["start line: OSM node raceway=start/finish, aligned onto TUMFTM (+135 m, 2.5 m off-centre)", "pole side: web search 2026-10-01", "limiter: where OSM way 227902927 meets the straight (430 m) to 50 m before its end", "sectors: by landmark (S2 on Wellington Straight, S3 at the start of Hangar Straight)"],
-    "unconfirmed": ["poleSide", "limiterStartM", "limiterEndM", "garage order direction", "sector2M", "sector3M"],
+    "sources": ["start line: OSM node raceway=start/finish, aligned onto TUMFTM (+135 m, 2.5 m off-centre)", "pole side: web search 2026-10-01", "limiter: where OSM way 227902927 meets the straight (430 m) to 50 m before its end", "sectors: by landmark (S2 on Wellington Straight, S3 at the start of Hangar Straight)", "DRS: Wellington Straight (detect before Village); Hangar Straight (detect before Maggotts) — [detectM, startM, endM] from the start line"],
+    "unconfirmed": ["poleSide", "limiterStartM", "limiterEndM", "garage order direction", "sector2M", "sector3M", "drs"],
     "sector2M": 1500,
-    "sector3M": 4100
+    "sector3M": 4100,
+    "drs": [[700, 1200, 1750], [2900, 4000, 4800]]
   },
   "suzuka": {
     "startLineM": 0,
     "poleSide": "right",
     "limiterStartM": 60,
     "limiterEndM": 826,
-    "sources": ["start line: TUMFTM row 0 (assumed)", "pole side: web search 2026-10-01", "limiter: 60 m inside each end of OSM way 120917578", "sectors: by landmark (S2 between Dunlop and Degner 1, S3 on the back straight after Spoon)"],
-    "unconfirmed": ["startLineM", "poleSide", "limiterStartM", "limiterEndM", "garage order direction", "sector2M", "sector3M"],
+    "sources": ["start line: TUMFTM row 0 (assumed)", "pole side: web search 2026-10-01", "limiter: 60 m inside each end of OSM way 120917578", "sectors: by landmark (S2 between Dunlop and Degner 1, S3 on the back straight after Spoon)", "DRS: main straight after the chicane — [detectM, startM, endM] from the start line"],
+    "unconfirmed": ["startLineM", "poleSide", "limiterStartM", "limiterEndM", "garage order direction", "sector2M", "sector3M", "drs"],
     "sector2M": 2200,
-    "sector3M": 4500
+    "sector3M": 4500,
+    "drs": [[5450, 5700, 550]]
   },
   "sakhir": {
     "startLineM": 0,
     "poleSide": "right",
     "limiterStartM": 60,
     "limiterEndM": 711,
-    "sources": ["start line: TUMFTM row 0 (assumed)", "pole side: web search 2026-10-01", "limiter: 60 m inside each end of OSM way 187123422", "sectors: by landmark (S2 between T4 and T5, S3 between T12 and T13)"],
-    "unconfirmed": ["startLineM", "poleSide", "limiterStartM", "limiterEndM", "garage order direction", "sector2M", "sector3M"],
+    "sources": ["start line: TUMFTM row 0 (assumed)", "pole side: web search 2026-10-01", "limiter: 60 m inside each end of OSM way 187123422", "sectors: by landmark (S2 between T4 and T5, S3 between T12 and T13)", "DRS: main straight, T3–T4 (shared detection before T14), back straight T10–T11 (detect before T9) — [detectM, startM, endM] from the start line"],
+    "unconfirmed": ["startLineM", "poleSide", "limiterStartM", "limiterEndM", "garage order direction", "sector2M", "sector3M", "drs"],
     "sector2M": 1650,
-    "sector3M": 4000
+    "sector3M": 4000,
+    "drs": [[4850, 5150, 650], [4850, 1050, 1450], [2600, 2850, 3350]]
   }
 }

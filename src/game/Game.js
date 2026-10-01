@@ -14,6 +14,10 @@ const LIMIT_WARNINGS = 2;    // race: violations before penalties start
 const LIMIT_PENALTY_S = 5;
 const JUMP_PENALTY_S = 5;     // moving before lights out
 const JUMP_MOVE_M = 0.5;      // further than this from the grid slot = moved
+const DRS_GAP_S = 1;          // race: within this of the car ahead at the detection point
+const DRS_DRAG = 0.85;        // drag with the flap open (~+15 km/h top speed)
+const SLIP_MAX = 0.2;         // drag cut right behind another car…
+const SLIP_MIN_M = 5, SLIP_RANGE_M = 40, SLIP_LAT_M = 3; // …fading out by 40 m behind, only roughly in line
 
 // Distance along the pit lane of a nearestOnPath result
 const pitAlong = (pit, n) => pit.cum[n.i] + n.t * (pit.cum[n.i + 1] - pit.cum[n.i]);
@@ -47,6 +51,7 @@ class Game {
         this.loopPath = null;
         this.winnerCount = 0;
         this.bestSectors = [null, null, null]; // session bests, valid laps only
+        this.lastDetect = [];                  // per DRS zone: time the last car crossed its detection point
 
         const cpCount = track.checkpoints.length;
         this.players = {};
@@ -63,6 +68,7 @@ class Game {
                 inPit: false, limiter: false, pitS: 0,
                 limits: 0, penalty: 0, offLimits: false, finishTime: null,
                 lastSafeX: slot.x, lastSafeY: slot.y, gridX: slot.x, gridY: slot.y, jumpStart: false, reacted: false,
+                drs: false, drsAvailable: false, drsEligible: [], tow: 0, lapS: null,
                 lap: 0,
                 // Race cars sit behind the line having "passed" checkpoint 0; quali cars must cross it to start a lap
                 checkpoint: mode === 'quali' ? cpCount - 1 : 0,
@@ -153,6 +159,45 @@ class Game {
         this.loopPath = null;
     }
 
+    // DRS: race — within 1 s of the car ahead at a zone's detection point, from lap 2; quali — free in the zones.
+    // The driver opens it with the button; braking or leaving the zone closes it.
+    updateDrs(p, prevS, curS) {
+        const t = this.track, total = t.cum[t.path.length], race = this.mode === 'race';
+        const passed = (x) => {
+            const step = (curS - prevS + total) % total, d = (x - prevS + total) % total;
+            return step < total / 2 && d > 0 && d <= step;
+        };
+        const inZone = (z) => (z.startS <= z.endS ? curS >= z.startS && curS < z.endS : curS >= z.startS || curS < z.endS);
+        let available = false;
+        t.drsZones.forEach((z, k) => {
+            if (race && passed(z.detectS)) {
+                p.drsEligible[k] = this.time - (this.lastDetect[k] ?? -Infinity) <= DRS_GAP_S;
+                this.lastDetect[k] = this.time;
+            }
+            if (inZone(z) && !p.inPit && (!race || (p.lap >= 1 && p.drsEligible[k]))) available = true;
+        });
+        p.drsAvailable = available;
+        if (!available || p.input.brake > 0) p.drs = false;
+        else if (p.input.drs) p.drs = true;
+    }
+
+    // Slipstream: drag cut for a car close behind another, roughly in line and pointing the same way
+    updateTow() {
+        const list = Object.values(this.players), sc = this.track.scale;
+        for (const p of list) {
+            p.tow = 0;
+            if (p.finished) continue;
+            const fx = Math.cos(p.angle), fy = Math.sin(p.angle);
+            for (const o of list) {
+                if (o === p || o.finished) continue;
+                const dx = o.x - p.x, dy = o.y - p.y;
+                const ahead = (dx * fx + dy * fy) / sc, side = Math.abs(-dx * fy + dy * fx) / sc;
+                if (ahead < SLIP_MIN_M || ahead > SLIP_RANGE_M || side > SLIP_LAT_M || Math.cos(o.angle - p.angle) < 0.9) continue;
+                p.tow = Math.max(p.tow, SLIP_MAX * (1 - (ahead - SLIP_MIN_M) / (SLIP_RANGE_M - SLIP_MIN_M)));
+            }
+        }
+    }
+
     // Moved off the grid slot before lights out: +5 s, once
     checkJumpStart(p) {
         if (p.jumpStart || Math.hypot(p.x - p.gridX, p.y - p.gridY) <= JUMP_MOVE_M * this.track.scale) return;
@@ -180,6 +225,7 @@ class Game {
         const before = Physics.nearestOnTrack(p.x, p.y, t), beforePit = nearPit(p.x, p.y);
         const grass = before.dist > t.width / 2 + KERB_M * scale && !(beforePit && beforePit.dist <= pit.width / 2 && pitAlong(pit, beforePit) >= pit.closeS);
         const input = p.assist === 'full' && !p.inPit ? Assist.brakeAssist(p, p.input, t, before) : p.input;
+        p.dragMul = (p.drs ? DRS_DRAG : 1) * (1 - p.tow);
         CarPhysics.step(p, input, this.dt, scale, grass, p.assist);
 
         // Pit wall: a move across it is undone
@@ -223,6 +269,11 @@ class Game {
         if (pit) this.updatePit(p, after, afterPit);
         this.checkLimits(p, after);
 
+        const total = t.cum[t.path.length];
+        const lapS = (((t.cum[after.i] + after.t * (t.cum[after.i + 1] - t.cum[after.i]) - t.startS) % total) + total) % total;
+        this.updateDrs(p, p.lapS ?? lapS, lapS);
+        p.lapS = lapS;
+
         if ([p.x, p.y, p.vx, p.vy, p.angle].every(Number.isFinite)) {
             p.lastSafeX = p.x;
             p.lastSafeY = p.y;
@@ -256,6 +307,7 @@ class Game {
         const ids = Object.keys(this.players);
         {
             if (!this.frozen) this.time += this.dt; // race clock starts at lights out
+            if (this.mode === 'race') this.updateTow();
             for (const id of ids) {
                 const p = this.players[id];
                 if (p.finished) continue; // finished race cars and parked quali cars stay put
@@ -283,7 +335,7 @@ class Game {
         for (const id in this.players) {
             const p = this.players[id];
             stateSync[id] = {
-                x: p.x, y: p.y, angle: p.angle, speed: p.speed, steer: p.steer, inPit: p.inPit, limiter: p.limiter,
+                x: p.x, y: p.y, angle: p.angle, speed: p.speed, steer: p.steer, inPit: p.inPit, limiter: p.limiter, drs: p.drs, drsAvailable: p.drsAvailable,
                 lap: p.lap, checkpoint: p.checkpoint, rank: p.rank, finished: p.finished,
                 gap: p.gap, lapsDown: p.lapsDown, lastLap: p.lastLap, bestLap: p.bestLap,
                 curLap: p.lapStart === null || p.finished ? null : this.time - p.lapStart,

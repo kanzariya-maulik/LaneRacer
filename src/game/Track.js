@@ -129,7 +129,11 @@ function build(raw, circuit = {}) {
         startPositions.push(lateral(p, (i % 2 === 0 ? pole : -pole) * (width / 4)));
     }
 
-    const track = { id: raw.id, name: raw.name, scale, width, path: pts, cum, start, checkpoints, sectorCps, startPositions, safeSpeed: Assist.safeSpeeds(pts, scale), pit: null };
+    // DRS zones as lap distances from the start line (world units)
+    const lapS = (m) => ((((m * scale) % total) + total) % total);
+    const drsZones = (circuit.drs || []).map(([d, a, b]) => ({ detectS: lapS(d), startS: lapS(a), endS: lapS(b) }));
+
+    const track = { id: raw.id, name: raw.name, scale, width, path: pts, cum, start, startS, drsZones, checkpoints, sectorCps, startPositions, safeSpeed: Assist.safeSpeeds(pts, scale), pit: null };
     if (raw.pit) track.pit = buildPit(raw, circuit, track);
     return track;
 }

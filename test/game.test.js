@@ -80,7 +80,7 @@ test('game_state fields', () => {
     const g = new Game(spyIo, [lp('a')], monza, RACE, () => {});
     g.update();
     assert.deepStrictEqual(Object.keys(sent.a).sort(),
-        ['angle', 'bestLap', 'bestLapSectors', 'checkpoint', 'curLap', 'finished', 'gap', 'ghost', 'inPit', 'lap', 'lapValid', 'lapsDown', 'lastLap', 'lastValid', 'limiter', 'penalty', 'rank', 'speed', 'steer', 'x', 'y']);
+        ['angle', 'bestLap', 'bestLapSectors', 'checkpoint', 'curLap', 'drs', 'drsAvailable', 'finished', 'gap', 'ghost', 'inPit', 'lap', 'lapValid', 'lapsDown', 'lastLap', 'lastValid', 'limiter', 'penalty', 'rank', 'speed', 'steer', 'x', 'y']);
     assert.strictEqual(sent.a.rank, 1);
     assert.strictEqual(sent.a.ghost, false);
 });
@@ -733,4 +733,73 @@ test('waiting for the lights: no penalty, and the reaction time is reported', ()
     const r = events.filter(([ev]) => ev === 'reaction').map(([, d]) => d);
     assert.strictEqual(r.length, 1);
     assert.ok(Math.abs(r[0].time - 0.25) < 0.02, `reaction ${r[0].time}`);
+});
+
+// DRS zone 0 at Monza is the main straight; s values are lap distances from the start line
+const Z = () => monza.drsZones[0];
+const lapPos = (s) => { const q = Track.pointAt(monza.path, monza.cum, monza.startS + s); return { x: q.x, y: q.y, angle: q.angle }; };
+
+test('DRS: within 1 s at detection, from lap 2, opens on the button, closes on the brake', () => {
+    const g = new Game(io, [lp('a'), lp('b', 'haas')], monza, RACE, () => {});
+    g.release();
+    const { a, b } = g.players, z = Z(), d = z.detectS, sc = monza.scale;
+    a.lap = b.lap = 1;
+    g.time = 50; g.updateDrs(a, d - sc, d + sc);           // a crosses detection first: nobody ahead
+    g.time = 50.6; g.updateDrs(b, d - sc, d + sc);         // b 0.6 s behind: eligible
+    const inZone = z.startS + 50 * sc;
+    b.input = { throttle: 1, brake: 0, steer: 0, drs: false };
+    g.updateDrs(b, inZone - sc, inZone);
+    assert.ok(b.drsAvailable && !b.drs, 'available but not opened yet');
+    b.input.drs = true;
+    g.updateDrs(b, inZone, inZone + sc);
+    assert.ok(b.drs, 'button opens DRS');
+    b.input = { throttle: 0, brake: 1, steer: 0, drs: true };
+    g.updateDrs(b, inZone + sc, inZone + 2 * sc);
+    assert.ok(!b.drs, 'braking closes DRS');
+    a.input = { throttle: 1, brake: 0, steer: 0, drs: true };
+    g.updateDrs(a, inZone - sc, inZone);
+    assert.ok(!a.drsAvailable && !a.drs, 'leader has no DRS');
+});
+
+test('DRS: not on lap 1, and more than 1 s behind is not enough', () => {
+    const g = new Game(io, [lp('a'), lp('b', 'haas')], monza, RACE, () => {});
+    g.release();
+    const { a, b } = g.players, z = Z(), d = z.detectS, sc = monza.scale, inZone = z.startS + 50 * sc;
+    g.time = 20; g.updateDrs(a, d - sc, d + sc);
+    g.time = 20.5; g.updateDrs(b, d - sc, d + sc);
+    b.input = { throttle: 1, brake: 0, steer: 0, drs: true };
+    g.updateDrs(b, inZone - sc, inZone);
+    assert.ok(!b.drs, 'no DRS on lap 1');
+    a.lap = b.lap = 1;
+    g.time = 100; g.updateDrs(a, d - sc, d + sc);
+    g.time = 101.5; g.updateDrs(b, d - sc, d + sc);
+    g.updateDrs(b, inZone - sc, inZone);
+    assert.ok(!b.drsAvailable, '1.5 s behind is too far');
+});
+
+test('DRS: free to use in the zones in qualifying', () => {
+    const g = new Game(io, [lp('a')], monza, QUALI, () => {}, 'quali');
+    const a = g.players.a, inZone = Z().startS + 50 * monza.scale;
+    a.input = { throttle: 1, brake: 0, steer: 0, drs: true };
+    g.updateDrs(a, inZone - monza.scale, inZone);
+    assert.ok(a.drs);
+    g.updateDrs(a, Z().endS + 10 * monza.scale, Z().endS + 11 * monza.scale);
+    assert.ok(!a.drs && !a.drsAvailable, 'closes after the zone');
+});
+
+test('slipstream: right behind another car cuts drag; alongside or far behind does not', () => {
+    const g = new Game(io, [lp('a'), lp('b', 'haas'), lp('c', 'mclaren')], monza, RACE, () => {});
+    g.release();
+    const { a, b, c } = g.players, sc = monza.scale;
+    Object.assign(a, lapPos(1000 * sc));
+    Object.assign(b, lapPos(985 * sc));    // 15 m behind a
+    Object.assign(c, lapPos(800 * sc));    // 200 m behind
+    g.updateTow();
+    assert.ok(b.tow > 0.05, `tow ${b.tow}`);
+    assert.strictEqual(a.tow, 0);
+    assert.strictEqual(c.tow, 0);
+    const side = lapPos(1000 * sc);
+    Object.assign(b, { x: side.x - Math.sin(side.angle) * 4 * sc, y: side.y + Math.cos(side.angle) * 4 * sc, angle: side.angle });
+    g.updateTow();
+    assert.strictEqual(b.tow, 0, 'alongside is no tow');
 });

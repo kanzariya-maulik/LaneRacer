@@ -168,3 +168,17 @@ for (const id of Track.TRACK_IDS) {
         assert.ok(Physics.nearestOnTrack(out.x, out.y, t).dist >= t.width / 2 + 80, 'gap around the barrier end');
     });
 }
+
+const DRS_COUNT = { monza: 2, spa: 2, silverstone: 2, suzuka: 1, sakhir: 3 };
+for (const id of Track.TRACK_IDS) {
+    test(`${id}: DRS zones on flat-out straights`, () => {
+        const t = tracks[id], total = t.cum[t.path.length];
+        assert.strictEqual(t.drsZones.length, DRS_COUNT[id]);
+        for (const z of t.drsZones) {
+            for (const s of [z.detectS, z.startS, z.endS]) assert.ok(s >= 0 && s < total);
+            // the activation point is on a straight: flat out there
+            const p = Track.pointAt(t.path, t.cum, t.startS + z.startS);
+            assert.strictEqual(t.safeSpeed[Physics.nearestOnTrack(p.x, p.y, t).i], 100, `${id} zone starts in a corner`);
+        }
+    });
+}

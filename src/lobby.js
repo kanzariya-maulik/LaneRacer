@@ -29,10 +29,10 @@ const num = (v, min, max) => (Number.isFinite(v) ? clamp(v, min, max) : 0);
 function sanitizeInput(input) {
     const i = input && typeof input === 'object' ? input : {};
     if ('throttle' in i || 'brake' in i || 'steer' in i) {
-        return { throttle: num(i.throttle, 0, 1), brake: num(i.brake, 0, 1), steer: num(i.steer, -1, 1) };
+        return { throttle: num(i.throttle, 0, 1), brake: num(i.brake, 0, 1), steer: num(i.steer, -1, 1), drs: i.drs === true };
     }
     // Legacy on/off keys from older clients
-    return { throttle: i.up ? 1 : 0, brake: i.down ? 1 : 0, steer: (i.right ? 1 : 0) - (i.left ? 1 : 0) };
+    return { throttle: i.up ? 1 : 0, brake: i.down ? 1 : 0, steer: (i.right ? 1 : 0) - (i.left ? 1 : 0), drs: false };
 }
 
 function canJoinTeam(players, teamId) {

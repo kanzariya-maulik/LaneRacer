@@ -42,14 +42,14 @@ test('sanitizeSettings clamps and ignores garbage', () => {
 });
 
 test('sanitizeInput clamps analog values', () => {
-    assert.deepStrictEqual(lobby.sanitizeInput({ throttle: 2, brake: -1, steer: -3 }), { throttle: 1, brake: 0, steer: -1 });
-    assert.deepStrictEqual(lobby.sanitizeInput({ throttle: 0.5, brake: NaN, steer: '1' }), { throttle: 0.5, brake: 0, steer: 0 });
-    assert.deepStrictEqual(lobby.sanitizeInput(null), { throttle: 0, brake: 0, steer: 0 });
+    assert.deepStrictEqual(lobby.sanitizeInput({ throttle: 2, brake: -1, steer: -3 }), { throttle: 1, brake: 0, steer: -1, drs: false });
+    assert.deepStrictEqual(lobby.sanitizeInput({ throttle: 0.5, brake: NaN, steer: '1' }), { throttle: 0.5, brake: 0, steer: 0, drs: false });
+    assert.deepStrictEqual(lobby.sanitizeInput(null), { throttle: 0, brake: 0, steer: 0, drs: false });
 });
 
 test('sanitizeInput legacy booleans', () => {
-    assert.deepStrictEqual(lobby.sanitizeInput({ up: true, left: 1 }), { throttle: 1, brake: 0, steer: -1 });
-    assert.deepStrictEqual(lobby.sanitizeInput({ down: true, right: true }), { throttle: 0, brake: 1, steer: 1 });
+    assert.deepStrictEqual(lobby.sanitizeInput({ up: true, left: 1 }), { throttle: 1, brake: 0, steer: -1, drs: false });
+    assert.deepStrictEqual(lobby.sanitizeInput({ down: true, right: true }), { throttle: 0, brake: 1, steer: 1, drs: false });
 });
 
 test('canJoinTeam rejects unknown team', () => {
@@ -77,4 +77,10 @@ test('pickRacers caps at 20 and skips spectators', () => {
     assert.strictEqual(racers.length, 20);
     assert.deepStrictEqual(overflow.map(p => p.id), ['p20', 'p21']);
     assert.ok(!racers.some(p => p.id === 'spec'));
+});
+
+test('sanitizeInput carries the DRS button as a strict boolean', () => {
+    assert.strictEqual(lobby.sanitizeInput({ throttle: 1, brake: 0, steer: 0, drs: true }).drs, true);
+    assert.strictEqual(lobby.sanitizeInput({ throttle: 1, brake: 0, steer: 0, drs: 'yes' }).drs, false);
+    assert.strictEqual(lobby.sanitizeInput({ up: true }).drs, false);
 });
