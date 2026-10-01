@@ -7,6 +7,7 @@ from math import radians
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from car_parts import PARTS, TEX_SIZE, WHEEL_RADIUS, POS_RANGE
+from car_shapes import f1_body
 
 ROOT = os.path.dirname(HERE)
 BUILD = os.path.join(HERE, 'build')
@@ -86,37 +87,8 @@ def join(objs, name):
     return o
 
 
-# ---------- body (X forward, Y left, Z up, metres) ----------
-parts = [
-    box('floor', -1.45, 1.15, -0.8, 0.8, 0.03, 0.08),
-    box('floor', 1.55, 1.65, -0.75, 0.75, 0.30, 0.33),      # front suspension arm
-    box('floor', -1.90, -1.80, -0.70, 0.70, 0.30, 0.33),    # rear suspension arm
-    loft('chassis', (-0.30, 0.36, 0.08, 0.62), (1.35, 0.30, 0.12, 0.58)),
-    loft('nose', (1.35, 0.30, 0.12, 0.58), (2.72, 0.09, 0.14, 0.30)),
-    loft('sidepods', (-1.00, 0.14, 0.10, 0.35), (0.55, 0.22, 0.10, 0.60), yc=0.55),
-    loft('sidepods', (-1.00, 0.14, 0.10, 0.35), (0.55, 0.22, 0.10, 0.60), yc=-0.55),
-    loft('engine', (-1.75, 0.12, 0.15, 0.42), (-0.30, 0.36, 0.10, 0.62)),
-    loft('engine', (-0.90, 0.08, 0.55, 0.75), (-0.05, 0.16, 0.60, 0.98)),   # airbox
-    box('engine', -2.30, -1.70, -0.15, 0.15, 0.15, 0.35),                   # gearbox / crash structure
-    loft('fin', (-1.65, 0.008, 0.42, 0.75), (-0.60, 0.008, 0.60, 0.78)),
-    box('fw_main', 2.45, 2.88, -0.95, 0.95, 0.05, 0.10),
-    box('fw_flap', 2.30, 2.60, -0.90, 0.90, 0.10, 0.17),
-    box('fw_end', 2.28, 2.90, 0.93, 0.97, 0.04, 0.30),
-    box('fw_end', 2.28, 2.90, -0.97, -0.93, 0.04, 0.30),
-    box('rw_main', -2.75, -2.42, -0.50, 0.50, 0.78, 0.86),
-    box('rw_flap', -2.72, -2.50, -0.50, 0.50, 0.88, 0.98),
-    box('rw_end', -2.80, -2.30, 0.50, 0.53, 0.35, 1.00),
-    box('rw_end', -2.80, -2.30, -0.53, -0.50, 0.35, 1.00),
-    box('rw_pillar', -2.55, -2.45, -0.02, 0.02, 0.30, 0.80),
-    box('halo', 0.55, 0.62, -0.02, 0.02, 0.58, 0.78),                       # halo centre pillar
-]
-bpy.ops.mesh.primitive_torus_add(major_radius=0.30, minor_radius=0.025, major_segments=24, minor_segments=8, location=(0.15, 0, 0.78))
-halo = bpy.context.active_object
-halo.scale = (1.4, 1.0, 1.0)
-bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
-parts.append(tag(halo, 'halo'))
-bpy.ops.mesh.primitive_uv_sphere_add(segments=16, ring_count=8, radius=0.13, location=(0.18, 0, 0.74))
-parts.append(tag(bpy.context.active_object, 'helmet'))
+# ---------- body (X forward, Y left, Z up, metres): modern ground-effect F1 car ----------
+parts = f1_body(PARTS)
 
 body = join(parts, 'body')
 bpy.context.scene.cursor.location = (0, 0, 0)
@@ -128,13 +100,10 @@ bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
 bm.to_mesh(body.data)
 bm.free()
 
-bevel = body.modifiers.new('bevel', 'BEVEL')
-bevel.width = 0.012
-bevel.segments = 2
-bevel.limit_method = 'ANGLE'
-bpy.ops.object.modifier_apply(modifier=bevel.name)
+# No bevel: it tripled the triangles on the new curved parts. Smooth-by-angle shading gives the curves for free.
 
 body.data.materials.append(LIVERY)
+bpy.ops.object.shade_smooth_by_angle(angle=radians(35))
 
 bpy.ops.object.mode_set(mode='EDIT')
 bpy.ops.mesh.select_all(action='SELECT')
@@ -144,21 +113,41 @@ bpy.ops.object.mode_set(mode='OBJECT')
 
 # ---------- wheels ----------
 def wheel(name, x, y, width):
-    objs = []
-    for radius, depth, mat in ((WHEEL_RADIUS, width, TYRE), (WHEEL_RADIUS * 0.62, width + 0.01, RIM)):
-        bpy.ops.mesh.primitive_cylinder_add(vertices=24, radius=radius, depth=depth,
-                                            location=(x, y, WHEEL_RADIUS), rotation=(radians(90), 0, 0))
-        o = bpy.context.active_object
-        bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
-        o.data.materials.append(mat)
-        objs.append(o)
-    return join(objs, name)  # origin = tyre centre, so it spins in place
+    bpy.ops.mesh.primitive_cylinder_add(vertices=32, radius=WHEEL_RADIUS, depth=width,
+                                        location=(x, y, WHEEL_RADIUS), rotation=(radians(90), 0, 0))
+    tyre = bpy.context.active_object
+    bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
+    bev = tyre.modifiers.new('shoulder', 'BEVEL')   # rounded low-profile sidewall
+    bev.width = 0.045
+    bev.segments = 3
+    bpy.ops.object.modifier_apply(modifier=bev.name)
+    tyre.data.materials.append(TYRE)
+    bpy.ops.mesh.primitive_cylinder_add(vertices=32, radius=WHEEL_RADIUS * 0.72, depth=width + 0.008,
+                                        location=(x, y, WHEEL_RADIUS), rotation=(radians(90), 0, 0))
+    cover = bpy.context.active_object               # flat 2022-style wheel cover
+    bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
+    cover.data.materials.append(RIM)
+    return join([tyre, cover], name)  # tyre first: the game batches sub-mesh 0 as tyre, 1 as rim
 
 
 wheel('wheel_FL', 1.60, 0.80, 0.30)
 wheel('wheel_FR', 1.60, -0.80, 0.30)
 wheel('wheel_RL', -1.85, 0.78, 0.40)
 wheel('wheel_RR', -1.85, -0.78, 0.40)
+
+
+# ---------- checks: the game depends on these ----------
+body_tris = sum(len(p.vertices) - 2 for p in body.data.polygons)
+xs = [v.co.x for v in body.data.vertices]; ys = [v.co.y for v in body.data.vertices]; zs = [v.co.z for v in body.data.vertices]
+print(f'body ~{body_tris} triangles, x {min(xs):.2f}..{max(xs):.2f} y {min(ys):.2f}..{max(ys):.2f} z {min(zs):.2f}..{max(zs):.2f}')
+if body_tris > 8000:
+    raise SystemExit(f'body has {body_tris} triangles, budget 8000')
+if min(xs) < -2.95 or max(xs) > 2.95 or min(ys) < -1.0 or max(ys) > 1.0 or min(zs) < 0 or max(zs) > 1.05:
+    raise SystemExit('body leaves its size box (x ±2.95, y ±1.0, z 0–1.05 m)')
+for name, (wx, wy) in {'wheel_FL': (1.60, 0.80), 'wheel_FR': (1.60, -0.80), 'wheel_RL': (-1.85, 0.78), 'wheel_RR': (-1.85, -0.78)}.items():
+    w = bpy.data.objects[name]
+    if abs(w.location.x - wx) > 1e-3 or abs(w.location.y - wy) > 1e-3 or abs(w.location.z - WHEEL_RADIUS) > 1e-3:
+        raise SystemExit(f'{name} moved to {tuple(w.location)}')
 
 
 # ---------- bake lookup maps ----------
