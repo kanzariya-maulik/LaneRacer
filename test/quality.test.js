@@ -76,3 +76,19 @@ test('adaptStep: a drop that helps is kept and the next one is tried', () => {
     st = Q.adaptStep(st, 46);   // helped by 6 fps, still slow → 0.8
     assert.strictEqual(st.ratio, 0.8);
 });
+
+test('snapToTexel: shadow camera moves in whole shadow-map texels (no shimmer)', () => {
+    const step = 720 / 2048;
+    for (const v of [0, 12.34, -987.6, 5000.01]) {
+        const s = Q.snapToTexel(v, 720, 2048);
+        assert.ok(Math.abs(s / step - Math.round(s / step)) < 1e-6, `${v} → ${s} not on the grid`);
+        assert.ok(Math.abs(s - v) <= step / 2 + 1e-9);
+    }
+});
+
+test('frameCapped: a steady 30 fps (Energy Saver) is detected, real slowness is not', () => {
+    assert.strictEqual(Q.frameCapped([30, 30, 29.8, 30.1, 30, 30]), true);
+    assert.strictEqual(Q.frameCapped([30, 30, 30]), false, 'needs 6 seconds');
+    assert.strictEqual(Q.frameCapped([24, 31, 27, 35, 29, 33]), false, 'jittery = GPU load, not a cap');
+    assert.strictEqual(Q.frameCapped([60, 60, 60, 60, 60, 60]), false);
+});

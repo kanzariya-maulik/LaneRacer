@@ -3,7 +3,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { keyboardStep, gamepadInput, changed } from './input.js';
-import { LEVELS, ratioRange, resolveLevel, autoPick, adaptStep } from './quality.js';
+import { LEVELS, ratioRange, resolveLevel, autoPick, adaptStep, snapToTexel, frameCapped } from './quality.js';
 import { placeScenery, seedOf } from './scenery.js';
 import { SnapshotBuffer, sample, project, decodeFlags, INTERP_S } from './netsync.js';
 import { gapText, driverCode, lapDelta } from './timing.js';
@@ -244,6 +244,8 @@ function coloredMesh(pos, col, uv = null, opts = {}) {
     const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({
         vertexColors: true, side: THREE.DoubleSide, roughness: 0.9, map: opts.map || null,
         transparent: opts.opacity !== undefined, opacity: opts.opacity ?? 1, depthWrite: opts.opacity === undefined,
+        // Flat layers only cm apart: a depth offset per layer stops them fighting (flickering) in the distance
+        polygonOffset: !!opts.layer, polygonOffsetFactor: -(opts.layer || 0), polygonOffsetUnits: -(opts.layer || 0) * 2,
     }));
     m.receiveShadow = true;
     return m;
@@ -514,7 +516,8 @@ function buildRacingLine(t) {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(pos.slice(), 3));
     g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 36), 3));
-    const mesh = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.75, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true }));
+    const mesh = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.75, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true,
+        polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -6 }));
     mesh.renderOrder = 1;        // over the tyre marks
     mesh.frustumCulled = false;  // hidden segments collapse to the origin, so the bounds are meaningless
     world.add(mesh);
@@ -590,15 +593,15 @@ function buildWorld(t) {
 
     world.add(strip(path, -half, half, 0.6, all, solid('#4a505a'), { map: asphaltTexture(), repeatM: 8 }));
     const inset = 0.5 * scale, line = 0.3 * scale;
-    world.add(strip(path, half - inset - line, half - inset, 0.9, all, solid('#f2f2f2')));
-    world.add(strip(path, -half + inset, -half + inset + line, 0.9, all, solid('#f2f2f2')));
+    world.add(strip(path, half - inset - line, half - inset, 0.9, all, solid('#f2f2f2'), { layer: 2 }));
+    world.add(strip(path, -half + inset, -half + inset + line, 0.9, all, solid('#f2f2f2'), { layer: 2 }));
 
     // Kerbs on corners (visual only), widened by 2 points so they don't flicker on and off
     const turny = path.map((_, i) => turnAngle(path, i) > KERB_TURN);
     const curvy = turny.map((_, i) => [-2, -1, 0, 1, 2].some((d) => turny[(i + d + n) % n]));
     const kerbW = 1.5 * scale;
-    world.add(strip(path, half, half + kerbW, 0.7, (i) => curvy[i], alternate('#d62828', '#f2f2f2')));
-    world.add(strip(path, -half - kerbW, -half, 0.7, (i) => curvy[i], alternate('#d62828', '#f2f2f2')));
+    world.add(strip(path, half, half + kerbW, 0.7, (i) => curvy[i], alternate('#d62828', '#f2f2f2'), { layer: 1 }));
+    world.add(strip(path, -half - kerbW, -half, 0.7, (i) => curvy[i], alternate('#d62828', '#f2f2f2'), { layer: 1 }));
 
     const scen = placeScenery(t, Q.scenery, seedOf(t.id));
     const onSlow = (side) => {
@@ -619,12 +622,12 @@ function buildWorld(t) {
             world.add(strip(path, inside * half * 0.15, inside * half * 0.55, 0.62, (i) => {
                 const len = (c.to - c.from + n) % n, k = (i - c.from + n) % n;
                 return k < len;
-            }, solid('#1a1c20'), { opacity: 0.35 }));
+            }, solid('#1a1c20'), { opacity: 0.35, layer: 1 }));
         }
     }
     // Thin dark outer edge on the kerbs so they read at speed
-    world.add(strip(path, half + kerbW - 0.2 * scale, half + kerbW, 0.72, (i) => curvy[i], solid('#5a1414')));
-    world.add(strip(path, -half - kerbW, -half - kerbW + 0.2 * scale, 0.72, (i) => curvy[i], solid('#5a1414')));
+    world.add(strip(path, half + kerbW - 0.2 * scale, half + kerbW, 0.72, (i) => curvy[i], solid('#5a1414'), { layer: 2 }));
+    world.add(strip(path, -half - kerbW, -half - kerbW + 0.2 * scale, 0.72, (i) => curvy[i], solid('#5a1414'), { layer: 2 }));
     buildRacingLine(t);
 
     // Barriers exactly where the physics wall is; skipped where another part of the track is closer
@@ -905,8 +908,10 @@ function updateCamera(dt) {
     camera.position.set(p.x - Math.cos(h) * CHASE_BACK_M * scale, CHASE_UP_M * scale, p.z - Math.sin(h) * CHASE_BACK_M * scale);
     look.set(p.x + Math.cos(h) * LOOK_AHEAD_M * scale, 1 * scale, p.z + Math.sin(h) * LOOK_AHEAD_M * scale);
     camera.lookAt(look);
-    sun.position.set(p.x + 600, 1800, p.z + 400);
-    sun.target.position.copy(p);
+    // Moved in whole shadow-map texels so shadow edges don't shimmer as the car drives
+    const sx = snapToTexel(p.x, 720, Q.shadows || 1024), sz = snapToTexel(p.z, 720, Q.shadows || 1024);
+    sun.position.set(sx + 600, 1800, sz + 400);
+    sun.target.position.set(sx, 0, sz);
 }
 
 // ---------- HUD + minimap ----------
@@ -1091,6 +1096,7 @@ function drawMinimap() {
 // ---------- loop ----------
 let last = performance.now();
 let fpsFrames = 0, fpsSince = performance.now(), lastHud = 0, lastTower = 0;
+const fpsHist = []; let capWarned = false; // steady 30 fps = browser frame cap, told once per page
 let autoMs = 0, autoFrames = 0; // auto-pick: frame time while driving
 const stats = new URLSearchParams(location.search).has('stats') ? Object.assign(document.createElement('div'), { id: 'stats' }) : null;
 if (stats) document.body.appendChild(stats);
@@ -1133,6 +1139,12 @@ function frame(now) {
         const next = adaptStep(res, fps);
         if (next.ratio !== res.ratio) renderer.setPixelRatio(next.ratio);
         res = next;
+        fpsHist.push(fps);
+        if (fpsHist.length > 6) fpsHist.shift();
+        if (!capWarned && frameCapped(fpsHist)) {
+            capWarned = true;
+            window.showBanner?.('30 FPS CAP — plug in the charger or turn off Chrome Energy Saver');
+        }
         if (stats) stats.textContent = `${fps.toFixed(0)} fps · ${renderer.info.render.calls} calls · ${res.ratio.toFixed(2)}× · ${level}${choice === 'auto' ? ' (auto)' : ''}`;
         fpsFrames = 0;
         fpsSince = now;

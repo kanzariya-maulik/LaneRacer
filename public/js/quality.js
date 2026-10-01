@@ -43,3 +43,15 @@ export function adaptStep(st, fps) {
     if (good >= (st.need || 3) && st.ratio < st.max) return { ...st, ratio: Math.min(st.max, round(st.ratio + 0.05)), good: 0, need: 3 };
     return { ...st, good };
 }
+
+// Shadow camera position rounded to the shadow map's texel grid, so moving with the car doesn't make shadow edges crawl
+export function snapToTexel(v, frustumSize, mapSize) {
+    const step = frustumSize / mapSize;
+    return Math.round(v / step) * step;
+}
+
+// The last 6 one-second fps readings all within 1 fps of 30: the browser caps frames (Chrome Energy Saver, low battery)
+export function frameCapped(history) {
+    const last = history.slice(-6);
+    return last.length === 6 && last.every((f) => Math.abs(f - 30) <= 1);
+}
