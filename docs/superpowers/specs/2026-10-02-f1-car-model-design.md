@@ -72,7 +72,7 @@ In-game (headless, `?stats=1`):
 - No console errors.
 - Ghost transparency in qualifying, blob shadows on Low, and the wheel batch all still work.
 
-The existing `npm test` suite keeps passing. No test relies on the mesh itself; `test/assets.test.js` checks that the files exist.
+The existing `npm test` suite keeps passing. `test/assets.test.js` already checks that `car.glb` has a body, four wheels, livery UVs and no vertex colours, and that every team has a 1024² livery and a thumbnail.
 
 ## Out of scope
 
