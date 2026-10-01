@@ -23,10 +23,21 @@ export function autoPick(avgFrameMs, current, dpr) {
     return current;
 }
 
-// Once a second: below 50 fps drop resolution 0.1; above 58 fps for 3 s raise it 0.05 (10 s right after a drop, so it doesn't flip-flop)
+// Once a second: below 50 fps drop resolution 0.1; above 58 fps for 3 s raise it 0.05 (10 s right after a drop, so it doesn't flip-flop).
+// Each drop is a probe: if the next second isn't at least 3 fps faster, resolution isn't the bottleneck (a 30 fps cap,
+// battery saver), so the drop is undone and no more drops are tried this session.
 export function adaptStep(st, fps) {
     const round = (v) => Math.round(v * 100) / 100;
-    if (fps < 50) return { ...st, ratio: Math.max(st.min, round(st.ratio - 0.1)), good: 0, need: 10 };
+    if (st.probe !== undefined) {
+        const before = st.probe;
+        st = { ...st };
+        delete st.probe;
+        if (fps < before + 3) return { ...st, ratio: Math.min(st.max, round(st.ratio + 0.1)), good: 0, noDrop: true };
+    }
+    if (fps < 50) {
+        if (st.noDrop || st.ratio <= st.min) return { ...st, good: 0 };
+        return { ...st, ratio: Math.max(st.min, round(st.ratio - 0.1)), good: 0, need: 10, probe: fps };
+    }
     if (fps <= 58) return { ...st, good: 0 };
     const good = st.good + 1;
     if (good >= (st.need || 3) && st.ratio < st.max) return { ...st, ratio: Math.min(st.max, round(st.ratio + 0.05)), good: 0, need: 3 };

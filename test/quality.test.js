@@ -33,10 +33,11 @@ test('autoPick: slow → Low, fast → High, otherwise unchanged', () => {
 
 test('adaptStep: drops fast, recovers only after good seconds (10 after a drop, then 3), stays in range', () => {
     let st = { ratio: 1, min: 0.6, max: 1, good: 0 };
-    st = Q.adaptStep(st, 40);
+    st = Q.adaptStep(st, 10);
     assert.strictEqual(st.ratio, 0.9);
-    for (let i = 0; i < 10; i++) st = Q.adaptStep(st, 30);
+    for (let i = 1; i <= 10; i++) st = Q.adaptStep(st, 10 + i * 3); // each drop helps a little, still slow
     assert.strictEqual(st.ratio, 0.6);
+    st = Q.adaptStep(st, 50); // leaves the probe state
     for (let i = 0; i < 9; i++) st = Q.adaptStep(st, 60);
     assert.strictEqual(st.ratio, 0.6, 'not after 9 s');
     st = Q.adaptStep(st, 60);
@@ -57,4 +58,21 @@ test('adaptStep: after a drop, raising again needs a longer good streak (no flip
     assert.strictEqual(st.ratio, 0.9, 'raised again within 5 s of a drop');
     for (let i = 0; i < 5; i++) st = Q.adaptStep(st, 60);
     assert.strictEqual(st.ratio, 0.95, 'recovers after 10 good seconds');
+});
+
+test('adaptStep: when a drop does not raise fps (frame cap), it undoes the drop and stops lowering', () => {
+    let st = { ratio: 2, min: 0.75, max: 2, good: 0 };
+    st = Q.adaptStep(st, 30);
+    assert.strictEqual(st.ratio, 1.9, 'first drop is tried');
+    st = Q.adaptStep(st, 30);
+    assert.strictEqual(st.ratio, 2, 'no gain: back to where it was');
+    for (let i = 0; i < 20; i++) st = Q.adaptStep(st, 30);
+    assert.strictEqual(st.ratio, 2, 'capped frame rate never sinks the resolution');
+});
+
+test('adaptStep: a drop that helps is kept and the next one is tried', () => {
+    let st = { ratio: 1, min: 0.6, max: 1, good: 0 };
+    st = Q.adaptStep(st, 40);   // 0.9
+    st = Q.adaptStep(st, 46);   // helped by 6 fps, still slow → 0.8
+    assert.strictEqual(st.ratio, 0.8);
 });
