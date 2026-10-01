@@ -818,3 +818,13 @@ test('late joiners get every field from game_init', () => {
     const p = g.initPayload().players.a;
     for (const f of Game.META_FIELDS) assert.ok(f in p, `${f} missing from game_init`);
 });
+
+test('fast update clock keeps running through the race countdown; race time rides in g', () => {
+    const pkts = [];
+    const io2 = { emit() {}, volatile: { emit(ev, d) { if (ev === 'game_state') pkts.push(d); } } };
+    const g = new Game(io2, [lp('a'), lp('b', 'haas')], monza, RACE, () => {});
+    assert.ok(g.frozen, 'race starts frozen behind the lights');
+    g.update(); g.update();
+    assert.ok(pkts[1].t > pkts[0].t, `clock stuck at ${pkts[0].t}`);
+    assert.strictEqual(pkts[1].g, 0, 'race clock waits for lights out');
+});

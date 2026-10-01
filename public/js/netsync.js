@@ -1,8 +1,9 @@
 // Snapshot buffer + interpolation for the 60 Hz fast updates. Pure, shared by game3d.js and the node tests.
-// Packet: { s: seq, t: game time (s), c: [[idx, x, y, angle, speed, steer, flags], ...] }
+// Packet: { s: seq, t: session clock (s, never frozen), g: race time (s), c: [[idx, x, y, angle, speed, steer, flags], ...] }
 export const INTERP_S = 0.05;     // other cars are drawn this far behind server time
 export const EXTRAP_MAX_S = 0.1;  // past the newest snapshot, coast at most this long, then hold
 export const BUFFER_S = 1;
+const OFFSET_DRIFT = 0.05;        // how fast the clock estimate follows packets that arrive later than the best seen
 export const FLAGS = { inPit: 1, limiter: 2, drs: 4, drsAvailable: 8, finished: 16, lapValid: 32, ghost: 64 }; // matches Game.FLAGS
 
 export function decodeFlags(f) {
@@ -11,14 +12,15 @@ export function decodeFlags(f) {
     return o;
 }
 
-const toSnap = (pkt) => ({ s: pkt.s, t: pkt.t, cars: new Map(pkt.c.map((e) => [e[0], e])) });
+const toSnap = (pkt) => ({ s: pkt.s, t: pkt.t, g: pkt.g, cars: new Map(pkt.c.map((e) => [e[0], e])) });
 const lerpAngle = (a, b, k) => a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * k;
 const pose = (e) => ({ x: e[1], y: e[2], angle: e[3], speed: e[4], steer: e[5], flags: e[6] });
 
 export class SnapshotBuffer {
     constructor() {
         this.snaps = [];     // ordered by seq
-        this.newestAt = 0;   // arrival time (s) of the newest snapshot
+        this.offset = null;  // local arrival time minus server time, from the least-delayed packets
+        this.lastNow = -Infinity;
     }
 
     push(pkt, arrivalS) {
@@ -30,15 +32,25 @@ export class SnapshotBuffer {
             this.snaps.splice(i, 0, toSnap(pkt));
         } else {
             this.snaps.push(toSnap(pkt));
-            this.newestAt = arrivalS;
+            // Late packets only nudge the estimate, so jitter can't pull the clock back; the drift follows tick-rate skew
+            const o = arrivalS - pkt.t;
+            if (this.offset === null || o < this.offset) this.offset = o;
+            else this.offset += (o - this.offset) * OFFSET_DRIFT;
         }
         while (this.snaps.length > 2 && this.snaps.at(-1).t - this.snaps[0].t > BUFFER_S) this.snaps.shift();
         return true;
     }
 
     serverNow(nowS) {
+        if (this.offset === null) return 0;
+        this.lastNow = Math.max(this.lastNow, nowS - this.offset); // never runs backwards
+        return this.lastNow;
+    }
+
+    // Race time (lap timing) at server time serverT
+    gameTime(serverT) {
         const n = this.snaps.at(-1);
-        return n ? n.t + (nowS - this.newestAt) : 0;
+        return n ? (n.g ?? n.t) + (serverT - n.t) : 0;
     }
 
     latest() {

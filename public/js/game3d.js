@@ -741,7 +741,7 @@ function applyNet(nowS) {
         if (!pose) continue;
         const p = gs[id];
         Object.assign(p, { x: pose.x, y: pose.y, angle: pose.angle, speed: pose.speed, steer: pose.steer }, decodeFlags(pose.flags));
-        p.curLap = p.lapStart === null || p.lapStart === undefined || p.finished ? null : Math.max(0, serverT - p.lapStart);
+        p.curLap = p.lapStart === null || p.lapStart === undefined || p.finished ? null : Math.max(0, netBuf.gameTime(serverT) - p.lapStart);
     }
 }
 

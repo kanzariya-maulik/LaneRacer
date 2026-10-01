@@ -57,3 +57,22 @@ test('project pushes the own car forward along its heading, capped at 100 ms', (
 test('decodeFlags', () => {
     assert.deepStrictEqual(N.decodeFlags(1 | 4 | 64), { inPit: true, limiter: false, drs: true, drsAvailable: false, finished: false, lapValid: false, ghost: true });
 });
+
+test('late in-order arrivals never move a car backwards', () => {
+    const b = new N.SnapshotBuffer();
+    let seed = 1;
+    const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    const v = 80, tick = 1 / 60;
+    let pending = [], lastX = -Infinity, backward = 0;
+    for (let k = 0; k < 600; k++) {
+        const t = k * tick;
+        pending.push([t + 0.02 + rand() * 0.05, N.SnapshotBuffer && { s: k + 1, t, c: [car(0, v * t, 0, v)] }]);
+        const now = t + 0.5 * tick;
+        pending = pending.filter(([at, p]) => (at <= now ? (b.push(p, at), false) : true));
+        if (!b.latest()) continue;
+        const p = N.sample(b, b.serverNow(now) - N.INTERP_S, 0);
+        if (p.x < lastX - 1e-9) backward++;
+        lastX = Math.max(lastX, p.x);
+    }
+    assert.strictEqual(backward, 0, `${backward} frames went backwards`);
+});

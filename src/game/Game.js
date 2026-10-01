@@ -51,7 +51,8 @@ class Game {
         this.onFinish = onFinish;
         this.mode = mode;
         this.dt = 1 / TICK_RATE;
-        this.time = 0;                     // session clock (s); race clock starts at lights out
+        this.time = 0;                     // race clock (s), starts at lights out
+        this.clock = 0;                    // session clock (s) for client interpolation, never frozen
         this.frozen = mode === 'race';     // race: lights still on — cars can move, but that's a jump start
         this.loopPath = null;
         this.winnerCount = 0;
@@ -153,7 +154,7 @@ class Game {
                 | (p.lapValid && FLAGS.lapValid) | (this.mode === 'quali' && FLAGS.ghost);
             c.push([this.index[id], r1(p.x), r1(p.y), +p.angle.toFixed(4), r1(p.speed), +p.steer.toFixed(3), flags]);
         }
-        return { s: this.seq, t: +this.time.toFixed(3), c };
+        return { s: this.seq, t: +this.clock.toFixed(3), g: +this.time.toFixed(3), c };
     }
 
     // Slow fields, only those that changed since the last info update
@@ -342,6 +343,7 @@ class Game {
         const ids = Object.keys(this.players);
         {
             if (!this.frozen) this.time += this.dt; // race clock starts at lights out
+            this.clock += this.dt;
             if (this.mode === 'race') this.updateTow();
             for (const id of ids) {
                 const p = this.players[id];
