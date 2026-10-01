@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LAN Race 2D</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;900&display=swap" rel="stylesheet">
+</head>
+<body>
+
+    <!-- LOBBY SCREEN -->
+    <div id="lobby-screen" class="screen">
+        <div class="lobby-container">
+            <h1 class="glow-title">LAN RACE</h1>
+            
+            <div class="lobby-panels">
+                <!-- Left Panel: Profile & Settings -->
+                <div class="panel profile-panel">
+                    <h2>Your Profile</h2>
+                    <input type="text" id="username" placeholder="Username" maxlength="15">
+                    
+                    <div class="color-picker-container">
+                        <label style="margin-bottom:10px; display:block;">Car Color</label>
+                        <div id="color-swatches">
+                            <div class="swatch selected" style="background:#ef4444;" data-color="#ef4444"></div>
+                            <div class="swatch" style="background:#3b82f6;" data-color="#3b82f6"></div>
+                            <div class="swatch" style="background:#22c55e;" data-color="#22c55e"></div>
+                            <div class="swatch" style="background:#eab308;" data-color="#eab308"></div>
+                            <div class="swatch" style="background:#a855f7;" data-color="#a855f7"></div>
+                            <div class="custom-color-wrapper">
+                                <input type="color" id="car-color" value="#ff0044" class="custom-swatch">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <button id="btn-join" class="btn primary">Join Lobby</button>
+                    
+                    <div id="player-controls" class="hidden">
+                        <button id="btn-ready" class="btn">Ready Up</button>
+                        
+                        <div id="host-settings" class="hidden">
+                            <h3>Host Settings</h3>
+                            <label>Track:
+                                <select id="setting-track">
+                                    <option value="1">Beginner Oval</option>
+                                    <option value="2">Infinity Loop</option>
+                                    <option value="3">Twisty Circuit (Hard)</option>
+                                </select>
+                            </label>
+                            <label>Laps:
+                                <input type="number" id="setting-laps" min="1" max="50" value="3">
+                            </label>
+                            <label>Max Speed (KM/H):
+                                <input type="number" id="setting-speed" min="20" max="200" value="80">
+                            </label>
+                            <button id="btn-start" class="btn success mt-1">Start Race</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Middle Panel: Players -->
+                <div class="panel players-panel">
+                    <h2>Players</h2>
+                    <ul id="players-list">
+                        <!-- Filled by JS -->
+                    </ul>
+                </div>
+
+                <!-- Right Panel: Chat -->
+                <div class="panel chat-panel">
+                    <h2>Lobby Chat</h2>
+                    <div id="chat-messages"></div>
+                    <form id="chat-form">
+                        <input type="text" id="chat-input" placeholder="Type a message..." autocomplete="off">
+                        <button type="submit" class="btn small">Send</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- GAME SCREEN -->
+    <div id="game-screen" class="screen hidden">
+        <canvas id="game-canvas"></canvas>
+        
+        <!-- HUD -->
+        <div id="hud">
+            <div id="hud-top">
+                <div class="hud-box">Pos: <span id="hud-rank">1</span>/<span id="hud-total">1</span></div>
+                <div class="hud-box">Lap: <span id="hud-lap">1</span></div>
+            </div>
+            <div id="hud-bottom">
+                <div class="hud-speedometer"><span id="hud-speed">0</span> KM/H</div>
+            </div>
+            
+            <!-- Leaderboard (top right) -->
+            <div id="leaderboard">
+                <h3>Standings</h3>
+                <ol id="leaderboard-list"></ol>
+            </div>
+        </div>
+
+        <div id="joystick-zone">
+            <div id="joystick-base">
+                <div id="joystick-knob"></div>
+            </div>
+        </div>
+
+        <div id="countdown-overlay" class="hidden">
+            <h1 id="countdown-text">3</h1>
+        </div>
+        
+        <div id="spectator-overlay" class="hidden">
+            <h2>SPECTATING</h2>
+            <p>Race is currently in progress...</p>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="js/socket.js"></script>
+    <script src="js/game.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
