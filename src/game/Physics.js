@@ -1,4 +1,7 @@
-const CAR_HALF_LENGTH_M = 2.8; // car.glb body: front wing tip to rear wing
+// Collision box = car.glb from front wing tip (+2.92 m) to rear wing (−2.56 m), wheel to wheel (±0.98 m).
+// Its middle sits ahead of the car's origin (between the axles), so the box is offset forward.
+const CAR_HALF_LENGTH_M = 2.74;
+const CAR_CENTER_OFFSET_M = 0.18;
 const CAR_HALF_WIDTH_M = 1.0;
 const RESTITUTION = 0.3;
 
@@ -73,10 +76,10 @@ class Physics {
         return null;
     }
 
-    // How far the car's half-extent reaches along unit normal n (rectangle support distance)
+    // How far the car's box reaches from its origin along unit normal n (rectangle support distance, box offset forward)
     static carReach(car, nx, ny, scale) {
-        const fx = Math.cos(car.angle), fy = Math.sin(car.angle);
-        return scale * (CAR_HALF_LENGTH_M * Math.abs(fx * nx + fy * ny) + CAR_HALF_WIDTH_M * Math.abs(-fy * nx + fx * ny));
+        const fx = Math.cos(car.angle), fy = Math.sin(car.angle), along = fx * nx + fy * ny;
+        return scale * (CAR_HALF_LENGTH_M * Math.abs(along) + CAR_HALF_WIDTH_M * Math.abs(-fy * nx + fx * ny) + CAR_CENTER_OFFSET_M * along);
     }
 
     // Car rectangle against a wall polyline: deepest poke-through and the way out (n from wall to car)
@@ -88,7 +91,7 @@ class Physics {
             const t = Math.max(0, Math.min(1, ((car.x - a.x) * ex + (car.y - a.y) * ey) / l2));
             const dx = car.x - (a.x + t * ex), dy = car.y - (a.y + t * ey), d = Math.hypot(dx, dy);
             if (d < 1e-9) continue;
-            const nx = dx / d, ny = dy / d, depth = this.carReach(car, nx, ny, scale) - d;
+            const nx = dx / d, ny = dy / d, depth = this.carReach(car, -nx, -ny, scale) - d; // box reach toward the wall
             if (depth > 0 && (!best || depth > best.depth)) best = { nx, ny, depth };
         }
         return best;
@@ -96,8 +99,9 @@ class Physics {
 
     // Separating-axis test for two oriented car rectangles; normal points from b to a
     static carOverlap(a, b, scale) {
-        const hl = CAR_HALF_LENGTH_M * scale, hw = CAR_HALF_WIDTH_M * scale;
-        const dx = a.x - b.x, dy = a.y - b.y;
+        const hl = CAR_HALF_LENGTH_M * scale, hw = CAR_HALF_WIDTH_M * scale, off = CAR_CENTER_OFFSET_M * scale;
+        const dx = a.x + Math.cos(a.angle) * off - (b.x + Math.cos(b.angle) * off);
+        const dy = a.y + Math.sin(a.angle) * off - (b.y + Math.sin(b.angle) * off); // between box centres
         const reach = 2 * Math.hypot(hl, hw); // ~6 m: further apart can't touch
         if (dx * dx + dy * dy > reach * reach) return null;
         const radius = (c, n) => {
@@ -138,5 +142,6 @@ class Physics {
 
 Physics.CAR_HALF_LENGTH_M = CAR_HALF_LENGTH_M;
 Physics.CAR_HALF_WIDTH_M = CAR_HALF_WIDTH_M;
+Physics.CAR_CENTER_OFFSET_M = CAR_CENTER_OFFSET_M;
 
 module.exports = Physics;
