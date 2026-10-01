@@ -1,12 +1,13 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { keyboardStep, gamepadInput, changed } from './input.js';
+import { SnapshotBuffer, sample, project, decodeFlags, INTERP_S } from './netsync.js';
 
 // World units per metre come from the track JSON (track.scale = 6).
 const WHEEL_RADIUS_M = 0.36;  // scripts/car_parts.py WHEEL_RADIUS
 const WALL_OFFSET = 80;       // src/game/Player.js invisible wall beyond the track edge
 const CHASE_BACK_M = 10, CHASE_UP_M = 4, LOOK_AHEAD_M = 6;
-const CAR_SMOOTH = 25, CAM_TURN_SMOOTH = 8; // 1/s; time-based so lag doesn't grow at low frame rates
+const CAM_TURN_SMOOTH = 8; // 1/s; time-based so lag doesn't grow at low frame rates
 const KERB_TURN = 0.05;
 const TAG_FULL_M = 40, TAG_GONE_M = 120; // name labels fade out between these camera distances       // rad per path segment (~10 m) → radius under ~200 m gets kerbs
 const PIT_RUNOFF_M = 2; // src/game/Game.js barrier outside the pit lane
@@ -138,6 +139,7 @@ let scale = 6;
 let bounds = null;
 let snapCamera = true;
 const cars = {}; // playerId -> { root, wheels, teamId }
+let netBuf = new SnapshotBuffer();
 
 function getBounds(path) {
     const b = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
@@ -509,11 +511,9 @@ function updateCars(dt) {
             cars[id] = car;
         }
         const r = car.root;
-        const a = 1 - Math.exp(-CAR_SMOOTH * dt);
-        r.position.x += (s.x - r.position.x) * a;
-        r.position.z += (s.y - r.position.z) * a;
-        const d = -s.angle - r.rotation.y;
-        r.rotation.y += Math.atan2(Math.sin(d), Math.cos(d)) * a;
+        r.position.x = s.x;
+        r.position.z = s.y;
+        r.rotation.y = -s.angle;
         for (const w of car.wheels) w.rotation.z -= (s.speed / (WHEEL_RADIUS_M * scale)) * dt;
         // +steer turns toward +z (right); a +y rotation points the wheel toward -z, so negate
         car.wheels[0] && (car.wheels[0].rotation.y = -(s.steer || 0)); // wheel_FL
@@ -533,6 +533,24 @@ function updateCars(dt) {
                 o.material.opacity = ghost ? 0.5 : 1;
             });
         }
+    }
+}
+
+// Pose every car from the snapshot buffer: others 50 ms behind (smooth), own car projected to "now" (instant)
+function applyNet(nowS) {
+    for (const [pkt, at] of clientState.netIn.splice(0)) netBuf.push(pkt, at);
+    const latest = netBuf.latest(), gs = clientState.gameState;
+    if (!latest || !gs) return;
+    const serverT = netBuf.serverNow(nowS);
+    for (const id in gs) {
+        const i = clientState.netIndex[id];
+        if (i === undefined) continue;
+        const own = id === clientState.me && latest.cars.has(i);
+        const pose = own ? project(latest.cars.get(i), serverT - latest.t) : sample(netBuf, serverT - INTERP_S, i);
+        if (!pose) continue;
+        const p = gs[id];
+        Object.assign(p, { x: pose.x, y: pose.y, angle: pose.angle, speed: pose.speed, steer: pose.steer }, decodeFlags(pose.flags));
+        p.curLap = p.lapStart === null || p.lapStart === undefined || p.finished ? null : Math.max(0, serverT - p.lapStart);
     }
 }
 
@@ -740,6 +758,7 @@ function frame(now) {
     if (clientState.status === 'LOBBY') return;
     pollInput(dt, now);
     if (!world || !clientState.gameState) return;
+    applyNet(now / 1000);
     updateCars(dt);
     updateCamera(dt);
     renderer.render(scene, camera);
@@ -748,6 +767,7 @@ function frame(now) {
 }
 
 window.initGameVisuals = () => {
+    netBuf = new SnapshotBuffer();
     buildWorld(clientState.trackData);
     sendInput(performance.now(), true); // resend what's held when a new session starts
 };

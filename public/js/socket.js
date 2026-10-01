@@ -12,6 +12,8 @@ let clientState = {
     myBestSectors: [null, null, null],
     gameState: null,
     trackData: null, // static track geometry
+    netIn: [],       // fast updates waiting for game3d.js: [packet, arrival s]
+    netIndex: {},    // player id -> car index in fast updates
     session: null,      // { phase, endsAt } — endsAt in local ms, null for open-ended
     qualiResults: null,
     lastTiming: null,
@@ -62,7 +64,7 @@ function setupWebRTC() {
 
                     if (msg.type === 'STATE') {
                         // 60 Hz game state arriving over UDP
-                        mergeGameState(msg.data);
+                        onFastPacket(msg.data);
                     }
                 } catch (e) {}
             };
@@ -151,10 +153,9 @@ window.sendUDPInput = function(inputs) {
 };
 
 
-function mergeGameState(stateSync) {
-    for (const id in stateSync) {
-        if (clientState.gameState && clientState.gameState[id]) Object.assign(clientState.gameState[id], stateSync[id]);
-    }
+// Fast updates are queued; game3d.js drains them into its snapshot buffer every frame
+function onFastPacket(pkt) {
+    if (pkt && Array.isArray(pkt.c)) clientState.netIn.push([pkt, performance.now() / 1000]);
 }
 
 socket.on('connect', () => {
@@ -223,6 +224,8 @@ socket.on('status_change', (status) => {
 socket.on('game_init', (data) => {
     clientState.gameState = data.players;
     clientState.trackData = data.track;
+    clientState.netIndex = data.index || {};
+    clientState.netIn = [];
     clientState.sessionBest = [null, null, null];
     clientState.mySectors = [null, null, null];
     clientState.myBestSectors = [null, null, null];
@@ -231,8 +234,12 @@ socket.on('game_init', (data) => {
 
 // This comes in 60 times a second
 // Socket.IO game_state: fallback until the UDP channel is open
-socket.on('game_state', (stateSync) => {
-    if (!udpReady) mergeGameState(stateSync);
+socket.on('game_state', (pkt) => {
+    if (!udpReady) onFastPacket(pkt);
+});
+
+socket.on('game_meta', (diff) => {
+    for (const id in diff) if (clientState.gameState && clientState.gameState[id]) Object.assign(clientState.gameState[id], diff[id]);
 });
 
 socket.on('lights', ({ count }) => {
