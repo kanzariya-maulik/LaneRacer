@@ -23,9 +23,11 @@ const minimap = document.getElementById('minimap');
 const mm = minimap.getContext('2d');
 
 // ---------- renderer / scene ----------
+// localStorage, with an in-memory copy (shared with app.js) so choices still apply when storage is blocked
+const mem = (window.lanraceMem ||= {});
 const store = {
-    get: (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } },
-    set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* storage blocked: not remembered */ } },
+    get: (k) => { if (k in mem) return mem[k]; try { return localStorage.getItem(k); } catch (e) { return null; } },
+    set: (k, v) => { mem[k] = v; try { localStorage.setItem(k, v); } catch (e) { /* storage blocked: this page only */ } },
 };
 const choice = store.get('lanrace.quality') || 'auto';
 let level = resolveLevel(choice, store.get('lanrace.quality.auto'));
@@ -464,7 +466,16 @@ function buildWorld(t) {
     applyLevel(resolveLevel(store.get('lanrace.quality') || 'auto', store.get('lanrace.quality.auto')));
     if (world) {
         scene.remove(world);
-        world.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+        // Free GPU memory; shared caches (asphalt, blob, env map, liveries) are kept for the next world
+        const keep = new Set([asphaltTex, blobTex, envTex, ...Object.values(liveries)]);
+        world.traverse((o) => {
+            if (o.geometry) o.geometry.dispose();
+            if (o.isInstancedMesh) o.dispose();
+            for (const m of [].concat(o.material || [])) {
+                if (m.map && !keep.has(m.map)) m.map.dispose();
+                m.dispose();
+            }
+        });
     }
     for (const id in cars) delete cars[id];
     wheelBatch = null; // rebuilt in the new world
@@ -1010,7 +1021,10 @@ function frame(now) {
             store.set('lanrace.quality.auto', picked); // used from the next race
         }
     }
-    if (now - fpsSince >= 1000) {
+    if (now - fpsSince > 1500) { // lobby, loading or a background tab: not a real measurement
+        fpsFrames = 0;
+        fpsSince = now;
+    } else if (now - fpsSince >= 1000) {
         const fps = (fpsFrames * 1000) / (now - fpsSince);
         const next = adaptStep(res, fps);
         if (next.ratio !== res.ratio) renderer.setPixelRatio(next.ratio);

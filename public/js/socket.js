@@ -155,7 +155,9 @@ window.sendUDPInput = function(inputs) {
 
 // Fast updates are queued; game3d.js drains them into its snapshot buffer every frame
 function onFastPacket(pkt) {
-    if (pkt && Array.isArray(pkt.c)) clientState.netIn.push([pkt, performance.now() / 1000]);
+    if (!pkt || !Array.isArray(pkt.c)) return;
+    clientState.netIn.push([pkt, performance.now() / 1000]);
+    if (clientState.netIn.length > 120) clientState.netIn.shift(); // background tab: keep only the last 2 s
 }
 
 socket.on('connect', () => {

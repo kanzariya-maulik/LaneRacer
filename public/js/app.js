@@ -22,6 +22,7 @@ const graphicsSelect = document.getElementById('graphics-select');
 try { graphicsSelect.value = localStorage.getItem('lanrace.quality') || 'auto'; } catch (e) { /* storage blocked: Auto */ }
 if (!graphicsSelect.value) graphicsSelect.value = 'auto';
 graphicsSelect.addEventListener('change', () => {
+    (window.lanraceMem ||= {})['lanrace.quality'] = graphicsSelect.value; // applies even when storage is blocked
     try { localStorage.setItem('lanrace.quality', graphicsSelect.value); } catch (e) { /* not remembered */ }
     document.getElementById('graphics-note').textContent = graphicsSelect.value === 'high' || window.lanraceQuality?.level === 'high'
         ? ' Applies next race (anti-aliasing after a page reload)' : ' Applies next race';
