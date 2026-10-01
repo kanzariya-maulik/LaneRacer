@@ -8,6 +8,9 @@ const QUALI_LAPS = 2;       // flying laps after the out-lap
 const QUALI_MAX_S = 360;    // quali ends at this session time even if someone never finishes
 const PIT_LIMIT_KMH = 80;
 const PIT_RUNOFF_M = 2;     // barrier this far outside the pit lane edge
+const KERB_M = 1.5;          // kerbs past the track edge drive like asphalt
+const LIMIT_WARNINGS = 2;    // race: violations before penalties start
+const LIMIT_PENALTY_S = 5;
 
 // Barrier response: n points from the barrier back toward the car
 function bounce(p, nx, ny) {
@@ -49,6 +52,7 @@ class Game {
                 x: slot.x, y: slot.y, angle: slot.angle,
                 vx: 0, vy: 0, speed: 0, steer: 0,
                 inPit: false, limiter: false, pitS: 0,
+                limits: 0, penalty: 0, offLimits: false, finishTime: null,
                 lastSafeX: slot.x, lastSafeY: slot.y,
                 lap: 0,
                 // Race cars sit behind the line having "passed" checkpoint 0; quali cars must cross it to start a lap
@@ -150,7 +154,7 @@ class Game {
         const x0 = p.x, y0 = p.y;
         const nearPit = (x, y) => (pit ? Physics.nearestOnPath(x, y, pit.path, false) : null);
         const before = Physics.nearestOnTrack(p.x, p.y, t), beforePit = nearPit(p.x, p.y);
-        const grass = before.dist > t.width / 2 && !(beforePit && beforePit.dist <= pit.width / 2);
+        const grass = before.dist > t.width / 2 + KERB_M * scale && !(beforePit && beforePit.dist <= pit.width / 2);
         CarPhysics.step(p, p.input, this.dt, scale, grass);
 
         // Pit wall: a move across it is undone
@@ -177,6 +181,7 @@ class Game {
         }
 
         if (pit) this.updatePit(p, after, afterPit);
+        this.checkLimits(p, after);
 
         if ([p.x, p.y, p.vx, p.vy, p.angle].every(Number.isFinite)) {
             p.lastSafeX = p.x;
@@ -227,6 +232,7 @@ class Game {
             }
         }
 
+        if (this.mode === 'race' && !this.classified && ids.length && ids.every(id => this.players[id]?.finished)) this.classify();
         this.updateRanks();
 
         const stateSync = {};
@@ -237,7 +243,7 @@ class Game {
                 lap: p.lap, checkpoint: p.checkpoint, rank: p.rank, finished: p.finished,
                 gap: p.gap, lapsDown: p.lapsDown, lastLap: p.lastLap, bestLap: p.bestLap,
                 curLap: p.lapStart === null || p.finished ? null : this.time - p.lapStart,
-                lapValid: p.lapValid, lastValid: p.lastValid, bestLapSectors: p.bestLapSectors,
+                lapValid: p.lapValid, lastValid: p.lastValid, penalty: p.penalty, bestLapSectors: p.bestLapSectors,
                 ghost: this.mode === 'quali'
             };
         }
@@ -274,6 +280,39 @@ class Game {
                 p.gap = i > 0 && p.lapsDown === 0 && mine !== undefined && theirs !== undefined ? mine - theirs : null;
             }
         });
+    }
+
+    // All four wheels past the white line, once per excursion; pit lane, quali out-lap exempt
+    checkLimits(p, near) {
+        const t = this.track;
+        if (near.dist <= t.width / 2) { p.offLimits = false; return; }
+        if (p.offLimits || p.inPit || near.dist <= t.width / 2 + Physics.CAR_HALF_WIDTH_M * t.scale) return;
+        if (this.mode === 'quali' && (p.lapStart === null || p.finished)) return;
+        p.offLimits = true;
+        p.lapValid = false;
+        if (this.mode === 'quali') {
+            this.io.emit('track_limits', { id: p.id, kind: 'deleted' });
+            return;
+        }
+        p.limits++;
+        if (p.limits <= LIMIT_WARNINGS) {
+            this.io.emit('track_limits', { id: p.id, kind: 'warning', count: p.limits });
+            return;
+        }
+        p.penalty += LIMIT_PENALTY_S;
+        this.io.emit('track_limits', { id: p.id, kind: 'penalty', penalty: p.penalty });
+        this.io.emit('chat_msg', { username: 'SYSTEM', color: '#ff0000', msg: `${p.username}: +${LIMIT_PENALTY_S}s track limits penalty (total +${p.penalty}s)` });
+    }
+
+    // Final result: finish time plus penalties, once every car has finished
+    classify() {
+        this.classified = true;
+        const list = Object.values(this.players).sort((a, b) => a.finishTime + a.penalty - (b.finishTime + b.penalty));
+        const changed = list.some((p, i) => p.finishOrder !== i + 1);
+        list.forEach((p, i) => { p.finishOrder = i + 1; });
+        if (changed) {
+            this.io.emit('chat_msg', { username: 'SYSTEM', color: '#ff0000', msg: `Result after penalties: ${list.map((p, i) => `P${i + 1} ${p.username}`).join(', ')}` });
+        }
     }
 
     recordLap(p) {
@@ -329,6 +368,7 @@ class Game {
             this.recordLap(p);
             if (p.lap >= this.settings.maxLaps) {
                 p.finished = true;
+                p.finishTime = this.time;
                 this.winnerCount++;
                 p.finishOrder = this.winnerCount;
                 this.io.emit('chat_msg', { username: 'SYSTEM', color: '#ff0000', msg: `${p.username} finished P${p.finishOrder}!` });
