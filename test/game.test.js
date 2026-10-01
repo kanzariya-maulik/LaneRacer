@@ -627,3 +627,59 @@ test('assist choice reaches the car', () => {
     assert.strictEqual(g.players.a.assist, 'full');
     assert.strictEqual(g.players.b.assist, 'off');
 });
+
+for (const id of Track.TRACK_IDS) {
+    test(`${id}: a car on the kerb beside the closed pit entry glances off and keeps at least half its speed`, () => {
+        const tr = Track.load(id), pit = tr.pit;
+        const cl = Track.pointAt(pit.path, pit.cum, pit.closeS, false);
+        const c = Physics.nearestOnTrack(cl.x, cl.y, tr);
+        const k = -pit.trackSide; // from the track toward the pit lane
+        for (const offM of [0.5, 0.9, 1.2, 1.5]) {
+            const s0 = tr.cum[c.i] - 60 * tr.scale;
+            const q = Track.pointAt(tr.path, tr.cum, s0);
+            const off = tr.width / 2 + offM * tr.scale;
+            const g = new Game(io, [lp('a')], tr, RACE, () => {});
+            // Flat out where it's flat out, otherwise 90% of the stretch's corner speed (Spa's pit entry is in a chicane)
+            let safe = 80;
+            for (let m = -60; m <= 40; m += 10) safe = Math.min(safe, 0.9 * tr.safeSpeed[Physics.nearestOnTrack(...Object.values(Track.pointAt(tr.path, tr.cum, tr.cum[c.i] + m * tr.scale)).slice(0, 2), tr).i]);
+            const p = g.players.a, v = safe * tr.scale;
+            Object.assign(p, { x: q.x - Math.sin(q.angle) * k * off, y: q.y + Math.cos(q.angle) * k * off, angle: q.angle,
+                vx: Math.cos(q.angle) * v, vy: Math.sin(q.angle) * v, speed: v, input: { throttle: 1, brake: 0, steer: 0 } });
+            // Hold the line `offM` past the edge: steer at a point 20 m ahead at the same offset
+            for (let n = 0; n < 90; n++) {
+                const near = Physics.nearestOnTrack(p.x, p.y, tr);
+                const ah = Track.pointAt(tr.path, tr.cum, tr.cum[near.i] + 20 * tr.scale);
+                const tx = ah.x - Math.sin(ah.angle) * k * off, ty = ah.y + Math.cos(ah.angle) * k * off;
+                let d = Math.atan2(ty - p.y, tx - p.x) - p.angle;
+                d = Math.atan2(Math.sin(d), Math.cos(d));
+                p.input = { throttle: 1, brake: 0, steer: Math.max(-1, Math.min(1, d * 2)) };
+                g.drive(p);
+            }
+            assert.ok(p.speed > 0.5 * v, `${offM} m past the line: ${(p.speed / tr.scale * 3.6).toFixed(0)} km/h left`);
+        }
+    });
+}
+
+test('the closed pit entry is not pit lane: no limiter, no exemption', () => {
+    const g = new Game(io, [lp('a')], monza, RACE, () => {});
+    const p = g.players.a, pit = monza.pit;
+    const q = Track.pointAt(pit.path, pit.cum, pit.closeS - 20 * monza.scale, false);
+    p.x = q.x; p.y = q.y;
+    g.updatePit(p);
+    assert.ok(!p.inPit && !p.limiter);
+});
+
+test('a sector from a lap deleted later is never a best', () => {
+    const { events, io: sio } = spy();
+    const g = new Game(sio, [lp('a')], monza, QUALI, () => {}, 'quali');
+    const a = g.players.a, cps = monza.checkpoints;
+    crossLine(g, a, 10);
+    for (let k = 1; k <= monza.sectorCps[1]; k++) { g.time = 10 + k; a.x = cps[k].x; a.y = cps[k].y; g.checkLapProgress(a); }
+    assert.ok(sectorsOf(events, 'a')[0].sessionBest, 'S1 looked purple live');
+    a.lapValid = false;                 // runs wide in S2
+    lap(g, a, 10 + monza.sectorCps[1], 80);
+    assert.deepStrictEqual(g.bestSectors, [null, null, null]);
+    assert.deepStrictEqual(a.bestSectors, [null, null, null]);
+    const timing = events.filter(([ev]) => ev === 'timing').map(([, d]) => d).at(-1);
+    assert.deepStrictEqual(timing.sessionBest, [null, null, null]);
+});

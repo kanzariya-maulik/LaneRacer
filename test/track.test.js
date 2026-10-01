@@ -46,9 +46,9 @@ for (const id of Track.TRACK_IDS) {
 
     test(`${id}: pit entry closed just before the first garage`, () => {
         const { closeS, closeWall, garageSpan, wall, path: pp, cum } = t.pit;
-        assert.ok(closeS < garageSpan[0] && closeS > garageSpan[0] - 11 * t.scale);
+        assert.ok(closeS < garageSpan[0], 'closure must be before the garages');
         const n = Physics.nearestOnPath(wall[0].x, wall[0].y, pp, false);
-        assert.ok(closeS >= cum[n.i] + n.t * (cum[n.i + 1] - cum[n.i]) - 1, 'closure upstream of the pit wall');
+        assert.ok(Math.abs(closeS - (cum[n.i] + n.t * (cum[n.i + 1] - cum[n.i]))) < 1 * t.scale, 'closure must start at the pit wall');
         assert.strictEqual(closeWall.length, 2);
     });
 
@@ -161,3 +161,10 @@ test('a track without a pit lane still builds', () => {
     assert.strictEqual(t.startPositions.length, 20);
     assert.deepStrictEqual(t.sectorCps.length, 3);
 });
+
+for (const id of Track.TRACK_IDS) {
+    test(`${id}: pit entry barrier reaches past the track run-off`, () => {
+        const t = tracks[id], out = t.pit.closeWall[0];
+        assert.ok(Physics.nearestOnTrack(out.x, out.y, t).dist >= t.width / 2 + 80, 'gap around the barrier end');
+    });
+}

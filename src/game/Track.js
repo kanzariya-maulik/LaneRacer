@@ -13,7 +13,7 @@ const WALL_OFFSET = 80; // matches the invisible wall in Game.js
 const GARAGE_ORDER = ['redbull', 'ferrari', 'mercedes', 'alpine', 'mclaren', 'alfaromeo', 'astonmartin', 'haas', 'alphatauri', 'williams', 'redbull-suzuka'];
 const GARAGE_PITCH_M = 18;
 const BOX_GAP_M = 9;
-const CLOSE_GAP_M = 10;   // pit entry barrier this far before the first garage
+const CLOSE_RAMP_M = 60;  // the barrier angles back this far, so a car meeting it glances off onto the track
 const PIT_RUNOFF_M = 2;   // matches Game.js
 const WALL_CLEAR_M = 0.5; // pit wall only where it stays this far off the track edge
 
@@ -83,10 +83,15 @@ function buildPit(raw, circuit, track) {
     });
     const garageSpan = [centre - reach, centre + reach];
 
-    // Pit entry closed (no pit stops): barrier across the lane just before the first garage
-    const closeS = Math.max(wallLo, garageSpan[0] - CLOSE_GAP_M * scale);
-    const cl = pointAt(pts, cum, closeS, false);
-    const closeWall = [lateral(cl, trackSide * half), lateral(cl, -trackSide * (half + PIT_RUNOFF_M * scale))].map(({ x, y }) => ({ x, y }));
+    // Pit entry closed (no pit stops): angled barrier from the start of the pit wall, so no gap or wedge beside it
+    const closeS = wallLo;
+    const inner = lateral(pointAt(pts, cum, closeS, false), trackSide * half);
+    const up = pointAt(pts, cum, closeS - CLOSE_RAMP_M * scale, false);
+    let outerOff = half + PIT_RUNOFF_M * scale;
+    // Outer end reaches past the track's run-off barrier, so there is no way round it
+    const short = width / 2 + WALL_OFFSET - Physics.nearestOnTrack(lateral(up, -trackSide * outerOff).x, lateral(up, -trackSide * outerOff).y, track).dist;
+    if (short > 0) outerOff += short + scale;
+    const closeWall = [lateral(up, -trackSide * outerOff), inner].map(({ x, y }) => ({ x, y }));
 
     return { path: pts, width: raw.pit.width, cum, len, entryS, exitS, span, startOnPit, trackSide, limStart: limLo, limEnd: limHi, wall, garages, garageSpan, closeS, closeWall, fitM: raw.pit.fitM };
 }

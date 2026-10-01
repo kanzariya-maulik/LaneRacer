@@ -13,6 +13,9 @@ const KERB_M = 1.5;          // kerbs past the track edge drive like asphalt
 const LIMIT_WARNINGS = 2;    // race: violations before penalties start
 const LIMIT_PENALTY_S = 5;
 
+// Distance along the pit lane of a nearestOnPath result
+const pitAlong = (pit, n) => pit.cum[n.i] + n.t * (pit.cum[n.i + 1] - pit.cum[n.i]);
+
 // Barrier response: n points from the barrier back toward the car
 function bounce(p, nx, ny) {
     const vn = -(p.vx * nx + p.vy * ny); // speed into the barrier
@@ -156,7 +159,7 @@ class Game {
         const x0 = p.x, y0 = p.y;
         const nearPit = (x, y) => (pit ? Physics.nearestOnPath(x, y, pit.path, false) : null);
         const before = Physics.nearestOnTrack(p.x, p.y, t), beforePit = nearPit(p.x, p.y);
-        const grass = before.dist > t.width / 2 + KERB_M * scale && !(beforePit && beforePit.dist <= pit.width / 2);
+        const grass = before.dist > t.width / 2 + KERB_M * scale && !(beforePit && beforePit.dist <= pit.width / 2 && pitAlong(pit, beforePit) >= pit.closeS);
         const input = p.assist === 'full' && !p.inPit ? Assist.brakeAssist(p, p.input, t, before) : p.input;
         CarPhysics.step(p, input, this.dt, scale, grass, p.assist);
 
@@ -173,7 +176,7 @@ class Game {
         const pitDist = pit && pit.width / 2 + PIT_RUNOFF_M * scale;
         const after = Physics.nearestOnTrack(p.x, p.y, t), afterPit = nearPit(p.x, p.y);
         // The pit lane upstream of the closure barrier is off-limits (no pit stops)
-        const afterS = afterPit && pit.cum[afterPit.i] + afterPit.t * (pit.cum[afterPit.i + 1] - pit.cum[afterPit.i]);
+        const afterS = afterPit && pitAlong(pit, afterPit);
         const overTrack = after.dist - wallDist, overPit = afterPit && afterS >= pit.closeS ? afterPit.dist - pitDist : Infinity;
         if (overTrack > 0 && overPit > 0) {
             const [near, lim] = overPit < overTrack ? [afterPit, pitDist] : [after, wallDist];
@@ -200,8 +203,8 @@ class Game {
     updatePit(p, near = Physics.nearestOnTrack(p.x, p.y, this.track), nearPit = Physics.nearestOnPath(p.x, p.y, this.track.pit.path, false)) {
         const t = this.track, pit = t.pit;
         const wasLimited = p.limiter;
-        p.inPit = nearPit.dist <= pit.width / 2 && near.dist > t.width / 2;
-        p.pitS = pit.cum[nearPit.i] + nearPit.t * (pit.cum[nearPit.i + 1] - pit.cum[nearPit.i]);
+        p.pitS = pitAlong(pit, nearPit);
+        p.inPit = nearPit.dist <= pit.width / 2 && near.dist > t.width / 2 && p.pitS >= pit.closeS; // closed entry isn't pit lane
         p.limiter = p.inPit && p.pitS >= pit.limStart && p.pitS <= pit.limEnd;
         if (p.limiter) {
             const max = (PIT_LIMIT_KMH / 3.6) * t.scale, v = Math.hypot(p.vx, p.vy);
@@ -212,7 +215,7 @@ class Game {
             }
         }
         // Crossing the pit entry line ends a timed lap
-        if (this.mode === 'quali' && p.limiter && !wasLimited) p.lapStart = null;
+        if (this.mode === 'quali' && p.limiter && !wasLimited) p.lapStart = p.sectorStart = null;
     }
 
     update() {
@@ -322,12 +325,19 @@ class Game {
         const lapTime = this.time - p.lapStart;
         p.lastLap = lapTime;
         p.lastValid = p.lapValid;
+        if (p.lapValid) { // bests only from completed valid laps
+            p.sectors.forEach((s, i) => {
+                if (s === null) return;
+                if (p.bestSectors[i] === null || s < p.bestSectors[i]) p.bestSectors[i] = s;
+                if (this.bestSectors[i] === null || s < this.bestSectors[i]) this.bestSectors[i] = s;
+            });
+        }
         if (p.lapValid && (p.bestLap === null || lapTime < p.bestLap)) {
             p.bestLap = lapTime;
             p.bestLapSectors = [...p.sectors];
         }
         p.lapStart = this.time;
-        this.io.emit('timing', { id: p.id, lap: p.lap, lapTime, bestLap: p.bestLap, valid: p.lapValid });
+        this.io.emit('timing', { id: p.id, lap: p.lap, lapTime, bestLap: p.bestLap, valid: p.lapValid, sessionBest: this.bestSectors });
         this.newLap(p);
     }
 
@@ -343,8 +353,6 @@ class Game {
         const time = this.time - p.sectorStart, i = n - 1;
         const personalBest = p.lapValid && (p.bestSectors[i] === null || time < p.bestSectors[i]);
         const sessionBest = p.lapValid && (this.bestSectors[i] === null || time < this.bestSectors[i]);
-        if (personalBest) p.bestSectors[i] = time;
-        if (sessionBest) this.bestSectors[i] = time;
         p.sectors[i] = time;
         p.sectorStart = this.time;
         this.io.emit('sector', { id: p.id, lap: p.lap + 1, sector: n, time, valid: p.lapValid, personalBest, sessionBest });

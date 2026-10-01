@@ -112,6 +112,7 @@ socket.on('quali_results', (list) => {
 });
 
 socket.on('timing', (t) => {
+    if (t.sessionBest) clientState.sessionBest = [...t.sessionBest]; // completed valid laps only
     clientState.lastTiming = t;
     if (t.id === clientState.me) {
         const el = document.getElementById('lt-last');
@@ -123,7 +124,6 @@ socket.on('timing', (t) => {
 
 socket.on('sector', (s) => {
     const i = s.sector - 1;
-    if (s.sessionBest) clientState.sessionBest[i] = s.time;
     if (s.id !== clientState.me) return;
     const cls = !s.valid ? 'sec-grey' : s.sessionBest ? 'sec-purple' : s.personalBest ? 'sec-green' : 'sec-yellow';
     const prev = clientState.myBestSectors[i];
