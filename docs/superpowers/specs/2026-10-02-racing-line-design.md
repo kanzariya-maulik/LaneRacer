@@ -16,6 +16,7 @@ An F1-game-style driving line on every track. It shows the fast path (out-in-out
 | In-session toggle | R key, gamepad X (button 2): steps Off → Corners → Full → Off |
 | How the line is made | Computed from the track shape and the car physics at server start (no recordings, no hand drawing) |
 | Colours | Green flat out, yellow lift, red brake; recoloured from your speed within 250 m ahead |
+| Controls | Visual guide only: the braking assist is unchanged. The line's target speeds are capped to what the assist allows, so its colours match what the car really does (chosen 2026-10-02, to keep racing challenging) |
 
 ## 1. Computing the line (server, `src/game/RacingLine.js`)
 
@@ -35,9 +36,9 @@ An F1-game-style driving line on every track. It shows the fast path (out-in-out
   - cornering acceleration: `(1 + ASSIST_GRIP·k(v)) · LAT_ASSIST · MU · (g + DOWN·v²)`, where `k` is the assist factor (1 below 150 km/h, 0 above 250 km/h);
   - braking: `MU · (g + DOWN·v²)` plus aero drag;
   - drive: `min(POWER / v, TRACTION·grip) / MASS` minus drag.
-- Step 1, corner speed: the curvature of the *line* (three-point circle, spanning ±2 points) gives `vmax[i]` for every point, capped at `MAX_SAFE`.
+- Step 1, corner speed: the curvature of the *line* (three-point circle, spanning ±2 points) gives a grip limit for every point, capped at `MAX_SAFE`. `vmax[i]` is the lower of that and `safeSpeed[i] × 0.95`, the speed the Full braking assist holds the car to (`Assist` AIM).
 - Step 2, forward pass, run twice around the loop so the lap wraps: `v[i+1] = min(vmax[i+1], sqrt(v[i]² + 2·a_drive·ds))`. The drive force is reduced by the friction circle: `a_drive · sqrt(1 − (a_lat / a_lat_max)²)`.
-- Step 3, backward pass, run twice around the loop: `v[i] = min(v[i], sqrt(v[i+1]² + 2·a_brake·ds))`, reduced by the friction circle in the same way.
+- Step 3, backward pass, run twice around the loop: `v[i] = min(v[i], sqrt(v[i+1]² + 2·a_brake·ds))`, reduced by the friction circle in the same way. `a_brake` uses `BRAKE_MARGIN` (0.7) × grip: this is where the braking assist starts braking, so red appears where the car would brake anyway.
 - **Phase:**
   - `brake` where the backward pass limited the speed and the speed falls by more than 1 m/s over the next point;
   - `lift` where `v` is within 3% of `vmax` (the car is at the corner limit) or the speed falls by up to 1 m/s;
@@ -51,9 +52,10 @@ An F1-game-style driving line on every track. It shows the fast path (out-in-out
 - Per track:
   - the line stays within the edges (`|offset| ≤ width/2 − 1.5 m·scale`);
   - at every point, `speed² × curvature` stays within the assisted cornering grip (+1%);
-  - a lap following the line is shorter in time than the centreline lap at its own speed profile.
+  - a lap following the line is no slower in time than the centreline lap at its own speed profile;
+  - no target speed exceeds `safeSpeed × 0.95`.
 - Monza: a brake zone sits before the first chicane. Spa: a brake zone sits before La Source. Both are found as the lowest `safeSpeed` point near the start.
-- Simulation: a car driven by the existing physics (`Game`), steering toward the line 25 m ahead and using throttle/brake from the target speed, completes a lap on every track with no wall hits.
+- Simulation: a car driven by the existing physics (`Game`, Full assist), steering toward the line about 25 m ahead and using throttle/brake from the target speed, completes a lap on every track with no wall hits, within 8 s of the profile's lap time (that allowance covers the standing start).
 
 ## 2. Showing the line (client)
 
@@ -96,4 +98,4 @@ An F1-game-style driving line on every track. It shows the fast path (out-in-out
 
 ## Out of scope
 
-AI or ghost cars following the line, per-player braking-point coaching messages, adapting the line to car damage or tyres (neither exists), 3D floating arrows.
+Changing the braking or steering assist, AI or ghost cars following the line, per-player braking-point coaching messages, adapting the line to car damage or tyres (neither exists), 3D floating arrows.
