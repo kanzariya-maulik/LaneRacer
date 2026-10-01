@@ -68,6 +68,8 @@ function buildPit(raw, circuit, track) {
     // garage 1 nearest the pit exit; boxes in the lane on the garage side
     const pitch = GARAGE_PITCH_M * scale, reach = 5.5 * pitch;
     const wallLo = cum[wallFrom], wallHi = cum[wallFrom + Math.max(0, wall.length - 1)];
+    // Limiter only where the pit wall keeps track cars out of the pit lane
+    const limLo = Math.max(limStart, wallLo), limHi = Math.min(limEnd, wallHi);
     const margin = reach + 5 * scale;
     const centre = Math.max(wallLo + margin, Math.min(startOnPit, wallHi - margin));
     const garages = GARAGE_ORDER.map((teamId, k) => {
@@ -78,7 +80,7 @@ function buildPit(raw, circuit, track) {
     });
     const garageSpan = [centre - reach, centre + reach];
 
-    return { path: pts, width: raw.pit.width, cum, len, entryS, exitS, span, startOnPit, trackSide, limStart, limEnd, wall, garages, garageSpan, fitM: raw.pit.fitM };
+    return { path: pts, width: raw.pit.width, cum, len, entryS, exitS, span, startOnPit, trackSide, limStart: limLo, limEnd: limHi, wall, garages, garageSpan, fitM: raw.pit.fitM };
 }
 
 function build(raw, circuit = {}) {

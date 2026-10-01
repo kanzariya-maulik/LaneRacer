@@ -184,7 +184,8 @@ test('quali ends when everyone has taken the flag, or 150 s after it', () => {
     let results = null;
     const g = new Game(io, [lp('a'), lp('b')], monza, { maxLaps: 3, qualiMinutes: 1 }, (r) => { results = r; }, 'quali');
     g.players.a.finished = true;
-    g.players.b.checkpoint = 7; // grid slots sit inside checkpoint 0's radius; keep b mid-lap so it doesn't take the flag
+    g.players.b.checkpoint = 7; // keep b mid-lap so it doesn't take the flag
+    Object.assign(g.players.b, { x: monza.start.x, y: monza.start.y, lapStart: 90 }); // on track, on a timed lap when the flag falls
     g.time = 100;
     g.update();
     assert.strictEqual(results, null);
@@ -389,4 +390,29 @@ test('race: a lap through the pit lane counts even where checkpoints are out of 
         g.checkLapProgress(p);
     });
     assert.strictEqual(p.lap, 1);
+});
+
+test('car just off the straight before the pit wall starts is not limited', () => {
+    const g = new Game(io, [lp('a')], monza, QUALI, () => {}, 'quali');
+    const p = g.players.a, pit = monza.pit;
+    const i = pit.cum.findIndex(c => c >= 80 * monza.scale); // inside 60 m limiter line, before the wall
+    const q = pit.path[i], c = Physics.nearestOnTrack(q.x, q.y, monza);
+    const d = Math.hypot(q.x - c.px, q.y - c.py);
+    const off = monza.width / 2 + 1 * monza.scale;
+    p.x = c.px + ((q.x - c.px) / d) * off; p.y = c.py + ((q.y - c.py) / d) * off;
+    p.lapStart = 3;
+    g.updatePit(p);
+    assert.ok(!p.limiter, 'limiter on beside the track with no pit wall');
+    assert.strictEqual(p.lapStart, 3);
+});
+
+test('quali: after the flag, a car that can no longer start a lap is done', () => {
+    let results = null;
+    const g = new Game(io, [lp('a'), lp('b')], monza, QUALI, (r) => { results = r; }, 'quali');
+    Object.assign(g.players.b, { x: monza.start.x, y: monza.start.y, checkpoint: 7, lapStart: 50 }); // b on track, mid-lap
+    g.time = g.flagAt;
+    g.update();                     // a sits in its garage: no lap running
+    assert.strictEqual(g.players.a.finished, true);
+    assert.strictEqual(g.players.b.finished, false);
+    assert.strictEqual(results, null);
 });

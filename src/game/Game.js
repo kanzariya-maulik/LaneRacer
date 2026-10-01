@@ -219,6 +219,11 @@ class Game {
             }
         }
 
+        // After the flag a car with no lap running can't set a time: its session is over
+        if (this.mode === 'quali' && this.time >= this.flagAt) {
+            for (const id of ids) if (this.players[id].lapStart === null) this.players[id].finished = true;
+        }
+
         if (this.mode === 'quali' && !this.flagShown && this.time >= this.flagAt) {
             this.flagShown = true;
             this.io.emit('session', { phase: 'QUALI_FLAG', endsInMs: QUALI_CUTOFF_S * 1000 });
