@@ -6,7 +6,7 @@
     "start": "node server.js",
     "dev": "node server.js",
     "test": "node --test test/*.test.js",
-    "tracks": "node scripts/import-tracks.js",
+    "tracks": "node scripts/import-tracks.js && node scripts/import-pits.js",
     "build:car": "${BLENDER:-/Applications/Blender.app/Contents/MacOS/Blender} -b --python scripts/build-car.py",
     "build:liveries": "${BLENDER:-/Applications/Blender.app/Contents/MacOS/Blender} -b scripts/build/car.blend --python scripts/paint-liveries.py"
   },
