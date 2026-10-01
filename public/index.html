@@ -98,10 +98,14 @@
             </div>
             <div id="hud-bottom">
                 <div id="lap-times">
-                    <div>LAP <span id="lt-current">--</span></div>
-                    <div>LAST <span id="lt-last">--</span></div>
-                    <div>BEST <span id="lt-best">--</span></div>
-                    <div id="sector-panel"><span class="sec" id="sec-1">S1</span><span class="sec" id="sec-2">S2</span><span class="sec" id="sec-3">S3</span></div>
+                    <div class="lt-row lt-now"><span class="lt-label">LAP</span><span id="lt-current">--</span></div>
+                    <div class="lt-row"><span class="lt-label">LAST</span><span id="lt-delta"></span><span id="lt-last">--</span></div>
+                    <div class="lt-row"><span class="lt-label">BEST</span><span id="lt-best">--</span></div>
+                    <div id="sector-panel">
+                        <div class="sec" id="sec-1"><i></i><span>S1</span></div>
+                        <div class="sec" id="sec-2"><i></i><span>S2</span></div>
+                        <div class="sec" id="sec-3"><i></i><span>S3</span></div>
+                    </div>
                 </div>
                 <div id="drs-badge" class="drs-off" title="DRS — press E (gamepad Y) when green">DRS</div>
                 <div class="hud-speedometer"><span id="hud-speed">0</span> KM/H</div>
@@ -118,7 +122,7 @@
 
             <!-- Leaderboard (top right) -->
             <div id="leaderboard">
-                <h3>Timing</h3>
+                <div id="tt-head" title="Press T or tap to switch"><span>TIMING</span><span id="tt-mode">INTERVAL</span></div>
                 <ol id="leaderboard-list"></ol>
             </div>
         </div>

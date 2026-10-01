@@ -6,6 +6,7 @@ import { keyboardStep, gamepadInput, changed } from './input.js';
 import { LEVELS, ratioRange, resolveLevel, autoPick, adaptStep } from './quality.js';
 import { placeScenery, seedOf } from './scenery.js';
 import { SnapshotBuffer, sample, project, decodeFlags, INTERP_S } from './netsync.js';
+import { gapText, driverCode, lapDelta } from './timing.js';
 
 // World units per metre come from the track JSON (track.scale = 6).
 const WHEEL_RADIUS_M = 0.36;  // scripts/car_parts.py WHEEL_RADIUS
@@ -83,6 +84,13 @@ let input = { throttle: 0, brake: 0, steer: 0, drs: false };
 let touchInput = null;
 let lastSent = null, lastSentAt = 0;
 let spectateIndex = 0;
+let towerMode = 'interval'; // timing tower gap column: 'interval' (car ahead) or 'leader'
+function toggleTower() {
+    towerMode = towerMode === 'interval' ? 'leader' : 'interval';
+    document.getElementById('tt-mode').textContent = towerMode.toUpperCase();
+    lastTower = 0; // redraw on the next HUD tick
+}
+document.getElementById('tt-head').addEventListener('click', toggleTower);
 
 function isSpectator() {
     return !!clientState.players[clientState.me]?.isSpectating || !clientState.gameState?.[clientState.me];
@@ -91,6 +99,7 @@ function isSpectator() {
 function onKey(e, down) {
     if (document.activeElement === chatInput) return;
     const key = e.key.toLowerCase();
+    if (down && key === 't' && !e.repeat && clientState.status !== 'LOBBY') toggleTower();
     if (down && clientState.status !== 'LOBBY' && isSpectator()) {
         if (key === 'arrowleft') spectateIndex--;
         if (key === 'arrowright') spectateIndex++;
@@ -889,9 +898,12 @@ function updateHUD(withTower = true) {
     lastEl.classList.toggle('t-purple', !deleted && !!racing && me.lastLap !== null && me.lastLap === fastest);
     lastEl.classList.toggle('t-green', !deleted && !!racing && me.lastLap !== null && me.lastLap === me.bestLap && me.lastLap !== fastest);
     $('lt-best').innerText = racing ? fmtTime(me.bestLap) : '--';
+    const delta = racing && !deleted ? lapDelta(me.lastLap, me.bestLap) : null;
+    $('lt-delta').textContent = delta ? delta.text : '';
+    $('lt-delta').className = delta ? delta.cls : '';
     for (let i = 0; i < 3; i++) {
         const el = $(`sec-${i + 1}`), s = racing ? clientState.mySectors[i] : null;
-        el.textContent = s ? `S${i + 1} ${s.time.toFixed(3)}` : `S${i + 1}`;
+        el.lastElementChild.textContent = s ? s.time.toFixed(3) : `S${i + 1}`;
         el.className = `sec ${s ? s.cls : ''}`;
     }
 
@@ -915,35 +927,42 @@ function updateHUD(withTower = true) {
         const quali = Object.values(gs).some(p => p.ghost);
         const ol = $('leaderboard-list');
         ol.innerHTML = '';
-        Object.entries(gs).sort((a, b) => a[1].rank - b[1].rank).slice(0, 10).forEach(([id, p]) => {
+        const sorted = Object.entries(gs).filter(([id]) => clientState.players[id]).sort((a, b) => a[1].rank - b[1].rank);
+        const rows = sorted.map(([, p]) => ({ gap: p.gap, lapsDown: p.lapsDown || 0 }));
+        const codes = sorted.map(([id]) => driverCode(clientState.players[id].username));
+        const el = (tag, cls, text = '') => Object.assign(document.createElement(tag), { className: cls, textContent: text });
+        // Top 10, or top 9 plus your own row when you're further back
+        const mine = sorted.findIndex(([id]) => id === clientState.me);
+        const shown = mine >= 10 ? [...sorted.keys()].slice(0, 9).concat(mine) : [...sorted.keys()].slice(0, 10);
+        shown.forEach((i, n) => {
+            const [id, p] = sorted[i];
             const lp = clientState.players[id];
-            if (!lp) return;
-            const li = document.createElement('li');
-            const name = document.createElement('span');
-            name.className = 'tt-name';
-            name.textContent = `${p.rank}. ${lp.username}${p.penalty ? ` +${p.penalty}s` : ''}`;
-            const time = document.createElement('span');
+            const li = el('li', (id === clientState.me ? 'me' : '') + (n > 0 && i !== shown[n - 1] + 1 ? ' gapline' : ''));
+            const team = el('span', 'tt-team');
+            team.style.background = teamInfo[lp.teamId]?.chatColor || '#888';
+            // Three-letter code like the TV graphic, unless two drivers share it
+            const name = el('span', 'tt-name', codes.indexOf(codes[i]) !== codes.lastIndexOf(codes[i]) ? lp.username.slice(0, 8) : codes[i]);
+            li.append(el('span', 'tt-pos', p.rank), team, name);
+            if (p.inPit && !quali) li.append(el('span', 'tt-tag', 'PIT'));
+            if (p.penalty) li.append(el('span', 'tt-tag pen', `+${p.penalty}s`));
+            const gap = gapText(rows, i, towerMode);
+            const time = el('span', 'tt-gap');
             if (quali) {
-                time.textContent = p.rank === 1 ? fmtTime(p.bestLap) : p.gap === null ? fmtTime(p.bestLap) : `+${p.gap.toFixed(3)}`;
-                if (p.bestLap !== null && p.bestLap === fastest) time.className = 't-purple';
-            } else if (p.finished && p.rank === 1) {
-                time.textContent = 'WINNER';
-            } else {
-                time.textContent = p.rank === 1 ? 'LEADER' : p.lapsDown > 0 ? `+${p.lapsDown} L` : p.gap === null ? '' : `+${p.gap.toFixed(3)}`;
-            }
-            if (quali) {
-                const bars = document.createElement('span');
-                bars.className = 'tt-sectors';
-                (p.bestLapSectors || [null, null, null]).forEach((s, i) => {
-                    const b = document.createElement('i');
-                    const best = clientState.sessionBest[i];
-                    if (s !== null) b.className = best !== null && s <= best + 1e-9 ? 'sb-purple' : 'sb-yellow';
-                    bars.appendChild(b);
+                time.textContent = gap ? gap : fmtTime(p.bestLap);
+                if (p.bestLap !== null && p.bestLap === fastest) time.classList.add('t-purple');
+                const bars = el('span', 'tt-sectors');
+                (p.bestLapSectors || [null, null, null]).forEach((s, k) => {
+                    const best = clientState.sessionBest[k];
+                    bars.appendChild(el('i', s === null ? '' : best !== null && s <= best + 1e-9 ? 'sb-purple' : 'sb-yellow'));
                 });
-                li.append(name, bars, time);
+                li.append(bars);
+            } else if (i === 0) {
+                time.textContent = p.finished ? 'WINNER' : 'LEADER';
+                time.classList.add('lead');
             } else {
-                li.append(name, time);
+                time.textContent = gap;
             }
+            li.append(time);
             ol.appendChild(li);
         });
     }

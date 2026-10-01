@@ -254,22 +254,26 @@ input:focus { border: 1px solid var(--primary); }
 }
 #hud-speed { color: #facc15; }
 
+/* Timing tower, F1 broadcast style */
 #leaderboard {
     position: absolute;
     top: 20px; right: 20px;
-    background: #3b82f6;
-    padding: 15px 25px;
-    border-radius: 20px;
-    border: 4px solid #000;
-    box-shadow: inset 0 4px 0 rgba(255,255,255,0.2), 0 5px 0 #000;
-    min-width: 200px;
-    color: white;
+    width: 270px;
+    background: rgba(15, 18, 28, 0.9);
+    border: 3px solid #fff;
+    border-radius: 14px;
+    overflow: hidden;
+    color: #fff;
 }
-#leaderboard h3 { border-bottom: 1px solid #fff; margin-bottom: 10px; padding-bottom: 5px; }
-#leaderboard-list {
-    list-style-position: inside;
-    font-size: 1.1rem;
+#tt-head {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 6px 12px;
+    background: #e10600;
+    font-weight: 900; letter-spacing: 2px; font-size: 0.95rem;
+    cursor: pointer; pointer-events: auto; user-select: none;
 }
+#tt-mode { font-size: 0.7rem; letter-spacing: 1px; background: rgba(0,0,0,0.35); padding: 2px 8px; border-radius: 10px; }
+#leaderboard-list { list-style: none; margin: 0; padding: 3px 0; font-size: 0.85rem; font-weight: 700; }
 
 #countdown-overlay, #spectator-overlay {
     position: absolute;
@@ -378,23 +382,38 @@ input:focus { border: 1px solid var(--primary); }
 
 #lap-times {
     margin-bottom: 10px;
-    background: rgba(15, 23, 42, 0.85);
+    width: 300px; margin-left: auto;
+    background: rgba(15, 18, 28, 0.9);
     border: 3px solid #fff;
-    border-radius: 16px;
-    padding: 8px 16px;
+    border-radius: 14px;
+    padding: 6px 14px 8px;
     font-weight: 700;
     font-variant-numeric: tabular-nums;
-    text-align: right;
 }
-#lap-times span { display: inline-block; min-width: 90px; }
+.lt-row { display: flex; align-items: baseline; gap: 10px; line-height: 1.35; }
+.lt-row > span:last-child { margin-left: auto; }
+.lt-label { color: #94a3b8; font-size: 0.75rem; letter-spacing: 2px; min-width: 40px; }
+.lt-now #lt-current { font-size: 1.5rem; font-weight: 900; letter-spacing: 1px; }
+#lt-delta { font-size: 0.8rem; margin-left: auto; }
+#lt-delta + #lt-last { margin-left: 0; }
+.t-yellow { color: #facc15; }
 .t-purple { color: #c084fc; }
 .t-green { color: #4ade80; }
 .t-flash { animation: lapflash 1s ease-out 3; }
 @keyframes lapflash { 50% { color: #fde047; } }
 
 #leaderboard-list { font-variant-numeric: tabular-nums; }
-#leaderboard-list li { display: flex; gap: 10px; }
-#leaderboard-list .tt-name { flex: 1; }
+#leaderboard-list li { display: flex; align-items: center; gap: 8px; height: 22px; padding: 0 12px 0 8px; }
+#leaderboard-list li.gapline { border-top: 1px dashed rgba(255,255,255,0.3); }
+#leaderboard-list li:nth-child(even) { background: rgba(255,255,255,0.04); }
+#leaderboard-list li.me { background: rgba(250, 204, 21, 0.22); }
+.tt-pos { width: 22px; text-align: right; color: #cbd5e1; }
+.tt-team { width: 4px; height: 16px; border-radius: 2px; }
+.tt-name { flex: 1; letter-spacing: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tt-tag { font-size: 0.65rem; font-weight: 900; padding: 1px 5px; border-radius: 3px; background: #1e5bd8; }
+.tt-tag.pen { background: #b91c1c; }
+.tt-gap { min-width: 74px; text-align: right; }
+.tt-gap.lead { color: #94a3b8; font-size: 0.8rem; letter-spacing: 1px; }
 
 #quali-results {
     position: absolute;
@@ -417,8 +436,13 @@ input:focus { border: 1px solid var(--primary); }
 
 #pit-limiter { position: absolute; bottom: 120px; left: 50%; transform: translateX(-50%); background: #1e5bd8; color: #fff; font-weight: 800; letter-spacing: 1px; padding: 6px 14px; border-radius: 4px; }
 
-#sector-panel { display: flex; gap: 8px; margin-top: 4px; font-family: monospace; }
-.sec { color: #cbd5e1; }
+#sector-panel { display: flex; gap: 6px; margin-top: 8px; }
+.sec { flex: 1; text-align: center; color: #64748b; font-size: 0.8rem; }
+.sec i { display: block; height: 6px; border-radius: 3px; background: #334155; margin-bottom: 3px; }
+.sec.sec-purple i { background: #c084fc; }
+.sec.sec-green i { background: #4ade80; }
+.sec.sec-yellow i { background: #facc15; }
+.sec.sec-grey i { background: #6b7280; }
 .sec-purple { color: #c084fc; }
 .sec-green { color: #4ade80; }
 .sec-yellow { color: #facc15; }
