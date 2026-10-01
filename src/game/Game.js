@@ -19,6 +19,11 @@ const DRS_DRAG = 0.85;        // drag with the flap open (~+15 km/h top speed)
 const SLIP_MAX = 0.2;         // drag cut right behind another car…
 const SLIP_MIN_M = 5, SLIP_RANGE_M = 40, SLIP_LAT_M = 3; // …fading out by 40 m behind, only roughly in line
 
+const FLAGS = { inPit: 1, limiter: 2, drs: 4, drsAvailable: 8, finished: 16, lapValid: 32, ghost: 64 };
+const META_FIELDS = ['lap', 'checkpoint', 'rank', 'gap', 'lapsDown', 'lastLap', 'bestLap', 'lapStart', 'bestLapSectors', 'lastValid', 'penalty'];
+const META_EVERY = 6; // ticks: info updates at 10 Hz
+const r1 = (v) => Math.round(v * 10) / 10;
+
 // Distance along the pit lane of a nearestOnPath result
 const pitAlong = (pit, n) => pit.cum[n.i] + n.t * (pit.cum[n.i + 1] - pit.cum[n.i]);
 
@@ -55,8 +60,10 @@ class Game {
 
         const cpCount = track.checkpoints.length;
         this.players = {};
+        this.index = {}; this.seq = 0; this.sentMeta = {};
         const boxes = mode === 'quali' && track.pit ? Game.garageSlots(players, track) : null;
         players.forEach((p, index) => {
+            this.index[p.id] = index;
             const slot = boxes ? boxes[index] : track.startPositions[index % track.startPositions.length];
             this.players[p.id] = {
                 id: p.id,
@@ -136,8 +143,36 @@ class Game {
         return pointAt(t.path, t.cum, pit.entryS + (p.pitS / pit.len) * pit.span);
     }
 
+    // 60 Hz: only what moves, packed small
+    fastPacket() {
+        const c = [];
+        for (const id in this.players) {
+            const p = this.players[id];
+            const flags = (p.inPit && FLAGS.inPit) | (p.limiter && FLAGS.limiter) | (p.drs && FLAGS.drs)
+                | (p.drsAvailable && FLAGS.drsAvailable) | (p.finished && FLAGS.finished)
+                | (p.lapValid && FLAGS.lapValid) | (this.mode === 'quali' && FLAGS.ghost);
+            c.push([this.index[id], r1(p.x), r1(p.y), +p.angle.toFixed(4), r1(p.speed), +p.steer.toFixed(3), flags]);
+        }
+        return { s: this.seq, t: +this.time.toFixed(3), c };
+    }
+
+    // Slow fields, only those that changed since the last info update
+    metaDiff() {
+        const diff = {};
+        for (const id in this.players) {
+            const p = this.players[id], sent = this.sentMeta[id] || (this.sentMeta[id] = {});
+            for (const f of META_FIELDS) {
+                const v = JSON.stringify(p[f] ?? null);
+                if (sent[f] === v) continue;
+                sent[f] = v;
+                (diff[id] || (diff[id] = {}))[f] = p[f] ?? null;
+            }
+        }
+        return diff;
+    }
+
     initPayload() {
-        return { players: this.players, track: this.track, mode: this.mode };
+        return { players: this.players, track: this.track, mode: this.mode, index: this.index };
     }
 
     handleInput(id, input) {
@@ -331,20 +366,14 @@ class Game {
         if (this.mode === 'race' && !this.classified && ids.length && ids.every(id => this.players[id]?.finished)) this.classify();
         this.updateRanks();
 
-        const stateSync = {};
-        for (const id in this.players) {
-            const p = this.players[id];
-            stateSync[id] = {
-                x: p.x, y: p.y, angle: p.angle, speed: p.speed, steer: p.steer, inPit: p.inPit, limiter: p.limiter, drs: p.drs, drsAvailable: p.drsAvailable,
-                lap: p.lap, checkpoint: p.checkpoint, rank: p.rank, finished: p.finished,
-                gap: p.gap, lapsDown: p.lapsDown, lastLap: p.lastLap, bestLap: p.bestLap,
-                curLap: p.lapStart === null || p.finished ? null : this.time - p.lapStart,
-                lapValid: p.lapValid, lastValid: p.lastValid, penalty: p.penalty, bestLapSectors: p.bestLapSectors,
-                ghost: this.mode === 'quali'
-            };
+        this.seq++;
+        const packet = this.fastPacket();
+        if (this.net) this.net.broadcastGameState(packet, this.io); // UDP, Socket.IO until a peer's channel opens
+        else this.io.volatile.emit('game_state', packet);
+        if (this.seq % META_EVERY === 1) {
+            const diff = this.metaDiff();
+            if (Object.keys(diff).length) this.io.emit('game_meta', diff);
         }
-        if (this.net) this.net.broadcastGameState(stateSync, this.io); // UDP, Socket.IO until a peer's channel opens
-        else this.io.volatile.emit('game_state', stateSync);
 
         const active = ids.filter(id => !this.players[id].finished).length;
         const over = this.mode === 'race'
@@ -495,4 +524,6 @@ class Game {
     }
 }
 
+Game.FLAGS = FLAGS;
+Game.META_FIELDS = META_FIELDS;
 module.exports = Game;

@@ -74,17 +74,6 @@ test('removing last unfinished racer ends race', () => {
     assert.strictEqual(finishedCalls, 1);
 });
 
-test('game_state fields', () => {
-    let sent = null;
-    const spyIo = { emit() {}, volatile: { emit: (ev, data) => { if (ev === 'game_state') sent = data; } } };
-    const g = new Game(spyIo, [lp('a')], monza, RACE, () => {});
-    g.update();
-    assert.deepStrictEqual(Object.keys(sent.a).sort(),
-        ['angle', 'bestLap', 'bestLapSectors', 'checkpoint', 'curLap', 'drs', 'drsAvailable', 'finished', 'gap', 'ghost', 'inPit', 'lap', 'lapValid', 'lapsDown', 'lastLap', 'lastValid', 'limiter', 'penalty', 'rank', 'speed', 'steer', 'x', 'y']);
-    assert.strictEqual(sent.a.rank, 1);
-    assert.strictEqual(sent.a.ghost, false);
-});
-
 test('initPayload carries players, track and mode', () => {
     const g = new Game(io, [lp('a')], monza, RACE, () => {}, 'quali');
     const p = g.initPayload();
@@ -265,17 +254,6 @@ test('pit wall blocks the straight → pit and pit → straight', () => {
     place(p, { x: q.px, y: q.py, angle: toPit + Math.PI }, 20);
     for (let k = 0; k < 120; k++) g.drive(p);
     assert.ok(Physics.nearestOnTrack(p.x, p.y, monza).dist > wallOff, 'car got out of the pit lane through the wall');
-});
-
-test('game_state carries inPit and limiter', () => {
-    let sent = null;
-    const io2 = { emit() {}, volatile: { emit(ev, d) { sent = d; } } };
-    const g = new Game(io2, [lp('a')], monza, RACE, () => {});
-    g.release();
-    place(g.players.a, box('haas'), 0);
-    g.update();
-    assert.strictEqual(sent.a.inPit, true);
-    assert.strictEqual(sent.a.limiter, true);
 });
 
 test('tracks without a pit lane still drive', () => {
@@ -802,4 +780,41 @@ test('slipstream: right behind another car cuts drag; alongside or far behind do
     Object.assign(b, { x: side.x - Math.sin(side.angle) * 4 * sc, y: side.y + Math.cos(side.angle) * 4 * sc, angle: side.angle });
     g.updateTow();
     assert.strictEqual(b.tow, 0, 'alongside is no tow');
+});
+
+test('fast update: compact per-car arrays with flags, at most 60 bytes per car', () => {
+    let pkt = null;
+    const io2 = { emit() {}, volatile: { emit(ev, d) { if (ev === 'game_state') pkt = d; } } };
+    const g = new Game(io2, [lp('a'), lp('b', 'haas')], monza, QUALI, () => {}, 'quali');
+    g.update();
+    assert.strictEqual(pkt.s, 1);
+    assert.strictEqual(typeof pkt.t, 'number');
+    assert.strictEqual(pkt.c.length, 2);
+    const a = pkt.c.find(e => e[0] === g.index.a);
+    assert.strictEqual(a.length, 7);
+    const F = Game.FLAGS;
+    assert.strictEqual(a[6] & (F.inPit | F.limiter | F.ghost), F.inPit | F.limiter | F.ghost, 'garage car: in pit, limiter, ghost');
+    for (const e of pkt.c) assert.ok(JSON.stringify(e).length <= 60, `${JSON.stringify(e).length} bytes`);
+    assert.deepStrictEqual(g.initPayload().index, g.index);
+});
+
+test('info update: everything first, then only what changed, at most 10 Hz', () => {
+    const metas = [];
+    const io2 = { emit(ev, d) { if (ev === 'game_meta') metas.push(d); }, volatile: { emit() {} } };
+    const g = new Game(io2, [lp('a')], monza, RACE, () => {});
+    g.release();
+    g.update();
+    assert.strictEqual(metas.length, 1);
+    assert.deepStrictEqual(Object.keys(metas[0].a).sort(), [...Game.META_FIELDS].sort());
+    for (let k = 0; k < 5; k++) g.update();
+    assert.strictEqual(metas.length, 1, 'nothing changed: no update');
+    g.players.a.penalty = 5;
+    g.update(); // seq 7: due
+    assert.deepStrictEqual(metas[1], { a: { penalty: 5 } });
+});
+
+test('late joiners get every field from game_init', () => {
+    const g = new Game(io, [lp('a')], monza, RACE, () => {});
+    const p = g.initPayload().players.a;
+    for (const f of Game.META_FIELDS) assert.ok(f in p, `${f} missing from game_init`);
 });
