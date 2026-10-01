@@ -76,3 +76,12 @@ test('late in-order arrivals never move a car backwards', () => {
     }
     assert.strictEqual(backward, 0, `${backward} frames went backwards`);
 });
+
+test('race time holds while the race clock is frozen (countdown), then runs', () => {
+    const b = new N.SnapshotBuffer();
+    b.push({ s: 1, t: 5.0, g: 0, c: [] }, 10);
+    b.push({ s: 2, t: 5.1, g: 0, c: [] }, 10.1);
+    assert.strictEqual(b.gameTime(5.3), 0, 'no lap time before lights out');
+    b.push({ s: 3, t: 5.2, g: 0.1, c: [] }, 10.2);
+    assert.ok(Math.abs(b.gameTime(5.3) - 0.2) < 1e-9, 'running clock is projected forward');
+});

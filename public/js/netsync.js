@@ -47,10 +47,13 @@ export class SnapshotBuffer {
         return this.lastNow;
     }
 
-    // Race time (lap timing) at server time serverT
+    // Race time (lap timing) at server time serverT; held still while the race clock is frozen (countdown)
     gameTime(serverT) {
-        const n = this.snaps.at(-1);
-        return n ? (n.g ?? n.t) + (serverT - n.t) : 0;
+        const n = this.snaps.at(-1), p = this.snaps.at(-2);
+        if (!n) return 0;
+        const g = n.g ?? n.t;
+        if (p && (p.g ?? p.t) === g) return g;
+        return g + (serverT - n.t);
     }
 
     latest() {
