@@ -297,15 +297,16 @@ function gridBoxes(slots) {
 function buildPit(pit) {
     const n = pit.path.length, ph = pit.width / 2, s = pit.trackSide;
     const inner = (i) => i >= 1 && i <= n - 3; // end segments would use wrapped normals
-    world.add(strip(pit.path, -ph, ph, 0.55, inner, solid('#3a3f47')));
+    const open = (i) => inner(i) && pit.cum[i] >= pit.closeS; // nothing drawn on the closed pit entry
+    world.add(strip(pit.path, -ph, ph, 0.55, open, solid('#3a3f47')));
     const line = 0.3 * scale;
-    world.add(strip(pit.path, ph - line, ph, 0.85, inner, solid('#f2f2f2')));
-    world.add(strip(pit.path, -ph, -ph + line, 0.85, inner, solid('#f2f2f2')));
+    world.add(strip(pit.path, ph - line, ph, 0.85, open, solid('#f2f2f2')));
+    world.add(strip(pit.path, -ph, -ph + line, 0.85, open, solid('#f2f2f2')));
 
     // Pit wall on the track side; outer wall behind the lane except where the garages open onto it
     world.add(wall(pit.wall, 0, 1 * scale, (i) => i < pit.wall.length - 1, solid('#9aa0a6')));
     const [lo, hi] = pit.garageSpan, back = ph + PIT_RUNOFF_M * scale;
-    world.add(wall(pit.path, -s * back, 1 * scale, (i) => inner(i) && (pit.cum[i + 1] < lo || pit.cum[i] > hi), solid('#9aa0a6')));
+    world.add(wall(pit.path, -s * back, 1 * scale, (i) => open(i) && (pit.cum[i + 1] < lo || pit.cum[i] > hi), solid('#9aa0a6')));
 
     const at = (s0) => {
         const i = Math.max(1, pit.cum.findIndex((c) => c >= s0));
@@ -319,11 +320,12 @@ function buildPit(pit) {
         m.rotation.y = facing(p.angle);
         world.add(m);
     };
-    board(pit.cum[2], 'PIT IN', '#d62828');
-    board(pit.limStart, 'PIT LIMIT 80', '#1e5bd8');
+    board(pit.closeS - 15 * scale, 'PIT CLOSED', '#d62828'); // ahead of the limiter board, seen first
+    board(Math.max(pit.limStart, pit.closeS), 'PIT LIMIT 80', '#1e5bd8');
     board(pit.limEnd, 'END LIMIT', '#1e5bd8');
     board(pit.cum[n - 3], 'PIT OUT', '#2a9d3f');
-    for (const s0 of [pit.limStart, pit.limEnd]) {
+    world.add(wall(pit.closeWall, 0, 1.2 * scale, (i) => i === 0, solid('#d62828')));
+    for (const s0 of [Math.max(pit.limStart, pit.closeS), pit.limEnd]) {
         const p = at(s0), m = flat(0.5 * scale, pit.width, 0xf2f2f2);
         m.position.set(p.x, 0.9, p.y);
         m.rotation.y = -p.angle;
@@ -589,9 +591,25 @@ window.showQualiResults = (list) => {
         const lp = clientState.players[r.id];
         const li = document.createElement('li');
         const gap = r.position > 1 && r.bestLap !== null && pole !== null ? `  +${(r.bestLap - pole).toFixed(3)}` : '';
-        li.textContent = `P${r.position}  ${lp ? lp.username : '—'}  ${r.bestLap === null ? 'no time' : fmtTime(r.bestLap)}${gap}`;
+        li.textContent = `P${r.position}  ${lp ? lp.username + window.assistBadge(lp) : '—'}  ${r.bestLap === null ? 'no time' : fmtTime(r.bestLap)}${gap}`;
         ol.appendChild(li);
     }
+};
+
+let flashTimer = null, bannerTimer = null;
+window.showSectorFlash = (n, time, delta, cls) => {
+    const el = $('sector-flash');
+    el.textContent = `S${n} ${time.toFixed(3)}` + (delta === null ? '' : `  ${delta < 0 ? '−' : '+'}${Math.abs(delta).toFixed(3)}`);
+    el.className = cls;
+    clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => el.classList.add('hidden'), 2000);
+};
+window.showBanner = (text) => {
+    const el = $('race-msg');
+    el.textContent = text;
+    el.classList.remove('hidden');
+    clearTimeout(bannerTimer);
+    bannerTimer = setTimeout(() => el.classList.add('hidden'), 3000);
 };
 
 function updateHUD() {
@@ -606,19 +624,28 @@ function updateHUD() {
     $('hud-speed').innerText = racing ? kmh(me.speed) : '--';
 
     // Own lap times: purple = fastest overall, green = personal best
-    $('lt-current').innerText = racing ? fmtTime(me.curLap) : '--';
+    const curEl = $('lt-current');
+    curEl.innerText = racing ? fmtTime(me.curLap) : '--';
+    curEl.classList.toggle('t-red', !!racing && me.lapValid === false);
     const lastEl = $('lt-last');
-    lastEl.innerText = racing ? fmtTime(me.lastLap) : '--';
-    lastEl.classList.toggle('t-purple', !!racing && me.lastLap !== null && me.lastLap === fastest);
-    lastEl.classList.toggle('t-green', !!racing && me.lastLap !== null && me.lastLap === me.bestLap && me.lastLap !== fastest);
+    const deleted = !!racing && me.lastValid === false;
+    lastEl.innerText = racing ? fmtTime(me.lastLap) + (deleted ? ' DELETED' : '') : '--';
+    lastEl.classList.toggle('t-red', deleted);
+    lastEl.classList.toggle('t-purple', !deleted && !!racing && me.lastLap !== null && me.lastLap === fastest);
+    lastEl.classList.toggle('t-green', !deleted && !!racing && me.lastLap !== null && me.lastLap === me.bestLap && me.lastLap !== fastest);
     $('lt-best').innerText = racing ? fmtTime(me.bestLap) : '--';
+    for (let i = 0; i < 3; i++) {
+        const el = $(`sec-${i + 1}`), s = racing ? clientState.mySectors[i] : null;
+        el.textContent = s ? `S${i + 1} ${s.time.toFixed(3)}` : `S${i + 1}`;
+        el.className = `sec ${s ? s.cls : ''}`;
+    }
 
     // Session bar
     const sess = clientState.session;
     let bar = '';
     if (clientState.status === 'QUALIFYING' && sess) {
-        bar = sess.phase === 'QUALI_FLAG' ? 'CHEQUERED FLAG' : `QUALIFYING ${fmtClock(sess.endsAt - Date.now())}`;
-        if (sess.phase !== 'QUALI_FLAG' && racing && me.curLap === null && !me.finished) bar += me.inPit ? ' · PIT LANE' : ' · OUT LAP';
+        bar = `QUALIFYING ${fmtClock(sess.endsAt - Date.now())}`;
+        if (racing) bar += me.finished ? ` · QUALIFYING COMPLETE — P${me.rank}` : me.curLap === null ? (me.inPit ? ' · PIT LANE' : ' · OUT LAP') : ` · LAP ${me.lap + 1}/2`;
     } else if (clientState.status === 'RACE' || clientState.status === 'FINISHED') {
         const leader = Object.values(gs).find(p => p.rank === 1);
         const lap = racing ? me.lap : leader ? leader.lap : 0;
@@ -637,7 +664,7 @@ function updateHUD() {
         const li = document.createElement('li');
         const name = document.createElement('span');
         name.className = 'tt-name';
-        name.textContent = `${p.rank}. ${lp.username}`;
+        name.textContent = `${p.rank}. ${lp.username}${window.assistBadge(lp)}${p.penalty ? ` +${p.penalty}s` : ''}`;
         const time = document.createElement('span');
         if (quali) {
             time.textContent = p.rank === 1 ? fmtTime(p.bestLap) : p.gap === null ? fmtTime(p.bestLap) : `+${p.gap.toFixed(3)}`;
@@ -647,7 +674,19 @@ function updateHUD() {
         } else {
             time.textContent = p.rank === 1 ? 'LEADER' : p.lapsDown > 0 ? `+${p.lapsDown} L` : p.gap === null ? '' : `+${p.gap.toFixed(3)}`;
         }
-        li.append(name, time);
+        if (quali) {
+            const bars = document.createElement('span');
+            bars.className = 'tt-sectors';
+            (p.bestLapSectors || [null, null, null]).forEach((s, i) => {
+                const b = document.createElement('i');
+                const best = clientState.sessionBest[i];
+                if (s !== null) b.className = best !== null && s <= best + 1e-9 ? 'sb-purple' : 'sb-yellow';
+                bars.appendChild(b);
+            });
+            li.append(name, bars, time);
+        } else {
+            li.append(name, time);
+        }
         ol.appendChild(li);
     });
 }
@@ -664,7 +703,8 @@ function drawMinimap() {
         mm.strokeStyle = 'rgba(255,255,255,0.45)';
         mm.lineWidth = 2;
         mm.beginPath();
-        t.pit.path.forEach((p, i) => (i ? mm.lineTo(mx(p.x), my(p.y)) : mm.moveTo(mx(p.x), my(p.y))));
+        t.pit.path.filter((_, i) => t.pit.cum[i] >= t.pit.closeS)
+            .forEach((p, i) => (i ? mm.lineTo(mx(p.x), my(p.y)) : mm.moveTo(mx(p.x), my(p.y))));
         mm.stroke();
     }
     mm.strokeStyle = 'rgba(255,255,255,0.85)';

@@ -6,7 +6,10 @@ let clientState = {
     players: {},
     hostId: null,
     status: 'LOBBY',
-    settings: { trackId: 'monza', maxLaps: 3, qualiMinutes: 3 },
+    settings: { trackId: 'monza', maxLaps: 3, qualifying: true },
+    sessionBest: [null, null, null], // fastest valid sector times this session
+    mySectors: [null, null, null],   // current lap: { time, cls }
+    myBestSectors: [null, null, null],
     gameState: null,
     trackData: null, // static track geometry
     session: null,      // { phase, endsAt } — endsAt in local ms, null for open-ended
@@ -79,6 +82,9 @@ socket.on('status_change', (status) => {
 socket.on('game_init', (data) => {
     clientState.gameState = data.players;
     clientState.trackData = data.track;
+    clientState.sessionBest = [null, null, null];
+    clientState.mySectors = [null, null, null];
+    clientState.myBestSectors = [null, null, null];
     if (window.initGameVisuals) window.initGameVisuals();
 });
 
@@ -113,4 +119,23 @@ socket.on('timing', (t) => {
         void el.offsetWidth; // restart the animation
         el.classList.add('t-flash');
     }
+});
+
+socket.on('sector', (s) => {
+    const i = s.sector - 1;
+    if (s.sessionBest) clientState.sessionBest[i] = s.time;
+    if (s.id !== clientState.me) return;
+    const cls = !s.valid ? 'sec-grey' : s.sessionBest ? 'sec-purple' : s.personalBest ? 'sec-green' : 'sec-yellow';
+    const prev = clientState.myBestSectors[i];
+    if (s.personalBest) clientState.myBestSectors[i] = s.time;
+    if (s.sector === 1) clientState.mySectors = [null, null, null];
+    clientState.mySectors[i] = { time: s.time, cls };
+    if (window.showSectorFlash) window.showSectorFlash(s.sector, s.time, prev === null ? null : s.time - prev, cls);
+});
+
+socket.on('track_limits', (e) => {
+    if (e.id !== clientState.me || !window.showBanner) return;
+    window.showBanner(e.kind === 'deleted' ? 'TRACK LIMITS — LAP DELETED'
+        : e.kind === 'warning' ? `TRACK LIMITS — WARNING ${e.count}/2`
+        : `+5s PENALTY (total +${e.penalty}s)`);
 });

@@ -24,6 +24,14 @@
                         <div id="team-grid"></div>
                     </div>
                     
+                    <label class="assist-picker">Assists:
+                        <select id="assist-select">
+                            <option value="off">Off</option>
+                            <option value="steering" selected>Steering</option>
+                            <option value="full">Full (steering + braking)</option>
+                        </select>
+                    </label>
+
                     <button id="btn-join" class="btn primary">Join Lobby</button>
                     
                     <div id="player-controls" class="hidden">
@@ -45,17 +53,8 @@
                             </label>
                             <label>Qualifying:
                                 <select id="setting-quali">
+                                    <option value="1" selected>On (out-lap + 2 laps)</option>
                                     <option value="0">Off</option>
-                                    <option value="1">1 min</option>
-                                    <option value="2">2 min</option>
-                                    <option value="3" selected>3 min</option>
-                                    <option value="4">4 min</option>
-                                    <option value="5">5 min</option>
-                                    <option value="6">6 min</option>
-                                    <option value="7">7 min</option>
-                                    <option value="8">8 min</option>
-                                    <option value="9">9 min</option>
-                                    <option value="10">10 min</option>
                                 </select>
                             </label>
                             <button id="btn-start" class="btn success mt-1">Start Race</button>
@@ -99,6 +98,7 @@
                     <div>LAP <span id="lt-current">--</span></div>
                     <div>LAST <span id="lt-last">--</span></div>
                     <div>BEST <span id="lt-best">--</span></div>
+                    <div id="sector-panel"><span class="sec" id="sec-1">S1</span><span class="sec" id="sec-2">S2</span><span class="sec" id="sec-3">S3</span></div>
                 </div>
                 <div class="hud-speedometer"><span id="hud-speed">0</span> KM/H</div>
             </div>
@@ -106,6 +106,8 @@
             <canvas id="minimap" width="220" height="220"></canvas>
             <div id="session-bar"></div>
             <div id="pit-limiter" class="hidden">PIT LIMITER 80</div>
+            <div id="sector-flash" class="hidden"></div>
+            <div id="race-msg" class="hidden"></div>
             <div id="lights" class="hidden">
                 <span class="light"></span><span class="light"></span><span class="light"></span><span class="light"></span><span class="light"></span>
             </div>

@@ -18,6 +18,15 @@ const hostSettings = document.getElementById('host-settings');
 const setTrack = document.getElementById('setting-track');
 const setLaps = document.getElementById('setting-laps');
 const setQuali = document.getElementById('setting-quali');
+const assistSelect = document.getElementById('assist-select');
+try { assistSelect.value = localStorage.getItem('lanrace.assist') || 'steering'; } catch (e) { /* storage blocked: keep the default */ }
+if (!assistSelect.value) assistSelect.value = 'steering'; // stored value no longer an option
+assistSelect.addEventListener('change', () => {
+    try { localStorage.setItem('lanrace.assist', assistSelect.value); } catch (e) { /* not persisted */ }
+    if (isJoined) socket.emit('set_assist', assistSelect.value);
+});
+const assistBadge = (p) => (p && p.assist === 'full' ? ' [F]' : p && p.assist === 'steering' ? ' [S]' : '');
+window.assistBadge = assistBadge;
 
 let isJoined = false;
 let amReady = false;
@@ -73,7 +82,7 @@ inputUser.focus();
 btnJoin.addEventListener('click', () => {
     if (!selectedTeam) return window.appendChat('SYSTEM', '#f43f5e', 'Pick a team first.');
     const username = inputUser.value.trim() || `Player${Math.floor(Math.random() * 1000)}`;
-    socket.emit('join_lobby', { username, teamId: selectedTeam });
+    socket.emit('join_lobby', { username, teamId: selectedTeam, assist: assistSelect.value });
     setJoinedUI(true);
 });
 
@@ -98,7 +107,7 @@ function emitSettings() {
     socket.emit('update_settings', {
         trackId: setTrack.value,
         maxLaps: parseInt(setLaps.value, 10),
-        qualiMinutes: parseInt(setQuali.value, 10)
+        qualifying: setQuali.value === '1'
     });
 }
 setTrack.addEventListener('change', emitSettings);
@@ -128,7 +137,7 @@ window.updateLobbyUI = () => {
 
         const nameNode = document.createElement('span');
         nameNode.className = 'player-name';
-        nameNode.textContent = player.username + (id === myId ? ' (You)' : '');
+        nameNode.textContent = player.username + assistBadge(player) + (id === myId ? ' (You)' : '');
 
         const statusNode = document.createElement('span');
         statusNode.className = 'player-status';
@@ -180,7 +189,7 @@ window.updateLobbyUI = () => {
 window.updateSettingsUI = () => {
     setTrack.value = clientState.settings.trackId;
     setLaps.value = clientState.settings.maxLaps;
-    setQuali.value = clientState.settings.qualiMinutes;
+    setQuali.value = clientState.settings.qualifying ? '1' : '0';
 };
 
 window.appendChat = (username, color, msg) => {

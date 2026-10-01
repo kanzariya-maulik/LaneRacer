@@ -415,3 +415,18 @@ input:focus { border: 1px solid var(--primary); }
 #quali-results-list li { margin-bottom: 6px; break-inside: avoid; }
 
 #pit-limiter { position: absolute; bottom: 120px; left: 50%; transform: translateX(-50%); background: #1e5bd8; color: #fff; font-weight: 800; letter-spacing: 1px; padding: 6px 14px; border-radius: 4px; }
+
+.assist-picker { display: block; margin: 10px 0; }
+#sector-panel { display: flex; gap: 8px; margin-top: 4px; font-family: monospace; }
+.sec { color: #cbd5e1; }
+.sec-purple { color: #c084fc; }
+.sec-green { color: #4ade80; }
+.sec-yellow { color: #facc15; }
+.sec-grey { color: #6b7280; }
+.t-red { color: #f87171; }
+#sector-flash { position: absolute; top: 34%; left: 50%; transform: translateX(-50%); font: 800 28px monospace; text-shadow: 0 2px 6px #000; }
+#race-msg { position: absolute; top: 22%; left: 50%; transform: translateX(-50%); background: rgba(200, 20, 20, 0.9); color: #fff; font-weight: 800; letter-spacing: 1px; padding: 8px 18px; border-radius: 4px; }
+.tt-sectors { display: inline-flex; gap: 2px; margin: 0 6px; }
+.tt-sectors i { display: inline-block; width: 10px; height: 4px; background: #4b5563; }
+.tt-sectors i.sb-purple { background: #c084fc; }
+.tt-sectors i.sb-yellow { background: #facc15; }
