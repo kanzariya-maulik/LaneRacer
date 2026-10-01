@@ -41,3 +41,22 @@ test('stepFollow: spectating follows a driver, not a position, and steps through
     assert.strictEqual(T.stepFollow(['b', 'c'], 'a', 0), 'b', 'followed driver left: back to the leader');
     assert.strictEqual(T.stepFollow([], 'a', 0), null);
 });
+
+test('inDrsZone: zones by lap distance, including one that wraps past the start line', () => {
+    const zones = [{ startS: 100, endS: 300 }, { startS: 900, endS: 50 }];
+    assert.strictEqual(T.inDrsZone(zones, 150), true);
+    assert.strictEqual(T.inDrsZone(zones, 500), false);
+    assert.strictEqual(T.inDrsZone(zones, 950), true);
+    assert.strictEqual(T.inDrsZone(zones, 20), true, 'wrapped zone');
+});
+
+test('drsHint explains why DRS is off', () => {
+    const base = { mode: 'race', inPit: false, drs: false, drsAvailable: false, lap: 2, inZone: false };
+    assert.strictEqual(T.drsHint({ ...base, inPit: true }), 'PIT LANE');
+    assert.strictEqual(T.drsHint({ ...base, drs: true }), 'OPEN');
+    assert.strictEqual(T.drsHint({ ...base, drsAvailable: true }), 'PRESS E / Y');
+    assert.strictEqual(T.drsHint({ ...base, lap: 0 }), 'FROM LAP 2');
+    assert.strictEqual(T.drsHint({ ...base, inZone: true }), 'NEED < 1.0 s');
+    assert.strictEqual(T.drsHint(base), 'IN DRS ZONES');
+    assert.strictEqual(T.drsHint({ ...base, mode: 'quali', lap: 0 }), 'IN DRS ZONES', 'quali: no lap or gap rule');
+});

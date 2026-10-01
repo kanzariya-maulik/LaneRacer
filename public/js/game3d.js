@@ -6,7 +6,7 @@ import { keyboardStep, gamepadInput, changed } from './input.js';
 import { LEVELS, ratioRange, resolveLevel, autoPick, adaptStep, snapLight, frameCapped } from './quality.js';
 import { placeScenery, seedOf } from './scenery.js';
 import { SnapshotBuffer, sample, project, decodeFlags, INTERP_S } from './netsync.js';
-import { gapText, driverCode, lapDelta, stepFollow } from './timing.js';
+import { gapText, driverCode, lapDelta, stepFollow, inDrsZone, drsHint } from './timing.js';
 import { MODES, segmentColor, cornerMask, aheadM, trackIndex, nextMode } from './racingline.js';
 
 // World units per metre come from the track JSON (track.scale = 6).
@@ -98,7 +98,7 @@ function toggleTower() {
 }
 document.getElementById('tt-head').addEventListener('click', toggleTower);
 // Racing line: one chevron mesh per world, recoloured with the HUD
-let line = null, lineIdx = null, padX = false;
+let line = null, lineIdx = null, padX = false, drsIdx = null;
 const lineChoice = () => { const v = store.get('lanrace.line'); return MODES.includes(v) ? v : 'corners'; };
 let lineMode = lineChoice();
 function toggleLine() {
@@ -507,6 +507,7 @@ const LINE_RGB = { green: new THREE.Color('#22c55e'), yellow: new THREE.Color('#
 function buildRacingLine(t) {
     line = null;
     lineIdx = null;
+    drsIdx = null;
     lineMode = lineChoice(); // each session starts from the lobby choice
     const rl = t.racingLine;
     if (!rl) return;
@@ -1047,6 +1048,14 @@ function updateHUD(withTower = true) {
     $('session-bar').textContent = bar;
     $('pit-limiter').classList.toggle('hidden', !(racing && me.limiter));
     $('drs-badge').className = !racing ? 'drs-off' : me.drs ? 'drs-open' : me.drsAvailable ? 'drs-avail' : 'drs-off';
+    let hint = '';
+    if (racing && clientState.trackData) {
+        const t = clientState.trackData, total = t.cum[t.path.length];
+        drsIdx = trackIndex(t.path, me.x, me.y, drsIdx, t.width);
+        const lapS = (((t.cum[drsIdx] - (t.startS || 0)) % total) + total) % total;
+        hint = drsHint({ mode: me.ghost ? 'quali' : 'race', inPit: me.inPit, drs: me.drs, drsAvailable: me.drsAvailable, lap: me.lap, inZone: inDrsZone(t.drsZones || [], lapS) });
+    }
+    $('drs-hint').textContent = hint;
 
     if (withTower) {
         // Timing tower

@@ -32,3 +32,18 @@ export function stepFollow(ids, current, step) {
     if (i < 0) return ids[0];
     return ids[(((i + step) % ids.length) + ids.length) % ids.length];
 }
+
+// Lap distance (world units from the start line) inside a DRS zone; zones may wrap past the line
+export function inDrsZone(zones, lapS) {
+    return zones.some((z) => (z.startS <= z.endS ? lapS >= z.startS && lapS < z.endS : lapS >= z.startS || lapS < z.endS));
+}
+
+// Why DRS is off (or how to open it), shown under the badge. Race: from lap 2, within 1.0 s at detection. Quali: free in the zones.
+export function drsHint({ mode, inPit, drs, drsAvailable, lap, inZone }) {
+    if (inPit) return 'PIT LANE';
+    if (drs) return 'OPEN';
+    if (drsAvailable) return 'PRESS E / Y';
+    if (mode === 'race' && lap < 1) return 'FROM LAP 2';
+    if (mode === 'race' && inZone) return 'NEED < 1.0 s';
+    return 'IN DRS ZONES';
+}

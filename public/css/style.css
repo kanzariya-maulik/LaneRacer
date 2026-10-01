@@ -457,6 +457,8 @@ input:focus { border: 1px solid var(--primary); }
 
 #drs-badge { width: fit-content; margin: 8px 0 8px auto; font: 900 1.1rem sans-serif; letter-spacing: 2px; padding: 6px 14px; border-radius: 6px; border: 3px solid #4b5563; color: #6b7280; background: #111827; }
 #drs-badge.drs-avail { border-color: #22c55e; color: #22c55e; }
+#drs-hint { text-align: right; margin: -4px 0 8px; font: 800 0.7rem sans-serif; letter-spacing: 1px; color: #cbd5e1; text-shadow: 0 1px 3px #000; }
+#drs-hint:empty { display: none; }
 #drs-badge.drs-open { border-color: #22c55e; background: #22c55e; color: #052e16; }
 #race-msg.good { background: rgba(22, 163, 74, 0.9); }
 
