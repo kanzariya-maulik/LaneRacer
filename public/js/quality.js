@@ -37,9 +37,11 @@ export function adaptStep(st, fps) {
         st.ceil = round(from - 0.05);
     }
     if (fps < 50) {
-        if (st.noDrop || st.ratio <= st.min) return { ...st, good: 0 };
-        return { ...st, ratio: st.min, good: 0, need: 10, probe: { fps, from: st.ratio } };
+        const slow = (st.slow || 0) + 1; // two slow seconds in a row: a one-off hitch (loading, rebuild) isn't a slow GPU
+        if (st.noDrop || st.ratio <= st.min || slow < 2) return { ...st, good: 0, slow };
+        return { ...st, ratio: st.min, good: 0, slow: 0, need: 10, probe: { fps, from: st.ratio } };
     }
+    st = { ...st, slow: 0 };
     if (fps <= 58) return { ...st, good: 0 };
     const good = st.good + 1, top = Math.min(st.max, st.ceil ?? st.max);
     if (good >= (st.need || 3) && st.ratio < top) return { ...st, ratio: Math.min(top, round(st.ratio + 0.05)), good: 0, need: 3 };

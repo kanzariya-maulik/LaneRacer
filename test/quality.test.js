@@ -36,6 +36,8 @@ const run = (st, seq) => seq.reduce((x, f) => Q.adaptStep(x, f), st);
 test('adaptStep: GPU-bound at 30 fps (vsync) probes the minimum, keeps it if it helps, climbs back under a ceiling', () => {
     let st = { ratio: 2, min: 0.75, max: 2, good: 0 };
     st = Q.adaptStep(st, 30);
+    assert.strictEqual(st.ratio, 2, 'one slow second (a hitch) is ignored');
+    st = Q.adaptStep(st, 30);
     assert.strictEqual(st.ratio, 0.75, 'one big probe, not 0.1 steps');
     st = Q.adaptStep(st, 60);
     assert.strictEqual(st.ratio, 0.75, 'it helped: kept');
@@ -48,7 +50,7 @@ test('adaptStep: GPU-bound at 30 fps (vsync) probes the minimum, keeps it if it 
 
 test('adaptStep: a frame cap (no gain at the minimum) restores the ratio and stops lowering', () => {
     let st = { ratio: 2, min: 0.75, max: 2, good: 0 };
-    st = run(st, [30, 30]);
+    st = run(st, [30, 30, 30]);
     assert.strictEqual(st.ratio, 2);
     assert.strictEqual(st.noDrop, true);
     st = run(st, new Array(20).fill(30));
@@ -56,10 +58,10 @@ test('adaptStep: a frame cap (no gain at the minimum) restores the ratio and sto
 });
 
 test('adaptStep: when the ceiling ratio is too slow again, it probes again with a lower ceiling', () => {
-    let st = run({ ratio: 1, min: 0.6, max: 1, good: 0 }, [40, 60]);
+    let st = run({ ratio: 1, min: 0.6, max: 1, good: 0 }, [40, 40, 60]);
     assert.strictEqual(st.ratio, 0.6);
     st = run(st, new Array(10).fill(60));        // 0.65
-    st = run(st, [45, 60]);                       // too slow at 0.65 → min, ceiling 0.6
+    st = run(st, [45, 45, 60]);                   // too slow at 0.65 → min, ceiling 0.6
     assert.strictEqual(st.ratio, 0.6);
     st = run(st, new Array(50).fill(60));
     assert.strictEqual(st.ratio, 0.6, 'stays under the new ceiling');
@@ -68,7 +70,8 @@ test('adaptStep: when the ceiling ratio is too slow again, it probes again with 
 test('adaptStep: 50–58 fps holds, never above max, never below min', () => {
     assert.strictEqual(Q.adaptStep({ ratio: 0.8, min: 0.6, max: 1, good: 2 }, 55).good, 0);
     assert.strictEqual(Q.adaptStep({ ratio: 1, min: 0.6, max: 1, good: 5 }, 60).ratio, 1);
-    assert.strictEqual(Q.adaptStep({ ratio: 0.6, min: 0.6, max: 1, good: 0 }, 30).ratio, 0.6);
+    assert.strictEqual(run({ ratio: 0.6, min: 0.6, max: 1, good: 0 }, [30, 30]).ratio, 0.6);
+    assert.strictEqual(run({ ratio: 1, min: 0.6, max: 1, good: 0 }, [30, 60, 30, 60]).ratio, 1, 'isolated hitches never probe');
 });
 
 test('frameCapped: a steady 30 fps (Energy Saver) is detected, real slowness is not', () => {
