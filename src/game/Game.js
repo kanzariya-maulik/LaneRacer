@@ -406,6 +406,9 @@ class Game {
                 p.lapsDown = Math.floor((leader.progress - p.progress) / cpCount);
                 const mine = p.passTimes[p.progress], theirs = leader.passTimes[p.progress];
                 p.gap = i > 0 && p.lapsDown === 0 && mine !== undefined && theirs !== undefined ? mine - theirs : null;
+                // Cars are timed at their own last checkpoint, so a car can read closer than the one ahead: never show that
+                const ahead = i > 1 ? ranked[i - 1].gap : 0;
+                if (p.gap !== null && ahead !== null && p.gap < ahead) p.gap = ahead;
             }
         });
     }

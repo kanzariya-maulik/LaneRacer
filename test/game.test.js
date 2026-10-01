@@ -828,3 +828,15 @@ test('fast update clock keeps running through the race countdown; race time ride
     assert.ok(pkts[1].t > pkts[0].t, `clock stuck at ${pkts[0].t}`);
     assert.strictEqual(pkts[1].g, 0, 'race clock waits for lights out');
 });
+
+test('race gaps never shrink down the order (cars timed at different checkpoints)', () => {
+    const g = new Game(io, [lp('a'), lp('b'), lp('c')], monza, { maxLaps: 5, qualifying: false }, () => {});
+    const { a, b, c } = g.players;
+    Object.assign(a, { lap: 1, checkpoint: 3, progress: 19, passTimes: { 17: 90, 18: 96, 19: 100 } });
+    Object.assign(b, { lap: 1, checkpoint: 3, progress: 19, passTimes: { 19: 100.95 } });   // +0.95 at checkpoint 19
+    Object.assign(c, { lap: 1, checkpoint: 2, progress: 18, passTimes: { 18: 96.08 } });    // +0.08 at checkpoint 18
+    g.updateRanks();
+    assert.deepStrictEqual([a.rank, b.rank, c.rank], [1, 2, 3]);
+    close(b.gap, 0.95);
+    assert.ok(c.gap >= b.gap, `P3 gap ${c.gap} below P2 gap ${b.gap}`);
+});
