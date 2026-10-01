@@ -47,6 +47,7 @@ const tris = (g, mesh) => g.meshes[mesh].primitives.reduce((s, p) => s + g.acces
 test('car body: at most 8000 triangles and inside the old size box (glTF is Y-up: z → -Y)', () => {
     const g = glb(), body = g.nodes.find(n => n.name === 'body');
     assert.ok(tris(g, body.mesh) <= 8000, `${tris(g, body.mesh)} triangles`);
+    assert.strictEqual(g.meshes[body.mesh].primitives.length, 1, 'body must stay one draw call per car (one material)');
     for (const p of g.meshes[body.mesh].primitives) {
         const { min, max } = g.accessors[p.attributes.POSITION];
         assert.ok(min[0] >= -2.95 && max[0] <= 2.95, 'length');

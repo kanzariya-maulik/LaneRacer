@@ -86,6 +86,8 @@ def strut(part, parts, a, b, r=0.018, n=6):
     bx, by, bz = b
     dx, dy, dz = bx - ax, by - ay, bz - az
     L = (dx * dx + dy * dy + dz * dz) ** 0.5
+    if L < 1e-6:
+        raise ValueError(f'{part}: zero-length strut at {a}')
     bpy.ops.mesh.primitive_cylinder_add(vertices=n, radius=r, depth=L, location=((ax + bx) / 2, (ay + by) / 2, (az + bz) / 2))
     o = bpy.context.active_object
     # cylinder axis is +Z: rotate onto (dx, dy, dz)
@@ -117,6 +119,7 @@ def tube(part, parts, points, r=0.025):
     cu.dimensions = '3D'
     cu.bevel_depth = r
     cu.bevel_resolution = 2
+    cu.use_fill_caps = True  # closed ends: no holes where a tube meets a surface
     path = _catmull_rom(points)
     sp = cu.splines.new('POLY')
     sp.points.add(len(path) - 1)
@@ -210,6 +213,6 @@ def f1_body(P):
                                              (-2.31, 0.011, 0.011, 0.30, 0.94, 0.505 * s), (-2.46, 0.011, 0.011, 0.30, 0.95, 0.505 * s),
                                              (-2.56, 0.011, 0.011, 0.56, 0.88, 0.505 * s)], P, p=6, n=8))
     objs.append(tube('rw_pillar', P, [(-1.96, 0.0, 0.33), (-2.03, 0.0, 0.62), (-2.06, 0.0, 0.86), (-2.12, 0.0, 0.90),
-                                       (-2.20, 0.0, 0.86)], r=0.02))       # swan neck: up, over the leading edge, onto the top
+                                       (-2.20, 0.0, 0.84)], r=0.02))       # swan neck: up, over the leading edge, onto the top
     objs.append(ellipsoid('rw_pillar', P, (-2.33, 0, 0.955), (0.06, 0.025, 0.02), 8, 5))                     # DRS actuator pod
     return objs
