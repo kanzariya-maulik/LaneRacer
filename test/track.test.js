@@ -25,11 +25,36 @@ for (const id of Track.TRACK_IDS) {
         assert.ok(Math.hypot(a.x - b.x, a.y - b.y) < 15 * t.scale, 'last point should be near the first');
     });
 
-    test(`${id}: 16 checkpoints, first on the start line`, () => {
-        assert.strictEqual(t.checkpoints.length, 16);
+    test(`${id}: checkpoints per sector, first on the start line`, () => {
+        assert.ok(t.checkpoints.length >= 15 && t.checkpoints.length <= 19, `${t.checkpoints.length} checkpoints`);
         assert.strictEqual(t.checkpoints[0].x, t.start.x);
         assert.strictEqual(t.checkpoints[0].y, t.start.y);
         for (const cp of t.checkpoints) assert.strictEqual(cp.radius, t.width / 2 + 80);
+        const [a, b, c] = t.sectorCps;
+        assert.strictEqual(a, 0);
+        assert.ok(b >= 3 && c - b >= 3 && t.checkpoints.length - c >= 3, `sector cps ${t.sectorCps}`);
+    });
+
+    test(`${id}: sector lines are checkpoints at sector2M / sector3M`, () => {
+        const c = circuits[id];
+        for (const [k, m] of [[1, c.sector2M], [2, c.sector3M]]) {
+            const p = Track.pointAt(t.path, t.cum, (c.startLineM + m) * t.scale);
+            const cp = t.checkpoints[t.sectorCps[k]];
+            assert.ok(Math.hypot(cp.x - p.x, cp.y - p.y) < 1e-6, `sector ${k + 1} line misplaced`);
+        }
+    });
+
+    test(`${id}: pit entry closed just before the first garage`, () => {
+        const { closeS, closeWall, garageSpan, wall, path: pp, cum } = t.pit;
+        assert.ok(closeS < garageSpan[0] && closeS > garageSpan[0] - 11 * t.scale);
+        const n = Physics.nearestOnPath(wall[0].x, wall[0].y, pp, false);
+        assert.ok(closeS >= cum[n.i] + n.t * (cum[n.i + 1] - cum[n.i]) - 1, 'closure upstream of the pit wall');
+        assert.strictEqual(closeWall.length, 2);
+    });
+
+    test(`${id}: safe corner speeds`, () => {
+        assert.strictEqual(t.safeSpeed.length, t.path.length);
+        for (const v of t.safeSpeed) assert.ok(v > 15 && v <= 100);
     });
 
     test(`${id}: start line at circuits.json startLineM`, () => {
@@ -134,4 +159,5 @@ test('a track without a pit lane still builds', () => {
     assert.strictEqual(t.pit, null);
     assert.strictEqual(t.start.x, pts[0].x);
     assert.strictEqual(t.startPositions.length, 20);
+    assert.deepStrictEqual(t.sectorCps.length, 3);
 });

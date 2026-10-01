@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const Physics = require('./Physics');
+const Assist = require('./Assist');
 
 const TRACK_IDS = ['monza', 'spa', 'silverstone', 'suzuka', 'sakhir'];
 const DATA_DIR = path.join(__dirname, '..', '..', 'data', 'tracks');
@@ -12,6 +13,8 @@ const WALL_OFFSET = 80; // matches the invisible wall in Game.js
 const GARAGE_ORDER = ['redbull', 'ferrari', 'mercedes', 'alpine', 'mclaren', 'alfaromeo', 'astonmartin', 'haas', 'alphatauri', 'williams', 'redbull-suzuka'];
 const GARAGE_PITCH_M = 18;
 const BOX_GAP_M = 9;
+const CLOSE_GAP_M = 10;   // pit entry barrier this far before the first garage
+const PIT_RUNOFF_M = 2;   // matches Game.js
 const WALL_CLEAR_M = 0.5; // pit wall only where it stays this far off the track edge
 
 // cum[i] = distance along the loop to path[i]; cum[n] = full lap length
@@ -80,7 +83,12 @@ function buildPit(raw, circuit, track) {
     });
     const garageSpan = [centre - reach, centre + reach];
 
-    return { path: pts, width: raw.pit.width, cum, len, entryS, exitS, span, startOnPit, trackSide, limStart: limLo, limEnd: limHi, wall, garages, garageSpan, fitM: raw.pit.fitM };
+    // Pit entry closed (no pit stops): barrier across the lane just before the first garage
+    const closeS = Math.max(wallLo, garageSpan[0] - CLOSE_GAP_M * scale);
+    const cl = pointAt(pts, cum, closeS, false);
+    const closeWall = [lateral(cl, trackSide * half), lateral(cl, -trackSide * (half + PIT_RUNOFF_M * scale))].map(({ x, y }) => ({ x, y }));
+
+    return { path: pts, width: raw.pit.width, cum, len, entryS, exitS, span, startOnPit, trackSide, limStart: limLo, limEnd: limHi, wall, garages, garageSpan, closeS, closeWall, fitM: raw.pit.fitM };
 }
 
 function build(raw, circuit = {}) {
@@ -90,10 +98,22 @@ function build(raw, circuit = {}) {
     const startS = (circuit.startLineM || 0) * scale;
     const start = pointAt(pts, cum, startS);
 
-    const checkpoints = [];
-    for (let k = 0; k < CHECKPOINT_COUNT; k++) {
-        const p = pointAt(pts, cum, startS + (k * total) / CHECKPOINT_COUNT);
-        checkpoints.push({ x: p.x, y: p.y, radius: width / 2 + WALL_OFFSET });
+    // Checkpoints: the start line and both sector lines are checkpoints, the rest evenly spaced per sector
+    const bounds = [
+        0,
+        circuit.sector2M != null ? circuit.sector2M * scale : total / 3,
+        circuit.sector3M != null ? circuit.sector3M * scale : (2 * total) / 3,
+        total,
+    ];
+    const checkpoints = [], sectorCps = [];
+    for (let k = 0; k < 3; k++) {
+        const len = bounds[k + 1] - bounds[k];
+        const count = Math.max(3, Math.round((CHECKPOINT_COUNT * len) / total));
+        sectorCps.push(checkpoints.length);
+        for (let j = 0; j < count; j++) {
+            const p = pointAt(pts, cum, startS + bounds[k] + (j * len) / count);
+            checkpoints.push({ x: p.x, y: p.y, radius: width / 2 + WALL_OFFSET });
+        }
     }
 
     // Staggered two-column grid behind the start line; -1 = driver's left (y points down the screen)
@@ -104,7 +124,7 @@ function build(raw, circuit = {}) {
         startPositions.push(lateral(p, (i % 2 === 0 ? pole : -pole) * (width / 4)));
     }
 
-    const track = { id: raw.id, name: raw.name, scale, width, path: pts, cum, start, checkpoints, startPositions, pit: null };
+    const track = { id: raw.id, name: raw.name, scale, width, path: pts, cum, start, checkpoints, sectorCps, startPositions, safeSpeed: Assist.safeSpeeds(pts, scale), pit: null };
     if (raw.pit) track.pit = buildPit(raw, circuit, track);
     return track;
 }
