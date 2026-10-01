@@ -23,12 +23,12 @@ export function autoPick(avgFrameMs, current, dpr) {
     return current;
 }
 
-// Once a second: below 50 fps drop resolution 0.1; above 58 fps for 3 s raise it 0.05
+// Once a second: below 50 fps drop resolution 0.1; above 58 fps for 3 s raise it 0.05 (10 s right after a drop, so it doesn't flip-flop)
 export function adaptStep(st, fps) {
     const round = (v) => Math.round(v * 100) / 100;
-    if (fps < 50) return { ...st, ratio: Math.max(st.min, round(st.ratio - 0.1)), good: 0 };
+    if (fps < 50) return { ...st, ratio: Math.max(st.min, round(st.ratio - 0.1)), good: 0, need: 10 };
     if (fps <= 58) return { ...st, good: 0 };
     const good = st.good + 1;
-    if (good >= 3 && st.ratio < st.max) return { ...st, ratio: Math.min(st.max, round(st.ratio + 0.05)), good: 0 };
+    if (good >= (st.need || 3) && st.ratio < st.max) return { ...st, ratio: Math.min(st.max, round(st.ratio + 0.05)), good: 0, need: 3 };
     return { ...st, good };
 }

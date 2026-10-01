@@ -15,6 +15,12 @@ for (const id of Track.TRACK_IDS) {
             assert.ok(Physics.nearestOnTrack(o.x, o.y, t).dist > clear, `${id}: object on or near the track at ${o.x},${o.y}`);
             if (t.pit) assert.ok(Physics.nearestOnPath(o.x, o.y, t.pit.path, false).dist > t.pit.width / 2 + 6 * t.scale, `${id}: object in the pit lane`);
         }
+        // Whole grandstand footprint (60 m long, 12 m deep), not just its centre
+        for (const g of out.grandstands) for (let a = -30; a <= 30; a += 5) for (const d of [-6, 6]) {
+            const x = g.x + (Math.cos(g.angle) * a - Math.sin(g.angle) * d) * t.scale, y = g.y + (Math.sin(g.angle) * a + Math.cos(g.angle) * d) * t.scale;
+            assert.ok(Physics.nearestOnTrack(x, y, t).dist > clear, `${id}: grandstand reaches the track at ${x},${y}`);
+            if (t.pit) assert.ok(Physics.nearestOnPath(x, y, t.pit.path, false).dist > t.pit.width / 2 + 6 * t.scale, `${id}: grandstand over the pit lane`);
+        }
         assert.ok(out.grandstands.length >= 2, 'grandstands at the main straight and slow corners');
         assert.ok(out.trees.length > 50 && out.billboards.length > 3);
         assert.ok(out.slowCorners.length >= 2);

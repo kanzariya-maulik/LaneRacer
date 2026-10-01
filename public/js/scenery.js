@@ -62,7 +62,10 @@ export function placeScenery(t, density, seed) {
         const h = heading(P, i);
         for (let extra = 0; extra < 60 * sc; extra += 10 * sc) {
             const q = offset(P[i], h, side * (back + extra));
-            if (ok(q.x, q.y)) return grandstands.push({ x: q.x, y: q.y, angle: h, len: 60 * sc });
+            const c = Math.cos(h), s = Math.sin(h);
+            const fits = [-30, -15, 0, 15, 30].every((a) => [-6, 6].every((d) =>
+                ok(q.x + (c * a - s * d) * sc, q.y + (s * a + c * d) * sc)));
+            if (fits) return grandstands.push({ x: q.x, y: q.y, angle: h, len: 60 * sc });
         }
     };
     const startIdx = t.cum ? t.cum.findIndex((c) => c >= (t.startS || 0)) : 0;
