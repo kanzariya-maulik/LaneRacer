@@ -147,7 +147,7 @@ class Game {
         CarPhysics.step(p, p.input, this.dt, scale, grass);
 
         // Pit wall: a move across it is undone
-        const hit = pit && Physics.crossWall(x0, y0, p.x, p.y, pit.wall);
+        const hit = pit && (Physics.crossWall(x0, y0, p.x, p.y, pit.wall) || Physics.crossWall(x0, y0, p.x, p.y, pit.closeWall));
         if (hit) {
             p.x = x0 + hit.nx * 0.5;
             p.y = y0 + hit.ny * 0.5;
@@ -158,7 +158,9 @@ class Game {
         const wallDist = t.width / 2 + WALL_OFFSET;
         const pitDist = pit && pit.width / 2 + PIT_RUNOFF_M * scale;
         const after = Physics.nearestOnTrack(p.x, p.y, t), afterPit = nearPit(p.x, p.y);
-        const overTrack = after.dist - wallDist, overPit = afterPit ? afterPit.dist - pitDist : Infinity;
+        // The pit lane upstream of the closure barrier is off-limits (no pit stops)
+        const afterS = afterPit && pit.cum[afterPit.i] + afterPit.t * (pit.cum[afterPit.i + 1] - pit.cum[afterPit.i]);
+        const overTrack = after.dist - wallDist, overPit = afterPit && afterS >= pit.closeS ? afterPit.dist - pitDist : Infinity;
         if (overTrack > 0 && overPit > 0) {
             const [near, lim] = overPit < overTrack ? [afterPit, pitDist] : [after, wallDist];
             const nx = (p.x - near.px) / near.dist, ny = (p.y - near.py) / near.dist;

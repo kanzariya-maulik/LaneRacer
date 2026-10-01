@@ -419,3 +419,39 @@ test('quali session clock is the 6-minute cap', () => {
     g.stop();
     assert.deepStrictEqual(sessions, [{ phase: 'QUALIFYING', endsInMs: 360000 }]);
 });
+
+const pitS = (p) => {
+    const n = Physics.nearestOnPath(p.x, p.y, monza.pit.path, false);
+    return monza.pit.cum[n.i] + n.t * (monza.pit.cum[n.i + 1] - monza.pit.cum[n.i]);
+};
+const pitPoint = (s) => Track.pointAt(monza.pit.path, monza.pit.cum, s, false);
+
+test('pit entry is closed: driving up the pit lane stops before the garages', () => {
+    const g = new Game(io, [lp('a')], monza, RACE, () => {});
+    const p = g.players.a;
+    place(p, pitPoint(monza.pit.closeS - 30 * monza.scale), 20);
+    p.input = FULL;
+    for (let k = 0; k < 180; k++) {
+        g.drive(p);
+        assert.ok(pitS(p) < monza.pit.closeS, 'car got past the pit entry barrier');
+    }
+});
+
+test('garage cars still drive out of the pit lane', () => {
+    const g = new Game(io, [lp('a', 'redbull-suzuka')], monza, QUALI, () => {}, 'quali');
+    const p = g.players.a, s0 = pitS(p);
+    p.input = FULL;
+    for (let k = 0; k < 120; k++) g.drive(p);
+    assert.ok(pitS(p) - s0 > 10 * monza.scale, 'garage car could not drive off');
+});
+
+test('racing line past the pit entry is not blocked', () => {
+    const g = new Game(io, [lp('a')], monza, RACE, () => {});
+    const p = g.players.a;
+    const e = monza.pit.path[3], c = Physics.nearestOnTrack(e.x, e.y, monza);
+    const ahead = Track.pointAt(monza.path, monza.cum, monza.cum[c.i]);
+    place(p, { x: c.px, y: c.py, angle: ahead.angle }, 70);
+    const x0 = p.x, y0 = p.y;
+    for (let k = 0; k < 60; k++) g.drive(p);
+    assert.ok(Math.hypot(p.x - x0, p.y - y0) / monza.scale > 50, 'track car was stopped by the pit barrier');
+});
