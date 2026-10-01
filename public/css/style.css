@@ -413,3 +413,5 @@ input:focus { border: 1px solid var(--primary); }
     font-variant-numeric: tabular-nums;
 }
 #quali-results-list li { margin-bottom: 6px; break-inside: avoid; }
+
+#pit-limiter { position: absolute; bottom: 120px; left: 50%; transform: translateX(-50%); background: #1e5bd8; color: #fff; font-weight: 800; letter-spacing: 1px; padding: 6px 14px; border-radius: 4px; }

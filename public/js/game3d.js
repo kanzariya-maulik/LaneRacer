@@ -9,6 +9,9 @@ const CHASE_BACK_M = 10, CHASE_UP_M = 4, LOOK_AHEAD_M = 6;
 const CAR_SMOOTH = 25, CAM_TURN_SMOOTH = 8; // 1/s; time-based so lag doesn't grow at low frame rates
 const KERB_TURN = 0.05;
 const TAG_FULL_M = 40, TAG_GONE_M = 120; // name labels fade out between these camera distances       // rad per path segment (~10 m) → radius under ~200 m gets kerbs
+const PIT_RUNOFF_M = 2; // src/game/Game.js barrier outside the pit lane
+const teamInfo = {};
+fetch('teams.json').then(r => r.json()).then((list) => { for (const t of list) teamInfo[t.id] = t; });
 
 const canvas = document.getElementById('game-canvas');
 const minimap = document.getElementById('minimap');
@@ -156,9 +159,9 @@ function offsetPoints(path, offset) {
     });
 }
 
-function distToPath(p, path) {
+function distToPath(p, path, closed = true) {
     let best = Infinity;
-    for (let i = 0; i < path.length; i++) {
+    for (let i = 0; i < (closed ? path.length : path.length - 1); i++) {
         const a = path[i], b = path[(i + 1) % path.length];
         const l2 = (b.x - a.x) ** 2 + (b.y - a.y) ** 2;
         let t = l2 ? ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / l2 : 0;
@@ -229,7 +232,7 @@ function grassTexture(w, h) {
     return tex;
 }
 
-function startLine(path, width) {
+function startLine(start, width) {
     const c = document.createElement('canvas');
     c.width = 16; c.height = 128;
     const g = c.getContext('2d');
@@ -245,12 +248,111 @@ function startLine(path, width) {
     const geo = new THREE.PlaneGeometry(2 * scale, width);
     geo.rotateX(-Math.PI / 2);
     const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: tex }));
-    const a = path[0], b = path[1];
-    m.position.set(a.x, 1.0, a.y);
-    m.rotation.y = -Math.atan2(b.y - a.y, b.x - a.x);
+    m.position.set(start.x, 1.0, start.y);
+    m.rotation.y = -start.angle;
     m.receiveShadow = true;
     return m;
 }
+
+// Same sideways convention as offsetPoints and the server's Track.lateral
+const side = (p, angle, off) => ({ x: p.x - Math.sin(angle) * off, y: p.y + Math.cos(angle) * off });
+// Rotation that turns a plane's +z normal to face against heading a (toward an approaching car)
+const facing = (a) => Math.atan2(-Math.cos(a), -Math.sin(a));
+
+// Text on a plane: signs, boards, grid numbers
+function textPlane(text, w, h, bg, fg = '#fff') {
+    const c = document.createElement('canvas');
+    c.width = 256; c.height = Math.max(32, Math.round((256 * h) / w));
+    const g = c.getContext('2d');
+    g.fillStyle = bg; g.fillRect(0, 0, c.width, c.height);
+    g.fillStyle = fg; g.font = `bold ${Math.round(c.height * 0.6)}px sans-serif`;
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(text, c.width / 2, c.height / 2, c.width * 0.9);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshStandardMaterial({ map: tex, side: THREE.DoubleSide, transparent: true }));
+}
+
+function flat(w, d, color, opacity = 1) {
+    const geo = new THREE.PlaneGeometry(w, d);
+    geo.rotateX(-Math.PI / 2);
+    return new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color, transparent: opacity < 1, opacity }));
+}
+
+function gridBoxes(slots) {
+    slots.forEach((g, i) => {
+        const fx = Math.cos(g.angle), fy = Math.sin(g.angle);
+        const bar = flat(0.4 * scale, 2.6 * scale, 0xf2f2f2);
+        bar.position.set(g.x + fx * 3 * scale, 0.9, g.y + fy * 3 * scale);
+        bar.rotation.y = -g.angle;
+        world.add(bar);
+        const num = textPlane(String(i + 1), 1.6 * scale, 1.6 * scale, 'rgba(0,0,0,0)');
+        num.geometry.rotateX(-Math.PI / 2);
+        num.position.set(g.x + fx * 4.6 * scale, 0.95, g.y + fy * 4.6 * scale);
+        num.rotation.y = facing(g.angle);
+        world.add(num);
+    });
+}
+
+function buildPit(pit) {
+    const n = pit.path.length, ph = pit.width / 2, s = pit.trackSide;
+    const inner = (i) => i >= 1 && i <= n - 3; // end segments would use wrapped normals
+    world.add(strip(pit.path, -ph, ph, 0.55, inner, solid('#3a3f47')));
+    const line = 0.3 * scale;
+    world.add(strip(pit.path, ph - line, ph, 0.85, inner, solid('#f2f2f2')));
+    world.add(strip(pit.path, -ph, -ph + line, 0.85, inner, solid('#f2f2f2')));
+
+    // Pit wall on the track side; outer wall behind the lane except where the garages open onto it
+    world.add(wall(pit.wall, 0, 1 * scale, (i) => i < pit.wall.length - 1, solid('#9aa0a6')));
+    const [lo, hi] = pit.garageSpan, back = ph + PIT_RUNOFF_M * scale;
+    world.add(wall(pit.path, -s * back, 1 * scale, (i) => inner(i) && (pit.cum[i + 1] < lo || pit.cum[i] > hi), solid('#9aa0a6')));
+
+    const at = (s0) => {
+        const i = Math.max(1, pit.cum.findIndex((c) => c >= s0));
+        const a = pit.path[i - 1], b = pit.path[i];
+        return { x: b.x, y: b.y, angle: Math.atan2(b.y - a.y, b.x - a.x) };
+    };
+    const board = (s0, text, bg) => {
+        const p = at(s0), b = side(p, p.angle, -s * (ph + 1 * scale));
+        const m = textPlane(text, 3 * scale, 1.5 * scale, bg);
+        m.position.set(b.x, 2 * scale, b.y);
+        m.rotation.y = facing(p.angle);
+        world.add(m);
+    };
+    board(pit.cum[2], 'PIT IN', '#d62828');
+    board(pit.limStart, 'PIT LIMIT 80', '#1e5bd8');
+    board(pit.limEnd, 'END LIMIT', '#1e5bd8');
+    board(pit.cum[n - 3], 'PIT OUT', '#2a9d3f');
+    for (const s0 of [pit.limStart, pit.limEnd]) {
+        const p = at(s0), m = flat(0.5 * scale, pit.width, 0xf2f2f2);
+        m.position.set(p.x, 0.9, p.y);
+        m.rotation.y = -p.angle;
+        world.add(m);
+    }
+
+    for (const g of pit.garages) {
+        const info = teamInfo[g.teamId] || { name: g.teamId, chatColor: '#888888' };
+        const c = side(g, g.angle, -s * (back + 2.5 * scale));
+        const building = new THREE.Mesh(new THREE.BoxGeometry(18 * scale, 6 * scale, 5 * scale), new THREE.MeshStandardMaterial({ color: 0x2b2f36 }));
+        building.position.set(c.x, 3 * scale, c.y);
+        building.rotation.y = -g.angle;
+        building.castShadow = true;
+        world.add(building);
+        const f = side(g, g.angle, -s * (back - 0.1 * scale));
+        const sign = textPlane(info.name.toUpperCase(), 17 * scale, 1.6 * scale, info.chatColor);
+        sign.position.set(f.x, 5 * scale, f.y);
+        sign.rotation.y = s > 0 ? -g.angle : Math.PI - g.angle; // face the pit lane
+        world.add(sign);
+        for (const b of g.boxes) {
+            const mark = flat(6 * scale, 2.6 * scale, info.chatColor, 0.45);
+            mark.position.set(b.x, 0.8, b.y);
+            mark.rotation.y = -b.angle;
+            world.add(mark);
+        }
+    }
+}
+
+const solid = (hex) => { const c = new THREE.Color(hex); return () => c; };
 
 function buildWorld(t) {
     if (world) {
@@ -266,7 +368,6 @@ function buildWorld(t) {
     const path = t.path, half = t.width / 2, n = path.length;
     bounds = getBounds(path);
     const all = () => true;
-    const solid = (hex) => { const c = new THREE.Color(hex); return () => c; };
     const alternate = (h1, h2) => { const a = new THREE.Color(h1), b = new THREE.Color(h2); return (i) => (i % 2 ? a : b); };
 
     const gw = bounds.maxX - bounds.minX + 8000, gh = bounds.maxY - bounds.minY + 8000;
@@ -290,12 +391,15 @@ function buildWorld(t) {
 
     // Barriers exactly where the physics wall is; skipped where another part of the track is closer
     const wallOff = half + WALL_OFFSET;
-    for (const side of [1, -1]) {
-        const ok = offsetPoints(path, side * wallOff).map((p) => distToPath(p, path) > wallOff * 0.95);
-        world.add(wall(path, side * wallOff, 1 * scale, (i) => ok[i] && ok[(i + 1) % n], alternate('#d62828', '#f2f2f2')));
+    for (const dir of [1, -1]) {
+        const ok = offsetPoints(path, dir * wallOff).map((p) => distToPath(p, path) > wallOff * 0.95
+            && !(t.pit && distToPath(p, t.pit.path, false) < t.pit.width / 2 + (PIT_RUNOFF_M + 2) * scale));
+        world.add(wall(path, dir * wallOff, 1 * scale, (i) => ok[i] && ok[(i + 1) % n], alternate('#d62828', '#f2f2f2')));
     }
 
-    world.add(startLine(path, t.width));
+    world.add(startLine(t.start, t.width));
+    gridBoxes(t.startPositions);
+    if (t.pit) buildPit(t.pit);
     snapCamera = true;
 }
 
@@ -514,12 +618,14 @@ function updateHUD() {
     let bar = '';
     if (clientState.status === 'QUALIFYING' && sess) {
         bar = sess.phase === 'QUALI_FLAG' ? 'CHEQUERED FLAG' : `QUALIFYING ${fmtClock(sess.endsAt - Date.now())}`;
+        if (sess.phase !== 'QUALI_FLAG' && racing && me.curLap === null && !me.finished) bar += me.inPit ? ' · PIT LANE' : ' · OUT LAP';
     } else if (clientState.status === 'RACE' || clientState.status === 'FINISHED') {
         const leader = Object.values(gs).find(p => p.rank === 1);
         const lap = racing ? me.lap : leader ? leader.lap : 0;
         bar = `LAP ${lapLabel(lap)}/${clientState.settings.maxLaps}`;
     }
     $('session-bar').textContent = bar;
+    $('pit-limiter').classList.toggle('hidden', !(racing && me.limiter));
 
     // Timing tower
     const quali = Object.values(gs).some(p => p.ghost);
@@ -554,6 +660,13 @@ function drawMinimap() {
     const my = (y) => pad + (y - bounds.minY) * k;
 
     mm.clearRect(0, 0, W, H);
+    if (t.pit) {
+        mm.strokeStyle = 'rgba(255,255,255,0.45)';
+        mm.lineWidth = 2;
+        mm.beginPath();
+        t.pit.path.forEach((p, i) => (i ? mm.lineTo(mx(p.x), my(p.y)) : mm.moveTo(mx(p.x), my(p.y))));
+        mm.stroke();
+    }
     mm.strokeStyle = 'rgba(255,255,255,0.85)';
     mm.lineWidth = 4;
     mm.lineJoin = 'round';
