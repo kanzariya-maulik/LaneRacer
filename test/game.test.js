@@ -3,6 +3,7 @@ const assert = require('node:assert');
 const Game = require('../src/game/Game');
 const Track = require('../src/game/Track');
 const Physics = require('../src/game/Physics');
+const CarPhysics = require('../src/game/CarPhysics');
 
 const io = { emit() {}, volatile: { emit() {} } };
 const monza = Track.load('monza');
@@ -78,7 +79,7 @@ test('game_state fields', () => {
     const g = new Game(spyIo, [lp('a')], monza, RACE, () => {});
     g.update();
     assert.deepStrictEqual(Object.keys(sent.a).sort(),
-        ['angle', 'bestLap', 'checkpoint', 'curLap', 'finished', 'gap', 'ghost', 'lap', 'lapsDown', 'lastLap', 'rank', 'speed', 'steer', 'x', 'y']);
+        ['angle', 'bestLap', 'checkpoint', 'curLap', 'finished', 'gap', 'ghost', 'inPit', 'lap', 'lapsDown', 'lastLap', 'limiter', 'rank', 'speed', 'steer', 'x', 'y']);
     assert.strictEqual(sent.a.rank, 1);
     assert.strictEqual(sent.a.ghost, false);
 });
@@ -117,7 +118,8 @@ test('wall hit at speed: car ends inside the wall line, finite, slowed', () => {
     const wall = monza.width / 2 + 80;
     // Put the car just past the wall, heading straight out at 300 km/h
     const n = Physics.nearestOnTrack(a.x, a.y, monza);
-    const dirX = -Math.sin(a.angle), dirY = Math.cos(a.angle);
+    const k = monza.pit.trackSide; // away from the pit lane, which sits on the other side of the straight
+    const dirX = -Math.sin(a.angle) * k, dirY = Math.cos(a.angle) * k;
     a.x = n.px + dirX * (wall + 5); a.y = n.py + dirY * (wall + 5);
     a.vx = dirX * (300 / 3.6) * monza.scale; a.vy = dirY * (300 / 3.6) * monza.scale;
     g.update();
@@ -205,7 +207,8 @@ test('grazing the wall at a shallow angle keeps most of the speed; head-on does 
         const a = g.players.a;
         const wall = monza.width / 2 + 80;
         const n = Physics.nearestOnTrack(a.x, a.y, monza);
-        const out = { x: -Math.sin(a.angle), y: Math.cos(a.angle) };   // away from the centreline
+        const k = monza.pit.trackSide; // away from the centreline, on the side without the pit lane
+        const out = { x: -Math.sin(a.angle) * k, y: Math.cos(a.angle) * k };
         const along = { x: Math.cos(a.angle), y: Math.sin(a.angle) };
         const r = (deg * Math.PI) / 180, v = (300 / 3.6) * monza.scale;
         a.x = n.px + out.x * (wall + 2); a.y = n.py + out.y * (wall + 2);
@@ -215,4 +218,105 @@ test('grazing the wall at a shallow angle keeps most of the speed; head-on does 
         g.update();
         assert.ok(check(Math.hypot(a.vx, a.vy) / v), `${deg}°: kept ${Math.hypot(a.vx, a.vy) / v}`);
     }
+});
+
+const box = (team, i = 0) => monza.pit.garages.find(g => g.teamId === team).boxes[i];
+function place(p, at, speedMs = 0) {
+    p.x = at.x; p.y = at.y; p.angle = at.angle;
+    p.vx = Math.cos(at.angle) * speedMs * monza.scale;
+    p.vy = Math.sin(at.angle) * speedMs * monza.scale;
+    p.speed = speedMs * monza.scale;
+}
+const kmh = (p) => (Math.hypot(p.vx, p.vy) / monza.scale) * 3.6;
+const FULL = { throttle: 1, brake: 0, steer: 0 };
+
+test('pit limiter holds 80 km/h at full throttle in the limiter zone', () => {
+    const g = new Game(io, [lp('a')], monza, RACE, () => {});
+    const p = g.players.a;
+    place(p, box('ferrari'), 40);
+    p.input = FULL;
+    for (let k = 0; k < 60; k++) {
+        g.drive(p);
+        assert.ok(kmh(p) <= 80 + 1e-6, `${kmh(p).toFixed(1)} km/h`);
+    }
+    assert.ok(p.inPit && p.limiter);
+    assert.ok(kmh(p) > 79, 'limiter should hold the limit, not stop the car');
+});
+
+test('no limiter on the track', () => {
+    const g = new Game(io, [lp('a')], monza, RACE, () => {});
+    const p = g.players.a;
+    place(p, monza.start, 60);
+    p.input = FULL;
+    for (let k = 0; k < 10; k++) g.drive(p);
+    assert.ok(!p.inPit && !p.limiter);
+    assert.ok(kmh(p) > 200);
+});
+
+test('pit lane is asphalt, not grass', () => {
+    const g = new Game(io, [lp('a')], monza, RACE, () => {});
+    const p = g.players.a;
+    const c = monza.pit.garages[5];
+    place(p, c, 0);
+    p.input = FULL;
+    const ref = { ...p };
+    for (let k = 0; k < 30; k++) {
+        g.drive(p);
+        CarPhysics.step(ref, FULL, g.dt, monza.scale, false);
+    }
+    close(p.speed, ref.speed);
+});
+
+test('racing line beside the pit entry is not the pit lane', () => {
+    const g = new Game(io, [lp('a')], monza, RACE, () => {});
+    const p = g.players.a;
+    const e = monza.pit.path[3];
+    const c = Physics.nearestOnTrack(e.x, e.y, monza);
+    p.x = c.px; p.y = c.py;
+    g.updatePit(p);
+    assert.ok(!p.inPit && !p.limiter);
+});
+
+test('pit wall blocks the straight → pit and pit → straight', () => {
+    const w = monza.pit.wall[monza.pit.wall.length >> 1];
+    const c = Physics.nearestOnTrack(w.x, w.y, monza);
+    const wallOff = Physics.nearestOnTrack(w.x, w.y, monza).dist;
+    const toPit = Math.atan2(w.y - c.py, w.x - c.px);
+
+    const g = new Game(io, [lp('a')], monza, RACE, () => {});
+    const p = g.players.a;
+    place(p, { x: c.px, y: c.py, angle: toPit }, 30);
+    p.input = FULL;
+    for (let k = 0; k < 120; k++) {
+        g.drive(p);
+        assert.ok(!p.inPit, 'car got into the pit lane');
+    }
+    assert.ok(Physics.nearestOnTrack(p.x, p.y, monza).dist < wallOff);
+
+    const q = Physics.nearestOnPath(w.x, w.y, monza.pit.path, false);
+    place(p, { x: q.px, y: q.py, angle: toPit + Math.PI }, 20);
+    for (let k = 0; k < 120; k++) g.drive(p);
+    assert.ok(Physics.nearestOnTrack(p.x, p.y, monza).dist > wallOff, 'car got out of the pit lane through the wall');
+});
+
+test('game_state carries inPit and limiter', () => {
+    let sent = null;
+    const io2 = { emit() {}, volatile: { emit(ev, d) { sent = d; } } };
+    const g = new Game(io2, [lp('a')], monza, RACE, () => {});
+    g.release();
+    place(g.players.a, box('haas'), 0);
+    g.update();
+    assert.strictEqual(sent.a.inPit, true);
+    assert.strictEqual(sent.a.limiter, true);
+});
+
+test('tracks without a pit lane still drive', () => {
+    const pts = Array.from({ length: 100 }, (_, i) => ({ x: Math.cos(i / 50 * Math.PI) * 3000, y: Math.sin(i / 50 * Math.PI) * 3000 }));
+    const ring = Track.build({ id: 'ring', name: 'Ring', scale: 6, width: 80, path: pts });
+    const g = new Game(io, [lp('a')], ring, RACE, () => {});
+    g.release();
+    g.players.a.input = FULL;
+    g.update();
+    assert.ok(g.players.a.speed > 0);
+    assert.strictEqual(g.players.a.inPit, false);
 });

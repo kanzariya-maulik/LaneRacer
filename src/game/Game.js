@@ -4,6 +4,22 @@ const Physics = require('./Physics');
 const TICK_RATE = 60;
 const WALL_OFFSET = 80;     // world units past the track edge; Track.js checkpoints use the same
 const QUALI_CUTOFF_S = 150; // after the flag, laps in progress get this long to finish
+const PIT_LIMIT_KMH = 80;
+const PIT_RUNOFF_M = 2;     // barrier this far outside the pit lane edge
+
+// Barrier response: n points from the barrier back toward the car
+function bounce(p, nx, ny) {
+    const vn = -(p.vx * nx + p.vy * ny); // speed into the barrier
+    const v = Math.hypot(p.vx, p.vy);
+    if (vn > 0) { p.vx += vn * nx; p.vy += vn * ny; }
+    // Speed loss scales with how square-on the hit is: head-on keeps WALL_KEEP, a graze keeps almost all
+    const impact = v > 0 ? Math.max(0, vn) / v : 0;
+    const keep = 1 - (1 - CarPhysics.C.WALL_KEEP) * impact;
+    p.vx *= keep;
+    p.vy *= keep;
+    p.speed = p.vx * Math.cos(p.angle) + p.vy * Math.sin(p.angle);
+}
+
 
 class Game {
     constructor(io, players, track, settings, onFinish, mode = 'race') {
@@ -30,6 +46,7 @@ class Game {
                 teamId: p.teamId,
                 x: slot.x, y: slot.y, angle: slot.angle,
                 vx: 0, vy: 0, speed: 0, steer: 0,
+                inPit: false, limiter: false, pitS: 0,
                 lastSafeX: slot.x, lastSafeY: slot.y,
                 lap: 0,
                 // Race cars sit behind the line having "passed" checkpoint 0; quali cars must cross it to start a lap
@@ -103,26 +120,35 @@ class Game {
     }
 
     drive(p) {
-        const t = this.track, scale = t.scale;
-        const before = Physics.nearestOnTrack(p.x, p.y, t);
-        CarPhysics.step(p, p.input, this.dt, scale, before.dist > t.width / 2);
+        const t = this.track, scale = t.scale, pit = t.pit;
+        const x0 = p.x, y0 = p.y;
+        const nearPit = (x, y) => (pit ? Physics.nearestOnPath(x, y, pit.path, false) : null);
+        const before = Physics.nearestOnTrack(p.x, p.y, t), beforePit = nearPit(p.x, p.y);
+        const grass = before.dist > t.width / 2 && !(beforePit && beforePit.dist <= pit.width / 2);
+        CarPhysics.step(p, p.input, this.dt, scale, grass);
 
-        const wallDist = t.width / 2 + WALL_OFFSET;
-        const after = Physics.nearestOnTrack(p.x, p.y, t);
-        if (after.dist > wallDist) {
-            const nx = (p.x - after.px) / after.dist, ny = (p.y - after.py) / after.dist;
-            p.x = after.px + nx * (wallDist - 1);
-            p.y = after.py + ny * (wallDist - 1);
-            const vn = p.vx * nx + p.vy * ny;
-            const v = Math.hypot(p.vx, p.vy);
-            if (vn > 0) { p.vx -= vn * nx; p.vy -= vn * ny; }
-            // Speed loss scales with how square-on the hit is: head-on keeps WALL_KEEP, a graze keeps almost all
-            const impact = v > 0 ? Math.max(0, vn) / v : 0;
-            const keep = 1 - (1 - CarPhysics.C.WALL_KEEP) * impact;
-            p.vx *= keep;
-            p.vy *= keep;
-            p.speed = p.vx * Math.cos(p.angle) + p.vy * Math.sin(p.angle);
+        // Pit wall: a move across it is undone
+        const hit = pit && Physics.crossWall(x0, y0, p.x, p.y, pit.wall);
+        if (hit) {
+            p.x = x0 + hit.nx * 0.5;
+            p.y = y0 + hit.ny * 0.5;
+            bounce(p, hit.nx, hit.ny);
         }
+
+        // Barrier: outside both the track's run-off and the pit lane's
+        const wallDist = t.width / 2 + WALL_OFFSET;
+        const pitDist = pit && pit.width / 2 + PIT_RUNOFF_M * scale;
+        const after = Physics.nearestOnTrack(p.x, p.y, t), afterPit = nearPit(p.x, p.y);
+        const overTrack = after.dist - wallDist, overPit = afterPit ? afterPit.dist - pitDist : Infinity;
+        if (overTrack > 0 && overPit > 0) {
+            const [near, lim] = overPit < overTrack ? [afterPit, pitDist] : [after, wallDist];
+            const nx = (p.x - near.px) / near.dist, ny = (p.y - near.py) / near.dist;
+            p.x = near.px + nx * (lim - 1);
+            p.y = near.py + ny * (lim - 1);
+            bounce(p, -nx, -ny);
+        }
+
+        if (pit) this.updatePit(p, after, afterPit);
 
         if ([p.x, p.y, p.vx, p.vy, p.angle].every(Number.isFinite)) {
             p.lastSafeX = p.x;
@@ -131,6 +157,22 @@ class Game {
             p.x = p.lastSafeX; p.y = p.lastSafeY;
             p.vx = p.vy = p.speed = 0;
             if (!Number.isFinite(p.angle)) p.angle = 0;
+        }
+    }
+
+    // In the pit lane = on pit asphalt and off the track's (where they overlap, it's track)
+    updatePit(p, near = Physics.nearestOnTrack(p.x, p.y, this.track), nearPit = Physics.nearestOnPath(p.x, p.y, this.track.pit.path, false)) {
+        const t = this.track, pit = t.pit;
+        p.inPit = nearPit.dist <= pit.width / 2 && near.dist > t.width / 2;
+        p.pitS = pit.cum[nearPit.i] + nearPit.t * (pit.cum[nearPit.i + 1] - pit.cum[nearPit.i]);
+        p.limiter = p.inPit && p.pitS >= pit.limStart && p.pitS <= pit.limEnd;
+        if (p.limiter) {
+            const max = (PIT_LIMIT_KMH / 3.6) * t.scale, v = Math.hypot(p.vx, p.vy);
+            if (v > max) {
+                p.vx *= max / v;
+                p.vy *= max / v;
+                p.speed = p.vx * Math.cos(p.angle) + p.vy * Math.sin(p.angle);
+            }
         }
     }
 
@@ -165,7 +207,7 @@ class Game {
         for (const id in this.players) {
             const p = this.players[id];
             stateSync[id] = {
-                x: p.x, y: p.y, angle: p.angle, speed: p.speed, steer: p.steer,
+                x: p.x, y: p.y, angle: p.angle, speed: p.speed, steer: p.steer, inPit: p.inPit, limiter: p.limiter,
                 lap: p.lap, checkpoint: p.checkpoint, rank: p.rank, finished: p.finished,
                 gap: p.gap, lapsDown: p.lapsDown, lastLap: p.lastLap, bestLap: p.bestLap,
                 curLap: p.lapStart === null || p.finished ? null : this.time - p.lapStart,
