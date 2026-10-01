@@ -1,5 +1,6 @@
 const CarPhysics = require('./CarPhysics');
 const Physics = require('./Physics');
+const { pointAt } = require('./Track');
 
 const TICK_RATE = 60;
 const WALL_OFFSET = 80;     // world units past the track edge; Track.js checkpoints use the same
@@ -38,8 +39,9 @@ class Game {
 
         const cpCount = track.checkpoints.length;
         this.players = {};
+        const boxes = mode === 'quali' && track.pit ? Game.garageSlots(players, track) : null;
         players.forEach((p, index) => {
-            const slot = track.startPositions[index % track.startPositions.length];
+            const slot = boxes ? boxes[index] : track.startPositions[index % track.startPositions.length];
             this.players[p.id] = {
                 id: p.id,
                 username: p.username,
@@ -89,6 +91,24 @@ class Game {
             }
             return a.bestLap - b.bestLap;
         });
+    }
+
+    // Each driver's box in their team's garage; unknown teams use the first garage
+    // ponytail: a third driver on one team reuses box 0; the lobby caps teams at 2
+    static garageSlots(players, track) {
+        const used = {};
+        return players.map((p) => {
+            const g = track.pit.garages.find(x => x.teamId === p.teamId) || track.pit.garages[0];
+            used[g.teamId] = (used[g.teamId] || 0) + 1;
+            return g.boxes[(used[g.teamId] - 1) % 2];
+        });
+    }
+
+    // Lap progress for a car in the pit lane: the matching point on the track
+    trackPos(p) {
+        const t = this.track, pit = t.pit;
+        if (!p.inPit) return p;
+        return pointAt(t.path, t.cum, pit.entryS + (p.pitS / pit.len) * pit.span);
     }
 
     initPayload() {
@@ -163,6 +183,7 @@ class Game {
     // In the pit lane = on pit asphalt and off the track's (where they overlap, it's track)
     updatePit(p, near = Physics.nearestOnTrack(p.x, p.y, this.track), nearPit = Physics.nearestOnPath(p.x, p.y, this.track.pit.path, false)) {
         const t = this.track, pit = t.pit;
+        const wasLimited = p.limiter;
         p.inPit = nearPit.dist <= pit.width / 2 && near.dist > t.width / 2;
         p.pitS = pit.cum[nearPit.i] + nearPit.t * (pit.cum[nearPit.i + 1] - pit.cum[nearPit.i]);
         p.limiter = p.inPit && p.pitS >= pit.limStart && p.pitS <= pit.limEnd;
@@ -174,6 +195,8 @@ class Game {
                 p.speed = p.vx * Math.cos(p.angle) + p.vy * Math.sin(p.angle);
             }
         }
+        // Crossing the pit entry line ends a timed lap
+        if (this.mode === 'quali' && p.limiter && !wasLimited) p.lapStart = null;
     }
 
     update() {
@@ -261,7 +284,8 @@ class Game {
         const cps = this.track.checkpoints;
         const target = (p.checkpoint + 1) % cps.length;
         const cp = cps[target];
-        if (Math.hypot(p.x - cp.x, p.y - cp.y) >= cp.radius) return;
+        const pos = this.trackPos(p);
+        if (Math.hypot(pos.x - cp.x, pos.y - cp.y) >= cp.radius) return;
 
         p.checkpoint = target;
         p.progress++;
@@ -290,7 +314,7 @@ class Game {
             p.lapStart = null;
             return;
         }
-        p.lapStart = this.time;
+        p.lapStart = p.inPit ? null : this.time; // out-lap: timing starts at the first crossing after pit exit
     }
 }
 

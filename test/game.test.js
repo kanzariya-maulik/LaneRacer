@@ -320,3 +320,73 @@ test('tracks without a pit lane still drive', () => {
     assert.ok(g.players.a.speed > 0);
     assert.strictEqual(g.players.a.inPit, false);
 });
+
+const QUALI = { maxLaps: 3, qualiMinutes: 1 };
+
+test('quali cars start in their own garage box, at rest, facing pit exit', () => {
+    const g = new Game(io, [lp('a'), lp('b'), lp('c', 'haas')], monza, QUALI, () => {}, 'quali');
+    for (const [id, b] of [['a', box('ferrari', 0)], ['b', box('ferrari', 1)], ['c', box('haas', 0)]]) {
+        const p = g.players[id];
+        assert.deepStrictEqual([p.x, p.y, p.angle, p.speed], [b.x, b.y, b.angle, 0], id);
+    }
+});
+
+test('quali: a team with no garage starts in the first garage', () => {
+    const g = new Game(io, [lp('z', 'nope')], monza, QUALI, () => {}, 'quali');
+    assert.strictEqual(g.players.z.x, monza.pit.garages[0].boxes[0].x);
+});
+
+test('race cars still start on the grid', () => {
+    const g = new Game(io, [lp('a')], monza, RACE, () => {});
+    assert.strictEqual(g.players.a.x, monza.startPositions[0].x);
+});
+
+test('quali: out-lap from the garage; timing starts at the first line crossing after pit exit', () => {
+    // redbull-suzuka is the last garage, before the line, so the car crosses the line in the pit lane
+    const g = new Game(io, [lp('a', 'redbull-suzuka')], monza, QUALI, () => {}, 'quali');
+    const p = g.players.a, pit = monza.pit;
+    const from = Physics.nearestOnPath(p.x, p.y, pit.path, false).i;
+    let crossed = false;
+    for (let i = from; i < pit.path.length; i++) {
+        g.time = i * 0.1;
+        p.x = pit.path[i].x; p.y = pit.path[i].y;
+        g.updatePit(p);
+        const before = p.checkpoint;
+        g.checkLapProgress(p);
+        if (before !== p.checkpoint && p.checkpoint === 0) crossed = true;
+        if (p.inPit) assert.strictEqual(p.lapStart, null, 'timing started in the pit lane');
+    }
+    assert.ok(crossed, 'car never crossed the line in the pit lane');
+    assert.ok(!p.inPit);
+    lap(g, p, 20, 30); // before the 60 s flag
+    assert.notStrictEqual(p.lapStart, null, 'timing never started');
+    assert.strictEqual(p.lastLap, null, 'out-lap must not be timed');
+});
+
+test('quali: crossing the pit entry line cancels the timed lap', () => {
+    const g = new Game(io, [lp('a')], monza, QUALI, () => {}, 'quali');
+    const p = g.players.a;
+    p.x = monza.start.x; p.y = monza.start.y;
+    g.updatePit(p);
+    p.lapStart = 3;
+    g.time = 50;
+    const b = box('haas');
+    p.x = b.x; p.y = b.y;
+    g.updatePit(p);
+    assert.strictEqual(p.lapStart, null);
+});
+
+test('race: a lap through the pit lane counts even where checkpoints are out of reach of the pit', () => {
+    const tight = { ...monza, checkpoints: monza.checkpoints.map(c => ({ ...c, radius: 5 * monza.scale })) };
+    const g = new Game(io, [lp('a')], tight, RACE, () => {});
+    g.release();
+    const p = g.players.a;
+    p.checkpoint = tight.checkpoints.length - 1;
+    monza.pit.path.forEach((q, i) => {
+        g.time = 60 + i * 0.1;
+        p.x = q.x; p.y = q.y;
+        g.updatePit(p);
+        g.checkLapProgress(p);
+    });
+    assert.strictEqual(p.lap, 1);
+});
