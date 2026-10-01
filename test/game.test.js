@@ -49,16 +49,17 @@ test('players start on grid slots at rest', () => {
     assert.strictEqual(g.players.a.teamId, 'ferrari');
 });
 
-test('race cars stay put before lights out even at full throttle, then drive', () => {
+test('race cars wait on the grid without input, then launch at lights out', () => {
     const g = new Game(io, [lp('a')], monza, RACE, () => {});
     const a = g.players.a, x0 = a.x, y0 = a.y;
-    g.handleInput('a', { throttle: 1, brake: 0, steer: 0 });
     for (let i = 0; i < 60; i++) g.update();
     assert.strictEqual(a.x, x0);
     assert.strictEqual(a.y, y0);
     g.release();
+    g.handleInput('a', { throttle: 1, brake: 0, steer: 0 });
     for (let i = 0; i < 60; i++) g.update();
     assert.ok(Math.hypot(a.x - x0, a.y - y0) > 3 * monza.scale, 'should launch > 3 m in 1 s');
+    assert.strictEqual(a.penalty, 0);
 });
 
 test('removing last unfinished racer ends race', () => {
@@ -706,4 +707,30 @@ test('walls stop the car body, not just its centre: nothing pokes through the pi
     for (let k = 0; k < 120; k++) g.drive(p);
     const d = (p.x - mx) * nx + (p.y - my) * ny;   // centre's distance in front of the barrier
     assert.ok(d >= Physics.CAR_HALF_LENGTH_M * monza.scale - 1, `nose ${((Physics.CAR_HALF_LENGTH_M * monza.scale - d) / monza.scale).toFixed(2)} m through the barrier`);
+});
+
+test('jump start: moving before lights out costs 5 s, once', () => {
+    const { events, io: sio } = spy();
+    const g = new Game(sio, [lp('a')], monza, RACE, () => {});
+    const p = g.players.a;
+    p.input = FULL;
+    for (let k = 0; k < 60; k++) g.update(); // lights still on
+    assert.strictEqual(p.penalty, 5);
+    assert.strictEqual(events.filter(([ev, d]) => ev === 'track_limits' && d.kind === 'jump').length, 1);
+    assert.strictEqual(g.time, 0, 'race clock must not run before lights out');
+});
+
+test('waiting for the lights: no penalty, and the reaction time is reported', () => {
+    const { events, io: sio } = spy();
+    const g = new Game(sio, [lp('a')], monza, RACE, () => {});
+    const p = g.players.a;
+    for (let k = 0; k < 30; k++) g.update();
+    g.release();
+    for (let k = 0; k < 15; k++) g.update(); // 0.25 s
+    p.input = FULL;
+    g.update();
+    assert.strictEqual(p.penalty, 0);
+    const r = events.filter(([ev]) => ev === 'reaction').map(([, d]) => d);
+    assert.strictEqual(r.length, 1);
+    assert.ok(Math.abs(r[0].time - 0.25) < 0.02, `reaction ${r[0].time}`);
 });

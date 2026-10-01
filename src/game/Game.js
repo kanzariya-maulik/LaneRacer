@@ -12,6 +12,8 @@ const PIT_RUNOFF_M = 2;     // barrier this far outside the pit lane edge
 const KERB_M = 1.5;          // kerbs past the track edge drive like asphalt
 const LIMIT_WARNINGS = 2;    // race: violations before penalties start
 const LIMIT_PENALTY_S = 5;
+const JUMP_PENALTY_S = 5;     // moving before lights out
+const JUMP_MOVE_M = 0.5;      // further than this from the grid slot = moved
 
 // Distance along the pit lane of a nearestOnPath result
 const pitAlong = (pit, n) => pit.cum[n.i] + n.t * (pit.cum[n.i + 1] - pit.cum[n.i]);
@@ -41,7 +43,7 @@ class Game {
         this.mode = mode;
         this.dt = 1 / TICK_RATE;
         this.time = 0;                     // session clock (s); race clock starts at lights out
-        this.frozen = mode === 'race';     // race cars wait for lights out
+        this.frozen = mode === 'race';     // race: lights still on — cars can move, but that's a jump start
         this.loopPath = null;
         this.winnerCount = 0;
         this.bestSectors = [null, null, null]; // session bests, valid laps only
@@ -60,7 +62,7 @@ class Game {
                 vx: 0, vy: 0, speed: 0, steer: 0,
                 inPit: false, limiter: false, pitS: 0,
                 limits: 0, penalty: 0, offLimits: false, finishTime: null,
-                lastSafeX: slot.x, lastSafeY: slot.y,
+                lastSafeX: slot.x, lastSafeY: slot.y, gridX: slot.x, gridY: slot.y, jumpStart: false, reacted: false,
                 lap: 0,
                 // Race cars sit behind the line having "passed" checkpoint 0; quali cars must cross it to start a lap
                 checkpoint: mode === 'quali' ? cpCount - 1 : 0,
@@ -151,6 +153,21 @@ class Game {
         this.loopPath = null;
     }
 
+    // Moved off the grid slot before lights out: +5 s, once
+    checkJumpStart(p) {
+        if (p.jumpStart || Math.hypot(p.x - p.gridX, p.y - p.gridY) <= JUMP_MOVE_M * this.track.scale) return;
+        p.jumpStart = true;
+        p.penalty += JUMP_PENALTY_S;
+        this.io.emit('track_limits', { id: p.id, kind: 'jump', penalty: p.penalty });
+        this.io.emit('chat_msg', { username: 'SYSTEM', color: '#ff0000', msg: `${p.username}: jump start, +${JUMP_PENALTY_S}s penalty` });
+    }
+
+    // Time from lights out to the first throttle
+    reaction(p) {
+        p.reacted = true;
+        this.io.emit('reaction', { id: p.id, time: this.time });
+    }
+
     release() {
         this.frozen = false;
         this.time = 0;
@@ -237,13 +254,17 @@ class Game {
 
     update() {
         const ids = Object.keys(this.players);
-        if (!this.frozen) {
-            this.time += this.dt;
+        {
+            if (!this.frozen) this.time += this.dt; // race clock starts at lights out
             for (const id of ids) {
                 const p = this.players[id];
                 if (p.finished) continue; // finished race cars and parked quali cars stay put
                 this.drive(p);
-                this.checkLapProgress(p);
+                if (this.frozen) this.checkJumpStart(p);
+                else {
+                    if (this.mode === 'race' && !p.reacted && p.input.throttle > 0) this.reaction(p);
+                    this.checkLapProgress(p);
+                }
             }
             if (this.mode === 'race') {
                 for (let i = 0; i < ids.length; i++) {
@@ -310,6 +331,7 @@ class Game {
     checkLimits(p, near) {
         const t = this.track;
         if (near.dist <= t.width / 2) { p.offLimits = false; return; }
+        if (this.frozen) return; // lights still on: jump starts are judged separately
         if (p.offLimits || p.inPit || near.dist <= t.width / 2 + Physics.CAR_HALF_WIDTH_M * t.scale) return;
         if (this.mode === 'quali' && (p.lapStart === null || p.finished)) return;
         p.offLimits = true;

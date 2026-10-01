@@ -57,26 +57,27 @@ test('everyone leaving during countdown cancels it, so a new host gets exactly o
     b.fire('disconnect');
 });
 
-test('lights: 1..5 one per second, out 0.5–2.5 s later; cars held until then', (t) => {
+test('lights: 1..5 one per second, out 0.5–2.5 s later; throttle before lights out is a jump start', (t) => {
     t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
     const io = fakeIo();
     setupSocketManager(io, noNet);
     const a = join(io, 'a', 'ferrari', 0);
     a.fire('start_game');
-    a.fire('input', { throttle: 1, brake: 0, steer: 0 });
     const init = io.events('game_init').at(-1);
     const car = init.players.a, x0 = car.x;
 
     t.mock.timers.tick(5000);
     assert.deepStrictEqual(io.events('lights').map(l => l.count), [1, 2, 3, 4, 5]);
+    assert.strictEqual(car.x, x0, 'car moved with no input');
+    a.fire('input', { throttle: 1, brake: 0, steer: 0 }); // too early: lights out comes 0.5–2.5 s after light 5
     t.mock.timers.tick(499);
     assert.ok(!io.events('lights').some(l => l.count === 0), 'lights out too early');
-    assert.strictEqual(car.x, x0, 'car moved before lights out');
     t.mock.timers.tick(2001);
     assert.ok(io.events('lights').some(l => l.count === 0), 'lights never went out');
     assert.ok(io.events('status_change').includes('RACE'));
+    assert.strictEqual(car.penalty, 5, 'jump start should cost 5 s');
     t.mock.timers.tick(1000);
-    assert.notStrictEqual(car.x, x0, 'held throttle should launch at lights out');
+    assert.notStrictEqual(car.x, x0);
     a.fire('disconnect');
 });
 
