@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { keyboardStep, gamepadInput, changed } from './input.js';
 import { LEVELS, ratioRange, resolveLevel, autoPick, adaptStep } from './quality.js';
 import { placeScenery, seedOf } from './scenery.js';
@@ -208,29 +209,61 @@ function turnAngle(path, i) {
     return Math.abs(Math.atan2(Math.sin(d), Math.cos(d)));
 }
 
-function coloredMesh(pos, col) {
+function coloredMesh(pos, col, uv = null, opts = {}) {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    if (uv) g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
     g.computeVertexNormals();
-    const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide, roughness: 0.9 }));
+    const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({
+        vertexColors: true, side: THREE.DoubleSide, roughness: 0.9, map: opts.map || null,
+        transparent: opts.opacity !== undefined, opacity: opts.opacity ?? 1, depthWrite: opts.opacity === undefined,
+    }));
     m.receiveShadow = true;
     return m;
 }
 
-// Flat band between two sideways offsets, only on segments where keep(i)
-function strip(path, from, to, y, keep, colorAt) {
+// Flat band between two sideways offsets, only on segments where keep(i); opts.map tiles every opts.repeatM metres
+function strip(path, from, to, y, keep, colorAt, opts = {}) {
     const a = offsetPoints(path, from), b = offsetPoints(path, to);
-    const pos = [], col = [];
+    const pos = [], col = [], uv = [];
+    const rep = (opts.repeatM || 8) * scale;
+    let along = 0;
     for (let i = 0; i < path.length; i++) {
-        if (!keep(i)) continue;
         const j = (i + 1) % path.length;
-        const c = colorAt(i);
-        pos.push(a[i].x, y, a[i].y, b[i].x, y, b[i].y, b[j].x, y, b[j].y,
-                 a[i].x, y, a[i].y, b[j].x, y, b[j].y, a[j].x, y, a[j].y);
-        for (let k = 0; k < 6; k++) col.push(c.r, c.g, c.b);
+        const seg = Math.hypot(path[j].x - path[i].x, path[j].y - path[i].y);
+        if (keep(i)) {
+            const c = colorAt(i), v0 = along / rep, v1 = (along + seg) / rep;
+            pos.push(a[i].x, y, a[i].y, b[i].x, y, b[i].y, b[j].x, y, b[j].y,
+                     a[i].x, y, a[i].y, b[j].x, y, b[j].y, a[j].x, y, a[j].y);
+            uv.push(0, v0, 1, v0, 1, v1, 0, v0, 1, v1, 0, v1);
+            for (let k = 0; k < 6; k++) col.push(c.r, c.g, c.b);
+        }
+        along += seg;
     }
-    return coloredMesh(pos, col);
+    return coloredMesh(pos, col, uv, opts);
+}
+
+// Grey speckle, tiled along the track
+let asphaltTex = null;
+function asphaltTexture() {
+    if (!asphaltTex) {
+        const c = document.createElement('canvas');
+        c.width = c.height = 256;
+        const g = c.getContext('2d'), rand = (() => { let s = 7; return () => ((s = (s * 16807) % 2147483647) / 2147483647); })();
+        g.fillStyle = '#d8d8d8';
+        g.fillRect(0, 0, 256, 256);
+        for (let k = 0; k < 9000; k++) {
+            const v = 150 + Math.floor(rand() * 105);
+            g.fillStyle = `rgb(${v},${v},${v})`;
+            g.fillRect(rand() * 256, rand() * 256, 1 + rand() * 2, 1 + rand() * 2);
+        }
+        asphaltTex = new THREE.CanvasTexture(c);
+        asphaltTex.wrapS = asphaltTex.wrapT = THREE.RepeatWrapping;
+        asphaltTex.colorSpace = THREE.SRGBColorSpace;
+    }
+    asphaltTex.anisotropy = Q.anisotropy;
+    return asphaltTex;
 }
 
 // Vertical wall at one sideways offset
@@ -452,7 +485,7 @@ function buildWorld(t) {
     ground.receiveShadow = true;
     world.add(ground);
 
-    world.add(strip(path, -half, half, 0.6, all, solid('#3a3f47')));
+    world.add(strip(path, -half, half, 0.6, all, solid('#4a505a'), { map: asphaltTexture(), repeatM: 8 }));
     const inset = 0.5 * scale, line = 0.3 * scale;
     world.add(strip(path, half - inset - line, half - inset, 0.9, all, solid('#f2f2f2')));
     world.add(strip(path, -half + inset, -half + inset + line, 0.9, all, solid('#f2f2f2')));
@@ -476,6 +509,19 @@ function buildWorld(t) {
         const from = dir > 0 ? half + kerbW : -(half + WALL_OFFSET - 1 * scale), to = dir > 0 ? half + WALL_OFFSET - 1 * scale : -(half + kerbW);
         world.add(strip(path, from, to, 0.4, (i) => slowOut[dir][i], solid('#cdb98f')));
     }
+    // Rubbered-in racing line through slow corners: inside at the apex, drifting out on exit (Medium/High)
+    if (Q.tyreMarks) {
+        for (const c of scen.slowCorners) {
+            const inside = -c.side; // the outside is c.side
+            world.add(strip(path, inside * half * 0.15, inside * half * 0.55, 0.62, (i) => {
+                const len = (c.to - c.from + n) % n, k = (i - c.from + n) % n;
+                return k < len;
+            }, solid('#1a1c20'), { opacity: 0.35 }));
+        }
+    }
+    // Thin dark outer edge on the kerbs so they read at speed
+    world.add(strip(path, half + kerbW - 0.2 * scale, half + kerbW, 0.72, (i) => curvy[i], solid('#5a1414')));
+    world.add(strip(path, -half - kerbW, -half - kerbW + 0.2 * scale, 0.72, (i) => curvy[i], solid('#5a1414')));
 
     // Barriers exactly where the physics wall is; skipped where another part of the track is closer
     const wallOff = half + WALL_OFFSET;
@@ -544,7 +590,7 @@ function liveryTexture(teamId) {
         });
         tex.flipY = false; // glTF UV convention
         tex.colorSpace = THREE.SRGBColorSpace;
-        tex.anisotropy = 8;
+        tex.anisotropy = Q.anisotropy;
         liveries[teamId] = tex;
     }
     return liveries[teamId];
@@ -587,6 +633,13 @@ function blobShadow() {
     return m;
 }
 
+// Generated once: a soft studio reflection for car paint (Medium/High)
+let envTex = null;
+function envTexture() {
+    if (!envTex) envTex = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+    return envTex;
+}
+
 function makeCar(id) {
     const lp = clientState.players[id];
     if (!lp) return null;
@@ -603,6 +656,11 @@ function makeCar(id) {
                 o.material.map = map;
                 o.material.color.set(0xffffff);
                 o.material.needsUpdate = true;
+            }
+            if (Q.envMap) {
+                o.material.envMap = envTexture();
+                o.material.envMapIntensity = 0.3;
+                if (o.material.name === 'livery') { o.material.metalness = 0.1; o.material.roughness = 0.35; }
             }
         });
         for (const name of ['wheel_FL', 'wheel_FR', 'wheel_RL', 'wheel_RR']) {
