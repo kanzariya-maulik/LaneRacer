@@ -236,9 +236,8 @@ socket.on('game_init', (data) => {
 
 // This comes in 60 times a second
 // Socket.IO game_state: fallback until the UDP channel is open
-socket.on('game_state', (pkt) => {
-    if (!udpReady) onFastPacket(pkt);
-});
+// The server only sends this copy when it has no open UDP channel for us, so always take it (duplicates are dropped by seq)
+socket.on('game_state', onFastPacket);
 
 socket.on('game_meta', (diff) => {
     for (const id in diff) if (clientState.gameState && clientState.gameState[id]) Object.assign(clientState.gameState[id], diff[id]);

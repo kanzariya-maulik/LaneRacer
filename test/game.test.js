@@ -56,8 +56,10 @@ test('race cars wait on the grid without input, then launch at lights out', () =
     assert.strictEqual(a.x, x0);
     assert.strictEqual(a.y, y0);
     g.release();
-    g.handleInput('a', { throttle: 1, brake: 0, steer: 0 });
-    for (let i = 0; i < 60; i++) g.update();
+    for (let i = 0; i < 60; i++) {
+        if (i % 6 === 0) g.handleInput('a', { throttle: 1, brake: 0, steer: 0 }); // clients resend every 100 ms
+        g.update();
+    }
     assert.ok(Math.hypot(a.x - x0, a.y - y0) > 3 * monza.scale, 'should launch > 3 m in 1 s');
     assert.strictEqual(a.penalty, 0);
 });
@@ -839,4 +841,45 @@ test('race gaps never shrink down the order (cars timed at different checkpoints
     assert.deepStrictEqual([a.rank, b.rank, c.rank], [1, 2, 3]);
     close(b.gap, 0.95);
     assert.ok(c.gap >= b.gap, `P3 gap ${c.gap} below P2 gap ${b.gap}`);
+});
+
+test('a player whose inputs stop arriving (tab hidden, connection lost) lets go of the controls', () => {
+    const g = new Game(io, [lp('a')], monza, RACE, () => {});
+    g.frozen = false;
+    g.handleInput('a', { throttle: 1, brake: 0, steer: 0.5, drs: true });
+    for (let k = 0; k < 10; k++) g.update();
+    assert.strictEqual(g.players.a.input.throttle, 1, 'recent input is kept');
+    for (let k = 0; k < 30; k++) g.update();
+    assert.deepStrictEqual(g.players.a.input, { throttle: 0, brake: 0, steer: 0, drs: false });
+});
+
+test('race ends 60 s after the winner even if a car never finishes; it is classified DNF, last', () => {
+    let ended = 0;
+    const g = new Game(io, [lp('a'), lp('b'), lp('c')], monza, { maxLaps: 3, qualifying: false }, () => { ended++; });
+    g.frozen = false;
+    const { a, b, c } = g.players;
+    Object.assign(a, { lap: 3, finished: true, finishTime: 100, finishOrder: 1 });
+    g.winnerCount = 1;
+    g.time = 100;
+    g.firstFinishAt = 100;
+    Object.assign(c, { progress: 30 });
+    Object.assign(b, { progress: 20 });
+    for (let k = 0; k < 59 * 60; k++) g.update();
+    assert.strictEqual(ended, 0, 'still waiting for the others');
+    for (let k = 0; k < 2 * 60; k++) g.update();
+    assert.ok(ended >= 1, 'race over'); // the real loop stops at the first call
+    assert.ok(b.dnf && c.dnf && !a.dnf);
+    assert.deepStrictEqual([a.finishOrder, c.finishOrder, b.finishOrder], [1, 2, 3], 'DNF ordered by distance covered');
+});
+
+test('jump start: a car shunted off its slot by the car behind is not penalised', () => {
+    const { events, io: sio } = spy();
+    const g = new Game(sio, [lp('a'), lp('b', 'haas')], monza, RACE, () => {});
+    const a = g.players.a;
+    for (let k = 0; k < 30; k++) {
+        a.x += 0.2 * monza.scale; // pushed forward, no throttle of its own
+        g.update();
+    }
+    assert.strictEqual(a.penalty, 0);
+    assert.strictEqual(events.filter(([ev, d]) => ev === 'track_limits' && d.kind === 'jump').length, 0);
 });

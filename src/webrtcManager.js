@@ -113,23 +113,22 @@ class WebRTCManager {
 
     broadcastGameState(stateSync, io) {
         const payload = JSON.stringify({ type: 'STATE', data: stateSync });
-        let sentOverUDP = 0;
+        const viaUDP = new Set();
 
         for (const [id, peer] of Object.entries(this.peers)) {
             if (peer.isOpen && peer.dc && peer.dc.isOpen()) {
                 try {
                     peer.dc.sendMessage(payload);
-                    sentOverUDP++;
+                    viaUDP.add(id);
                 } catch (err) {
                     peer.isOpen = false;
                 }
             }
         }
 
-        // If any peer has not yet finished UDP handshake, emit via Socket.IO volatile so car is never frozen
-        if (io && (sentOverUDP === 0 || sentOverUDP < Object.keys(this.peers).length)) {
-            io.volatile.emit('game_state', stateSync);
-        }
+        // Socket.IO only for sockets still without an open channel (handshake, failed WebRTC, visitors), so one slow
+        // peer doesn't double everyone's traffic
+        if (io) for (const [id, sock] of io.sockets.sockets) if (!viaUDP.has(id)) sock.volatile.emit('game_state', stateSync);
     }
 
     hasOpenChannel(socketId) {

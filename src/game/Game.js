@@ -14,6 +14,8 @@ const LIMIT_WARNINGS = 2;    // race: violations before penalties start
 const LIMIT_PENALTY_S = 5;
 const JUMP_PENALTY_S = 5;     // moving before lights out
 const JUMP_MOVE_M = 0.5;      // further than this from the grid slot = moved
+const FINISH_WINDOW_S = 60;   // after the winner finishes, the rest have this long before they're classified DNF
+const INPUT_TIMEOUT_S = 0.3;  // no input for this long = controls released
 const DRS_GAP_S = 1;          // race: within this of the car ahead at the detection point
 const DRS_DRAG = 0.85;        // drag with the flap open (~+15 km/h top speed)
 const SLIP_MAX = 0.2;         // drag cut right behind another car…
@@ -177,7 +179,10 @@ class Game {
     }
 
     handleInput(id, input) {
-        if (this.players[id]) this.players[id].input = input; // kept while frozen, applies at lights out
+        const p = this.players[id];
+        if (!p) return;
+        p.input = input; // kept while frozen, applies at lights out
+        p.inputAt = this.clock;
     }
 
     removePlayer(id) {
@@ -236,7 +241,8 @@ class Game {
 
     // Moved off the grid slot before lights out: +5 s, once
     checkJumpStart(p) {
-        if (p.jumpStart || Math.hypot(p.x - p.gridX, p.y - p.gridY) <= JUMP_MOVE_M * this.track.scale) return;
+        if (p.input.throttle > 0) p.throttledEarly = true; // only the driver's own throttle counts, not a shunt from behind
+        if (p.jumpStart || !p.throttledEarly || Math.hypot(p.x - p.gridX, p.y - p.gridY) <= JUMP_MOVE_M * this.track.scale) return;
         p.jumpStart = true;
         p.penalty += JUMP_PENALTY_S;
         this.io.emit('track_limits', { id: p.id, kind: 'jump', penalty: p.penalty });
@@ -344,6 +350,11 @@ class Game {
         {
             if (!this.frozen) this.time += this.dt; // race clock starts at lights out
             this.clock += this.dt;
+            // The client resends every 100 ms; silence (hidden tab, dropped link) means let go, not full throttle forever
+            for (const id of ids) {
+                const p = this.players[id];
+                if (p.inputAt !== undefined && this.clock - p.inputAt > INPUT_TIMEOUT_S) p.input = { throttle: 0, brake: 0, steer: 0, drs: false };
+            }
             if (this.mode === 'race') this.updateTow();
             for (const id of ids) {
                 const p = this.players[id];
@@ -365,6 +376,13 @@ class Game {
             }
         }
 
+        // A parked or disconnected-in-spirit car can't hold everyone on track forever
+        if (this.mode === 'race' && this.firstFinishAt !== undefined && this.time - this.firstFinishAt > FINISH_WINDOW_S) {
+            for (const id of ids) {
+                const p = this.players[id];
+                if (!p.finished) Object.assign(p, { finished: true, dnf: true, finishTime: null });
+            }
+        }
         if (this.mode === 'race' && !this.classified && ids.length && ids.every(id => this.players[id]?.finished)) this.classify();
         this.updateRanks();
 
@@ -439,11 +457,13 @@ class Game {
     // Final result: finish time plus penalties, once every car has finished
     classify() {
         this.classified = true;
-        const list = Object.values(this.players).sort((a, b) => a.finishTime + a.penalty - (b.finishTime + b.penalty));
+        const all = Object.values(this.players);
+        const list = all.filter((p) => !p.dnf).sort((a, b) => a.finishTime + a.penalty - (b.finishTime + b.penalty))
+            .concat(all.filter((p) => p.dnf).sort((a, b) => b.progress - a.progress)); // DNF last, furthest first
         const changed = list.some((p, i) => p.finishOrder !== i + 1);
         list.forEach((p, i) => { p.finishOrder = i + 1; });
         if (changed) {
-            this.io.emit('chat_msg', { username: 'SYSTEM', color: '#ff0000', msg: `Result after penalties: ${list.map((p, i) => `P${i + 1} ${p.username}`).join(', ')}` });
+            this.io.emit('chat_msg', { username: 'SYSTEM', color: '#ff0000', msg: `Result after penalties: ${list.map((p, i) => `P${i + 1} ${p.username}${p.dnf ? ' (DNF)' : ''}`).join(', ')}` });
         }
     }
 
@@ -508,6 +528,7 @@ class Game {
                 p.finishTime = this.time;
                 this.winnerCount++;
                 p.finishOrder = this.winnerCount;
+                if (this.winnerCount === 1) this.firstFinishAt = this.time;
                 this.io.emit('chat_msg', { username: 'SYSTEM', color: '#ff0000', msg: `${p.username} finished P${p.finishOrder}!` });
             }
             return;

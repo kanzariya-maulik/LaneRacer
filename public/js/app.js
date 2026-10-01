@@ -89,8 +89,18 @@ inputUser.focus();
 btnJoin.addEventListener('click', () => {
     if (!selectedTeam) return window.appendChat('SYSTEM', '#f43f5e', 'Pick a team first.');
     const username = inputUser.value.trim() || `Player${Math.floor(Math.random() * 1000)}`;
-    socket.emit('join_lobby', { username, teamId: selectedTeam });
+    lastJoin = { username, teamId: selectedTeam };
+    socket.emit('join_lobby', lastJoin);
     setJoinedUI(true);
+});
+
+// A reconnect (WiFi drop, sleep, server restart) is a new socket the server doesn't know: join again as the same driver
+let lastJoin = null;
+socket.on('connect', () => {
+    if (!lastJoin || !isJoined) return;
+    amReady = false;
+    btnReady.innerText = 'Ready Up';
+    socket.emit('join_lobby', lastJoin);
 });
 
 window.handleJoinError = (reason) => {
