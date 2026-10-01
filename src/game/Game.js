@@ -35,6 +35,7 @@ class Game {
         this.frozen = mode === 'race';     // race cars wait for lights out
         this.loopPath = null;
         this.winnerCount = 0;
+        this.bestSectors = [null, null, null]; // session bests, valid laps only
 
         const cpCount = track.checkpoints.length;
         this.players = {};
@@ -57,6 +58,12 @@ class Game {
                 lapStart: mode === 'race' ? 0 : null,
                 lastLap: null,
                 bestLap: null,
+                sectors: [null, null, null],
+                bestSectors: [null, null, null],
+                bestLapSectors: null,
+                lapValid: true,
+                lastValid: null,
+                sectorStart: mode === 'race' ? 0 : null, // quali: untimed out-lap
                 finished: false,
                 finishOrder: 0,
                 rank: index + 1,
@@ -230,6 +237,7 @@ class Game {
                 lap: p.lap, checkpoint: p.checkpoint, rank: p.rank, finished: p.finished,
                 gap: p.gap, lapsDown: p.lapsDown, lastLap: p.lastLap, bestLap: p.bestLap,
                 curLap: p.lapStart === null || p.finished ? null : this.time - p.lapStart,
+                lapValid: p.lapValid, lastValid: p.lastValid, bestLapSectors: p.bestLapSectors,
                 ghost: this.mode === 'quali'
             };
         }
@@ -271,9 +279,33 @@ class Game {
     recordLap(p) {
         const lapTime = this.time - p.lapStart;
         p.lastLap = lapTime;
-        if (p.bestLap === null || lapTime < p.bestLap) p.bestLap = lapTime;
+        p.lastValid = p.lapValid;
+        if (p.lapValid && (p.bestLap === null || lapTime < p.bestLap)) {
+            p.bestLap = lapTime;
+            p.bestLapSectors = [...p.sectors];
+        }
         p.lapStart = this.time;
-        this.io.emit('timing', { id: p.id, lap: p.lap, lapTime, bestLap: p.bestLap });
+        this.io.emit('timing', { id: p.id, lap: p.lap, lapTime, bestLap: p.bestLap, valid: p.lapValid });
+        this.newLap(p);
+    }
+
+    newLap(p) {
+        p.sectors = [null, null, null];
+        p.lapValid = true;
+        p.sectorStart = this.time;
+    }
+
+    // Sector n (1–3) just ended; colours: session best > personal best > slower, invalid laps never count
+    recordSector(p, n) {
+        if (p.sectorStart === null) return; // out-lap
+        const time = this.time - p.sectorStart, i = n - 1;
+        const personalBest = p.lapValid && (p.bestSectors[i] === null || time < p.bestSectors[i]);
+        const sessionBest = p.lapValid && (this.bestSectors[i] === null || time < this.bestSectors[i]);
+        if (personalBest) p.bestSectors[i] = time;
+        if (sessionBest) this.bestSectors[i] = time;
+        p.sectors[i] = time;
+        p.sectorStart = this.time;
+        this.io.emit('sector', { id: p.id, lap: p.lap + 1, sector: n, time, valid: p.lapValid, personalBest, sessionBest });
     }
 
     checkLapProgress(p) {
@@ -286,7 +318,10 @@ class Game {
         p.checkpoint = target;
         p.progress++;
         p.passTimes[p.progress] = this.time;
+        const sec = this.track.sectorCps.indexOf(target);
+        if (sec > 0) this.recordSector(p, sec); // sector 1 or 2 ended
         if (target !== 0) return;
+        if (!p.finished) this.recordSector(p, 3);
 
         // Crossed the start/finish line
         if (this.mode === 'race') {
@@ -307,11 +342,13 @@ class Game {
             if (p.lap >= QUALI_LAPS) { // run complete: park the car
                 p.finished = true;
                 p.lapStart = null;
+                p.sectorStart = null;
                 p.vx = p.vy = p.speed = 0;
             }
             return; // recordLap already started the next flying lap at the line
         }
         p.lapStart = p.inPit ? null : this.time; // out-lap: timing starts at the first crossing after pit exit
+        if (p.lapStart !== null) this.newLap(p);
     }
 }
 

@@ -79,7 +79,7 @@ test('game_state fields', () => {
     const g = new Game(spyIo, [lp('a')], monza, RACE, () => {});
     g.update();
     assert.deepStrictEqual(Object.keys(sent.a).sort(),
-        ['angle', 'bestLap', 'checkpoint', 'curLap', 'finished', 'gap', 'ghost', 'inPit', 'lap', 'lapsDown', 'lastLap', 'limiter', 'rank', 'speed', 'steer', 'x', 'y']);
+        ['angle', 'bestLap', 'bestLapSectors', 'checkpoint', 'curLap', 'finished', 'gap', 'ghost', 'inPit', 'lap', 'lapValid', 'lapsDown', 'lastLap', 'lastValid', 'limiter', 'rank', 'speed', 'steer', 'x', 'y']);
     assert.strictEqual(sent.a.rank, 1);
     assert.strictEqual(sent.a.ghost, false);
 });
@@ -454,4 +454,48 @@ test('racing line past the pit entry is not blocked', () => {
     const x0 = p.x, y0 = p.y;
     for (let k = 0; k < 60; k++) g.drive(p);
     assert.ok(Math.hypot(p.x - x0, p.y - y0) / monza.scale > 50, 'track car was stopped by the pit barrier');
+});
+
+function spy() {
+    const events = [];
+    return { events, io: { emit: (ev, d) => events.push([ev, d]), volatile: { emit() {} } } };
+}
+const sectorsOf = (events, id) => events.filter(([ev, d]) => ev === 'sector' && d.id === id).map(([, d]) => d);
+
+test('sectors: three per lap, adding up to the lap time, with personal and session bests', () => {
+    const { events, io: sio } = spy();
+    const g = new Game(sio, [lp('a'), lp('b')], monza, QUALI, () => {}, 'quali');
+    const { a, b } = g.players;
+    crossLine(g, a, 10);
+    lap(g, a, 10, 90);
+    const s = sectorsOf(events, 'a');
+    assert.deepStrictEqual(s.map(x => x.sector), [1, 2, 3]);
+    close(s.reduce((sum, x) => sum + x.time, 0), 90);
+    assert.ok(s.every(x => x.valid && x.personalBest && x.sessionBest));
+    assert.deepStrictEqual(a.bestLapSectors, s.map(x => x.time));
+
+    crossLine(g, b, 12);
+    lap(g, b, 12, 80);
+    assert.ok(sectorsOf(events, 'b').every(x => x.sessionBest), 'faster lap should set session bests');
+    lap(g, a, 100, 95);
+    const slow = sectorsOf(events, 'a').slice(3);
+    assert.ok(slow.every(x => !x.personalBest && !x.sessionBest));
+});
+
+test('sectors: an invalid lap never sets a best; the out-lap is untimed', () => {
+    const { events, io: sio } = spy();
+    const g = new Game(sio, [lp('a')], monza, QUALI, () => {}, 'quali');
+    const a = g.players.a;
+    a.checkpoint = 0; // on the out-lap, crossing sector lines before the start line
+    lap(g, a, 0, 60);
+    assert.strictEqual(sectorsOf(events, 'a').length, 0, 'out-lap produced sector times');
+    lap(g, a, 60, 90);
+    a.lapValid = false;
+    lap(g, a, 150, 85);
+    const bad = sectorsOf(events, 'a').filter(x => x.lap === 2);
+    assert.ok(bad.length === 3 && bad.every(x => !x.valid && !x.personalBest && !x.sessionBest));
+    close(a.bestLap, 90);
+    assert.strictEqual(a.lastValid, false);
+    const timing = events.filter(([ev]) => ev === 'timing').map(([, d]) => d);
+    assert.strictEqual(timing.at(-1).valid, false);
 });
