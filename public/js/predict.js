@@ -6,6 +6,7 @@ export const STEP_S = 1 / 60;
 export const SNAP_M = 5;              // corrections this big snap (reset, teleport)
 export const BLEND_TAU_S = 0.033;     // smaller ones decay exponentially: ~100 ms to vanish
 export const MAX_PENDING = 120;       // 2 s of unacknowledged inputs at most (tab stall)
+export const MAX_UNACKED = 60;        // 1 s with no server answer (results screen, dead link): stop driving alone
 
 const FIN = 16;
 const lerpAngle = (a, b, k) => a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * k;
@@ -20,7 +21,7 @@ export class Predictor {
         this.off = { x: 0, y: 0, angle: 0 };
         this.lastError = 0;
         this.finished = false;
-        this.ackSeq = -1;                 // newest input the server has confirmed
+        this.lastS = -1;                  // newest server packet applied
     }
 
     // Server entry → simulation state
@@ -39,7 +40,7 @@ export class Predictor {
         this.prev = { x: this.car.x, y: this.car.y, angle: this.car.angle };
         this.pending = [];
         this.off = { x: 0, y: 0, angle: 0 };
-        this.ackSeq = e[10] ?? -1;
+        this.lastS = -1;
     }
 
     step(input) {
@@ -50,14 +51,16 @@ export class Predictor {
         if (this.finished) return;                        // the server parks finished cars
         this.pending.push(input);
         if (this.pending.length > MAX_PENDING) this.pending.splice(0, this.pending.length - MAX_PENDING);
-        driveCar(this.car, input, this.track, STEP_S);
+        if (this.pending.length <= MAX_UNACKED) driveCar(this.car, input, this.track, STEP_S);
     }
 
-    onServer(e) {
-        if (!this.car) { this.reset(e); return; }
+    // s = the packet's server seq: an older packet arriving late (reordered UDP) is ignored — its replay inputs are gone.
+    // Keyed on s, not lastSeq: lastSeq legitimately moves back when the server re-aligns a stalled client.
+    onServer(e, s = Infinity) {
+        if (s !== Infinity && s <= this.lastS) return;
+        if (s !== Infinity) this.lastS = s;
+        if (!this.car) { this.reset(e); this.lastS = s === Infinity ? -1 : s; return; }
         const lastSeq = e[10];
-        if (lastSeq !== undefined && lastSeq < this.ackSeq) return; // reordered: older than what's applied, its replay inputs are gone
-        if (lastSeq !== undefined) this.ackSeq = lastSeq;
         if (lastSeq !== undefined && lastSeq >= 0) while (this.pending.length && this.pending[0].seq <= lastSeq) this.pending.shift();
         const bx = this.car.x, by = this.car.y, ba = this.car.angle;
         this.load(e);

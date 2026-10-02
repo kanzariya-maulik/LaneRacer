@@ -174,7 +174,7 @@ class Game {
         if (!p) return;
         // Far behind the server's slots (stalled tab, reconnect): re-align to this client instead of dropping it forever
         if (list.length && Math.max(...list.map((i) => i.seq)) < p.lastSeq - INPUT_QUEUE_MAX) {
-            p.lastSeq = Math.min(...list.map((i) => i.seq)) - 1;
+            p.lastSeq = Math.max(p.applied ?? -1, Math.min(...list.map((i) => i.seq)) - 1); // the batch's resends were already applied
             p.queue = [];
         }
         const top = p.queue.length ? p.queue[p.queue.length - 1].seq : p.lastSeq;
@@ -310,7 +310,7 @@ class Game {
                 }
                 if (p.queue.length && (p.lastSeq < 0 || p.queue[0].seq === p.lastSeq + 1)) {
                     p.input = p.queue.shift();
-                    p.lastSeq = p.input.seq;
+                    p.lastSeq = p.applied = p.input.seq; // applied: real inputs only, lastSeq also counts guessed slots
                 } else if (p.lastSeq >= 0 && this.clock - p.inputAt <= INPUT_TIMEOUT_S) {
                     p.lastSeq++;
                     p.starve++;
@@ -341,7 +341,7 @@ class Game {
         if (this.mode === 'race' && this.firstFinishAt !== undefined && this.time - this.firstFinishAt > FINISH_WINDOW_S) {
             for (const id of ids) {
                 const p = this.players[id];
-                if (!p.finished) Object.assign(p, { finished: true, dnf: true, finishTime: null });
+                if (!p.finished) Object.assign(p, { finished: true, dnf: true, finishTime: null, vx: 0, vy: 0, speed: 0 });
             }
         }
         if (this.mode === 'race' && !this.classified && ids.length && ids.every(id => this.players[id]?.finished)) this.classify();
@@ -487,6 +487,7 @@ class Game {
             if (p.lap >= this.settings.maxLaps) {
                 p.finished = true;
                 p.finishTime = this.time;
+                p.vx = p.vy = p.speed = 0; // parked: a moving velocity would make other clients dead-reckon it forward
                 this.winnerCount++;
                 p.finishOrder = this.winnerCount;
                 if (this.winnerCount === 1) this.firstFinishAt = this.time;

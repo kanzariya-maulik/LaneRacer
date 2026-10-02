@@ -109,7 +109,8 @@ export class RenderClock {
 
     advance(dtS, serverNowS, targetDelayS) {
         const want = serverNowS - targetDelayS;
-        if (this.t === null || Math.abs(want - this.t) > 0.5) { this.t = want; this.rate = 1; return this.t; } // start / stall: resync
+        // Start, stall or hitch: further off than the largest delay we'd ever choose means resync, not a slow 5% crawl back
+        if (this.t === null || Math.abs(want - this.t) > MAX_DELAY_S + 0.05) { this.t = want; this.rate = 1; return this.t; }
         this.rate = 1 + Math.max(-DILATION, Math.min(DILATION, (want - this.t) * 2));
         this.t += dtS * this.rate;
         return this.t;

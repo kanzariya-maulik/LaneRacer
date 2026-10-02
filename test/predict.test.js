@@ -46,7 +46,7 @@ function run({ latency = 30, jitter = 20, loss = 2, seconds = 60, track = 'monza
         const a = g.players.a;
         serverPos.set(a.lastSeq, [a.x, a.y]);
         const snap = JSON.parse(JSON.stringify(pkt));
-        at(now, () => pr.onServer(snap.c[0]));
+        at(now, () => pr.onServer(snap.c[0], snap.s));
     }
     const errs = [];
     for (const [s, sp] of serverPos) { const cp = clientPos.get(s); if (cp) errs.push(Math.hypot(cp[0] - sp[0], cp[1] - sp[1]) / sc); }
@@ -94,9 +94,17 @@ test('a server update older than one already applied (reordered packet) is ignor
     const t = Track.load('monza'), pr = new P.Predictor(t), sc = t.scale;
     const x0 = t.path[10].x, y0 = t.path[10].y;
     pr.reset([0, x0, y0, 0, 0, 0, 0, 0, 0, 0, 5]);
-    pr.onServer([0, x0 + 3 * sc, y0, 0, 0, 0, 0, 0, 0, 0, 9]);
-    pr.onServer([0, x0 + 1 * sc, y0, 0, 0, 0, 0, 0, 0, 0, 7]);      // late, older
+    pr.onServer([0, x0 + 3 * sc, y0, 0, 0, 0, 0, 0, 0, 0, 9], 101);
+    pr.onServer([0, x0 + 1 * sc, y0, 0, 0, 0, 0, 0, 0, 0, 7], 100);      // late, older packet
     assert.strictEqual(pr.car.x, x0 + 3 * sc);
+});
+
+test('after the server re-aligns (its lastSeq goes back), newer updates still reconcile', () => {
+    const t = Track.load('monza'), pr = new P.Predictor(t), sc = t.scale;
+    const x0 = t.path[10].x, y0 = t.path[10].y;
+    pr.reset([0, x0, y0, 0, 0, 0, 0, 0, 0, 0, 32]);
+    pr.onServer([0, x0 + 2 * sc, y0, 0, 0, 0, 0, 0, 0, 0, 20], 101);
+    assert.strictEqual(pr.car.x, x0 + 2 * sc);
 });
 
 test('bad WiFi (60±50 ms, 5% loss): still within 5 cm, no visible correction steps', () => {
@@ -112,4 +120,14 @@ test('the predicted car uses the player\'s own assist setting', () => {
         pr.reset([0, t.path[10].x, t.path[10].y, 0, 0, 0, 0, 0, 0, 0, 1]);
         assert.strictEqual(pr.car.assist, assist);
     }
+});
+
+test('prediction holds after 1 s without a server update (results screen, dead link) instead of driving on alone', () => {
+    const t = Track.load('monza'), pr = new P.Predictor(t, 'full');
+    pr.reset([0, t.path[10].x, t.path[10].y, t.path[10].angle ?? 0, 0, 0, 0, 0, 0, 0, 1]);
+    for (let k = 0; k < P.MAX_UNACKED; k++) pr.step({ seq: 2 + k, steer: 0, throttle: 1, brake: 0, drs: false });
+    const x = pr.car.x, y = pr.car.y;
+    for (let k = 0; k < 120; k++) pr.step({ seq: 200 + k, steer: 0, throttle: 1, brake: 0, drs: false });
+    assert.strictEqual(pr.car.x, x);
+    assert.strictEqual(pr.car.y, y);
 });

@@ -881,7 +881,7 @@ function applyNet(nowS, dt) {
     for (const [pkt, at] of clientState.netIn.splice(0)) {
         if (!netBuf.push(pkt, at) || !predictor || myIdx === undefined) continue; // duplicate / stale: dropped
         const mine = netBuf.latest().s === pkt.s && netBuf.latest().cars.get(myIdx);
-        if (mine) predictor.onServer(mine);
+        if (mine) predictor.onServer(mine, pkt.s);
     }
     const latest = netBuf.latest(), gs = clientState.gameState;
     if (!latest || !gs) return;

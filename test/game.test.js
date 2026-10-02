@@ -970,3 +970,31 @@ test('start() runs the fixed-step loop and reports net_stats once a second', asy
     assert.deepStrictEqual(Object.keys(stats[0].starve), ['a']);
     assert.ok(g.seq >= 66 && g.seq <= 71, `${g.seq} ticks in 1.15 s`);
 });
+
+test('input queue: re-align after a stall never re-applies inputs from the redundant window', () => {
+    const g = new Game(io, [lp('a')], monza, RACE, () => {});
+    g.frozen = false;
+    const a = g.players.a, inp = (seq) => ({ seq, steer: 0, throttle: 1, brake: 0, drs: false });
+    const win = (top) => [0, 1, 2, 3, 4, 5].map((k) => inp(top - 5 + k)).filter((i) => i.seq >= 1);
+    for (let s = 1; s <= 20; s++) { g.handleInputs('a', win(s)); g.update(); }
+    for (let k = 0; k < 12; k++) g.update();                         // client hitch: 12 guessed slots, lastSeq 32
+    const applied = [];
+    for (let s = 21; s <= 26; s++) { g.handleInputs('a', win(s)); g.update(); applied.push(a.input.seq); }
+    assert.ok(applied.every((s) => s === undefined || s > 20), `re-applied ${applied}`);
+    assert.deepStrictEqual(applied.filter((s) => s !== undefined), [...new Set(applied.filter((s) => s !== undefined))].sort((x, y) => x - y), 'in order, once each');
+});
+
+test('finished and DNF race cars park with zero velocity (remote clients must not dead-reckon them forward)', () => {
+    const g = new Game(io, [lp('a'), lp('b')], monza, { maxLaps: 1, qualifying: false }, () => {});
+    g.release();
+    const { a, b } = g.players;
+    Object.assign(a, { vx: 80, vy: 5, speed: 80 });
+    lap(g, a, 0, 85);
+    assert.ok(a.finished);
+    assert.deepStrictEqual([a.vx, a.vy, a.speed], [0, 0, 0], 'finisher parked');
+    Object.assign(b, { vx: 60, vy: 0, speed: 60 });
+    g.time = 85 + 61;
+    g.update();
+    assert.ok(b.dnf);
+    assert.deepStrictEqual([b.vx, b.vy, b.speed], [0, 0, 0], 'DNF parked');
+});

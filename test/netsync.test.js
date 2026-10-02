@@ -148,3 +148,11 @@ test('dead reckoning follows the arc for 250 ms, then holds; recovery blends ins
     const after = N.sample(b, 0.2 + 1 / 60, 0, out, st, 6);
     assert.ok(Math.hypot(after.x - before.x, after.y - before.y) < 60 / 60 * 1.5, 'no pop on recovery');
 });
+
+test('render clock: a 0.3 s stall (frame dt clamped to 0.1 s) is caught up at once, not crawled back at 5%', () => {
+    const clock = new N.RenderClock();
+    clock.advance(0, 10, 0.05);
+    for (let k = 1; k <= 30; k++) clock.advance(1 / 60, 10 + k / 60, 0.05);
+    const t = clock.advance(0.1, 10 + 0.5 + 0.3, 0.05);            // 0.3 s hitch, caller clamps dt
+    assert.ok(Math.abs(t - (10.8 - 0.05)) < 0.06, `lag ${(10.75 - t).toFixed(3)} s`);
+});

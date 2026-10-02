@@ -82,7 +82,7 @@ for (const id of Track.TRACK_IDS) {
             const v0 = p.speed;
             g.update();
             time += g.dt;
-            if (v0 / sc > 15 && p.speed < v0 * 0.7) walls++;
+            if (v0 / sc > 15 && p.speed < v0 * 0.7 && !p.finished) walls++; // finishing parks the car, not a wall
         }
         assert.ok(p.finished, `${id}: no lap in 200 s`);
         assert.strictEqual(walls, 0, `${id}: ${walls} wall hits`);
