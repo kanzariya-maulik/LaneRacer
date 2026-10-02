@@ -429,12 +429,14 @@ input:focus { border: 1px solid var(--primary); }
     gap: 16px;
 }
 /* Race classification (F1 TV style) */
-#race-results { position: absolute; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 8; }
+#race-results { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 8; }
 #race-results.hidden { display: none; }
 .rr-card { width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 40px); overflow: auto; background: rgba(12, 14, 28, 0.96); border-radius: 8px; box-shadow: 0 12px 40px rgba(0,0,0,0.6); color: #fff; animation: flIn 0.4s ease-out; }
 .rr-head { display: flex; align-items: center; gap: 12px; background: #e10600; padding: 10px 16px; font-weight: 900; letter-spacing: 3px; }
 .rr-title { flex: 1; font-size: 1.1rem; }
 #rr-track { font-size: 0.8rem; letter-spacing: 2px; opacity: 0.9; }
+#rr-close { background: none; border: 0; color: #fff; font: 900 1rem sans-serif; cursor: pointer; padding: 0 0 0 6px; opacity: 0.85; }
+#rr-close:hover { opacity: 1; }
 .rr-flag { width: 26px; height: 18px; background: conic-gradient(#fff 25%, #111 0 50%, #fff 0 75%, #111 0) 0 0 / 9px 9px; border-radius: 2px; }
 .rr-cols, #rr-list li { display: grid; grid-template-columns: 40px 6px 1fr 34px 48px 96px 50px 96px; align-items: center; gap: 10px; padding: 0 16px; }
 .rr-cols { height: 26px; font-size: 0.65rem; letter-spacing: 2px; color: #94a3b8; border-bottom: 1px solid rgba(255,255,255,0.1); }

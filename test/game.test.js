@@ -1055,5 +1055,5 @@ test('race results: final time = finish time + penalties, order and gaps after p
     assert.strictEqual(rows[3].total, null);
     assert.strictEqual(rows[0].laps, 1);
     assert.strictEqual(res[0].fastestLapId, 'a');
-    assert.ok(!sent.some(([ev, m]) => ev === 'chat_msg' && /Result after penalties/.test(m.msg)), 'results no longer go to chat');
+    assert.ok(!sent.some(([ev, m]) => ev === 'chat_msg' && /Result after penalties|finished P/.test(m.msg)), 'results no longer go to chat');
 });

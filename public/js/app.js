@@ -233,7 +233,7 @@ window.handleStatusChange = (status) => {
     if (status === 'LOBBY') {
         screenLobby.classList.remove('hidden');
         screenGame.classList.add('hidden');
-        [cdOverlay, spOverlay, results, raceResults, lights].forEach(el => el.classList.add('hidden'));
+        [cdOverlay, spOverlay, results, lights].forEach(el => el.classList.add('hidden')); // the race classification stays up over the lobby
         return;
     }
 

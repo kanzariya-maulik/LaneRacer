@@ -1037,10 +1037,16 @@ window.showRaceResults = (res) => {
     $('race-results').classList.remove('hidden');
     const end = Date.now() + 15000;
     clearInterval(rrTimer);
-    const tick = () => { $('rr-count').textContent = Math.max(0, Math.ceil((end - Date.now()) / 1000)); };
+    const tick = () => {
+        const left = Math.ceil((end - Date.now()) / 1000);
+        $('rr-count').textContent = left > 0 ? `back to lobby in ${left} s` : 'close with ✕';
+        if (left <= 0) clearInterval(rrTimer);
+    };
     tick();
     rrTimer = setInterval(tick, 250);
 };
+
+$('rr-close').addEventListener('click', () => $('race-results').classList.add('hidden'));
 
 let flashTimer = null, bannerTimer = null;
 window.showSectorFlash = (n, time, delta, cls) => {
@@ -1309,6 +1315,7 @@ window.initGameVisuals = () => {
     sentInputs = []; carPose.clear(); carState.clear(); renderClock.t = null;
     for (const k in liveSec) delete liveSec[k]; // new session, new timing
     $('fl-card').classList.add('hidden');
+    $('race-results').classList.add('hidden'); // next session: last race's classification goes
     buildWorld(clientState.trackData);
     simStep(false); // resend what's held when a new session starts
 };

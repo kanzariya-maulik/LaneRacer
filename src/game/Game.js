@@ -505,7 +505,6 @@ class Game {
                 this.winnerCount++;
                 p.finishOrder = this.winnerCount;
                 if (this.winnerCount === 1) this.firstFinishAt = this.time;
-                this.io.emit('chat_msg', { username: 'SYSTEM', color: '#ff0000', msg: `${p.username} finished P${p.finishOrder}!` });
             }
             return;
         }

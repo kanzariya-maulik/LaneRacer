@@ -162,15 +162,16 @@
             <h2>QUALIFYING RESULTS</h2>
             <ol id="quali-results-list"></ol>
         </div>
-        <div id="race-results" class="hidden">
-            <div class="rr-card">
-                <div class="rr-head"><span class="rr-flag"></span><span class="rr-title">RACE CLASSIFICATION</span><span id="rr-track"></span></div>
-                <div class="rr-cols"><span>POS</span><span></span><span>DRIVER</span><span></span><span>LAPS</span><span>BEST LAP</span><span>PEN</span><span>TIME</span></div>
-                <ol id="rr-list"></ol>
-                <div class="rr-foot">Times include penalties · back to lobby in <span id="rr-count">15</span> s</div>
-            </div>
         </div>
     </div>
+
+    <div id="race-results" class="hidden">
+        <div class="rr-card">
+            <div class="rr-head"><span class="rr-flag"></span><span class="rr-title">RACE CLASSIFICATION</span><span id="rr-track"></span><button id="rr-close" title="Close">✕</button></div>
+            <div class="rr-cols"><span>POS</span><span></span><span>DRIVER</span><span></span><span>LAPS</span><span>BEST LAP</span><span>PEN</span><span>TIME</span></div>
+            <ol id="rr-list"></ol>
+            <div class="rr-foot">Times include penalties · <span id="rr-count">back to lobby in 15 s</span></div>
+        </div>
 
     <script type="importmap">
         { "imports": { "three": "/vendor/three/build/three.module.js", "three/addons/": "/vendor/three/examples/jsm/" } }
