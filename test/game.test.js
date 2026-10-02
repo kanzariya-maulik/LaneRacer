@@ -956,3 +956,17 @@ test('fast update carries velocity, tow and the last applied input for reconcili
     assert.strictEqual(e[10], 36);
     assert.ok(JSON.stringify(e).length <= 75, `${JSON.stringify(e).length} bytes`);
 });
+
+test('start() runs the fixed-step loop and reports net_stats once a second', async () => {
+    const stats = [];
+    const io2 = { emit(ev, d) { if (ev === 'net_stats') stats.push(d); }, volatile: { emit() {} } };
+    const g = new Game(io2, [lp('a')], monza, RACE, () => {});
+    g.start();
+    await new Promise((r) => setTimeout(r, 1150));
+    g.stop();
+    assert.ok(g.ticker === null, 'stop() clears the ticker');
+    assert.strictEqual(stats.length, 1);
+    assert.strictEqual(typeof stats[0].tickMs, 'number');
+    assert.deepStrictEqual(Object.keys(stats[0].starve), ['a']);
+    assert.ok(g.seq >= 66 && g.seq <= 71, `${g.seq} ticks in 1.15 s`);
+});

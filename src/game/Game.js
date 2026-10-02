@@ -190,12 +190,26 @@ class Game {
     start() {
         this.io.emit('game_init', this.initPayload());
         if (this.mode === 'quali') this.io.emit('session', { phase: 'QUALIFYING', endsInMs: QUALI_MAX_S * 1000 });
-        this.loopPath = setInterval(() => this.update(), 1000 / TICK_RATE);
+        this.ticker = new Ticker(1000 / TICK_RATE, () => this.timedUpdate());
+        this.ticker.start();
     }
 
     stop() {
-        if (this.loopPath) clearInterval(this.loopPath);
-        this.loopPath = null;
+        if (this.ticker) this.ticker.stop();
+        this.ticker = null;
+    }
+
+    // update() plus a tick-cost average and a once-a-second net_stats for the overlay
+    timedUpdate() {
+        const t0 = process.hrtime.bigint();
+        this.update();
+        const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+        this.tickMs = this.tickMs === undefined ? ms : this.tickMs + (ms - this.tickMs) * 0.05;
+        if (this.seq % TICK_RATE === 0) {
+            const starve = {};
+            for (const id in this.players) { starve[id] = this.players[id].starve; this.players[id].starve = 0; }
+            this.io.emit('net_stats', { tickMs: +this.tickMs.toFixed(2), starve });
+        }
     }
 
     // DRS: race — within 1 s of the car ahead at a zone's detection point, from lap 2; quali — free in the zones.
