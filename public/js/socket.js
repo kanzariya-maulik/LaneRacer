@@ -329,6 +329,6 @@ socket.on('track_limits', (e) => {
     if (e.id !== clientState.me || !window.showBanner) return;
     window.showBanner(e.kind === 'deleted' ? 'TRACK LIMITS — LAP DELETED'
         : e.kind === 'warning' ? `TRACK LIMITS — WARNING ${e.count}/2`
-        : e.kind === 'jump' ? 'JUMP START — +5s PENALTY'
+        : e.kind === 'jump' ? `JUMP START — +${e.penalty}s PENALTY`
         : `+5s PENALTY (total +${e.penalty}s)`);
 });

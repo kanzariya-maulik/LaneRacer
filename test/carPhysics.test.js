@@ -153,8 +153,9 @@ test('steering assist changes nothing above 250 km/h', () => {
     assert.deepStrictEqual([b.x, b.y, b.angle, b.vx, b.vy], [a.x, a.y, a.angle, a.vx, a.vy]);
 });
 
-test('DRS drag cut adds 10–25 km/h of top speed', () => {
+test('DRS drag cut adds 25–35 km/h of top speed', async () => {
+    const { DRS_DRAG } = await import('../public/js/sim/drive.js');
     const top = (dragMul) => { const c = { ...mk(80), dragMul }; for (let i = 0; i < 60 * 40; i++) step(c, FULL, DT, S); return kmh(c); };
-    const gain = top(0.85) - top(1);
-    assert.ok(gain > 10 && gain < 25, `+${gain.toFixed(1)} km/h`);
+    const gain = top(DRS_DRAG) - top(1);
+    assert.ok(gain > 25 && gain < 35, `+${gain.toFixed(1)} km/h`);
 });

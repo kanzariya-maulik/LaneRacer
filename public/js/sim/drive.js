@@ -8,7 +8,7 @@ export const WALL_OFFSET = 80;     // world units past the track edge; Track.js 
 export const PIT_RUNOFF_M = 2;     // barrier this far outside the pit lane edge
 export const KERB_M = 1.5;         // kerbs past the track edge drive like asphalt
 export const PIT_LIMIT_KMH = 80;
-export const DRS_DRAG = 0.85;      // drag with the flap open (~+15 km/h top speed)
+export const DRS_DRAG = 0.78;      // drag with the flap open (~+29 km/h top speed)
 
 // Distance along the pit lane of a nearestOnPath result
 export const pitAlong = (pit, n) => pit.cum[n.i] + n.t * (pit.cum[n.i + 1] - pit.cum[n.i]);

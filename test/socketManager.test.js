@@ -80,7 +80,7 @@ test('lights: 1..5 one per second, out 0.5–2.5 s later; throttle before lights
     advance(t, 2001);
     assert.ok(io.events('lights').some(l => l.count === 0), 'lights never went out');
     assert.ok(io.events('status_change').includes('RACE'));
-    assert.strictEqual(car.penalty, 5, 'jump start should cost 5 s');
+    assert.strictEqual(car.penalty, 10, 'jump start should cost 10 s');
     advance(t, 1000);
     assert.notStrictEqual(car.x, x0);
     a.fire('disconnect');

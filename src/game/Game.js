@@ -8,7 +8,7 @@ const QUALI_LAPS = 2;       // flying laps after the out-lap
 const QUALI_MAX_S = 360;    // quali ends at this session time even if someone never finishes
 const LIMIT_WARNINGS = 2;    // race: violations before penalties start
 const LIMIT_PENALTY_S = 5;
-const JUMP_PENALTY_S = 5;     // moving before lights out
+const JUMP_PENALTY_S = 10;    // moving before lights out
 const JUMP_MOVE_M = 0.5;      // further than this from the grid slot = moved
 const FINISH_WINDOW_S = 60;   // after the winner finishes, the rest have this long before they're classified DNF
 const INPUT_TIMEOUT_S = 0.3;  // no input for this long = controls released

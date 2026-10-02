@@ -689,13 +689,13 @@ test('walls stop the car body, not just its centre: nothing pokes through the pi
     assert.ok(d >= Physics.CAR_HALF_LENGTH_M * monza.scale - 1, `nose ${((Physics.CAR_HALF_LENGTH_M * monza.scale - d) / monza.scale).toFixed(2)} m through the barrier`);
 });
 
-test('jump start: moving before lights out costs 5 s, once', () => {
+test('jump start: moving before lights out costs 10 s, once', () => {
     const { events, io: sio } = spy();
     const g = new Game(sio, [lp('a')], monza, RACE, () => {});
     const p = g.players.a;
     p.input = FULL;
     for (let k = 0; k < 60; k++) g.update(); // lights still on
-    assert.strictEqual(p.penalty, 5);
+    assert.strictEqual(p.penalty, 10);
     assert.strictEqual(events.filter(([ev, d]) => ev === 'track_limits' && d.kind === 'jump').length, 1);
     assert.strictEqual(g.time, 0, 'race clock must not run before lights out');
 });
