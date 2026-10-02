@@ -457,6 +457,27 @@ input:focus { border: 1px solid var(--primary); }
 .tt-sectors i { display: inline-block; width: 10px; height: 4px; background: #4b5563; }
 .tt-sectors i.sb-purple { background: #c084fc; }
 .tt-sectors i.sb-yellow { background: #facc15; }
+.tt-sectors i.sb-green { background: #4ade80; }
+.tt-sectors i.sb-grey { background: #6b7280; }
+
+/* F1-style purple timing: fastest lap of the session */
+.stopwatch { width: 1em; height: 1em; vertical-align: -0.12em; }
+.lt-fl, .lt-fl .lt-label { color: #c084fc; }
+#lt-fl-who { font-size: 0.75rem; letter-spacing: 1px; }
+.sec-best { display: block; font-style: normal; font-size: 0.62rem; color: #c084fc; opacity: 0.85; white-space: nowrap; }
+.sec-best:empty { display: none; }
+.tt-fl { color: #fff; background: #8b2fc9; border-radius: 3px; padding: 0 3px; font-size: 0.8rem; line-height: 16px; }
+#fl-card { position: absolute; left: 20px; bottom: 140px; min-width: 300px; color: #fff; font-family: inherit; box-shadow: 0 6px 18px rgba(0,0,0,0.45);
+    border-radius: 6px; overflow: hidden; animation: flIn 0.35s cubic-bezier(.2,.9,.3,1.2); z-index: 6; }
+#fl-card.hidden { display: none; }
+#fl-card .fl-head { display: flex; align-items: center; gap: 8px; background: linear-gradient(90deg, #6d28d9, #a21caf); padding: 6px 12px; font-weight: 900; letter-spacing: 2px; font-size: 0.85rem; }
+#fl-card .fl-head .stopwatch { width: 18px; height: 18px; }
+#fl-card .fl-body { display: flex; align-items: center; gap: 10px; background: rgba(15, 15, 30, 0.94); padding: 8px 12px; }
+#fl-card .fl-team { width: 5px; height: 26px; border-radius: 2px; }
+#fl-card .fl-name { flex: 1; font-weight: 900; font-size: 1.15rem; letter-spacing: 1px; text-transform: uppercase; }
+#fl-card .fl-time { font-weight: 900; font-size: 1.25rem; color: #d8b4fe; font-variant-numeric: tabular-nums; }
+#fl-card .fl-lap { background: rgba(15, 15, 30, 0.8); color: #94a3b8; font-size: 0.72rem; letter-spacing: 2px; padding: 3px 12px 6px 27px; }
+@keyframes flIn { from { transform: translateX(-120%); opacity: 0; } to { transform: none; opacity: 1; } }
 
 #drs-badge { width: fit-content; margin: 8px 0 8px auto; font: 900 1.1rem sans-serif; letter-spacing: 2px; padding: 6px 14px; border-radius: 6px; border: 3px solid #4b5563; color: #6b7280; background: #111827; }
 #drs-badge.drs-avail { border-color: #22c55e; color: #22c55e; }

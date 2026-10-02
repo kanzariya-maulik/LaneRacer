@@ -109,10 +109,11 @@
                     <div class="lt-row lt-now"><span class="lt-label">LAP</span><span id="lt-current">--</span></div>
                     <div class="lt-row"><span class="lt-label">LAST</span><span id="lt-delta"></span><span id="lt-last">--</span></div>
                     <div class="lt-row"><span class="lt-label">BEST</span><span id="lt-best">--</span></div>
+                    <div class="lt-row lt-fl"><span class="lt-label"><svg class="stopwatch" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13.5" r="8" fill="none" stroke="currentColor" stroke-width="2.4"/><rect x="9.5" y="1.5" width="5" height="2.6" rx="1" fill="currentColor"/><path d="M12 13.5V8.6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="M18.4 5.6l1.6-1.6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></span><span id="lt-fl-who"></span><span id="lt-fl">--</span></div>
                     <div id="sector-panel">
-                        <div class="sec" id="sec-1"><i></i><span>S1</span></div>
-                        <div class="sec" id="sec-2"><i></i><span>S2</span></div>
-                        <div class="sec" id="sec-3"><i></i><span>S3</span></div>
+                        <div class="sec" id="sec-1"><i></i><span>S1</span><em class="sec-best"></em></div>
+                        <div class="sec" id="sec-2"><i></i><span>S2</span><em class="sec-best"></em></div>
+                        <div class="sec" id="sec-3"><i></i><span>S3</span><em class="sec-best"></em></div>
                     </div>
                 </div>
                 <div id="drs-badge" class="drs-off" title="DRS — press E (gamepad Y) when green">DRS</div>
@@ -126,6 +127,11 @@
             <div id="pit-limiter" class="hidden">PIT LIMITER 80</div>
             <div id="sector-flash" class="hidden"></div>
             <div id="race-msg" class="hidden"></div>
+            <div id="fl-card" class="hidden">
+                <div class="fl-head"><svg class="stopwatch" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13.5" r="8" fill="none" stroke="currentColor" stroke-width="2.4"/><rect x="9.5" y="1.5" width="5" height="2.6" rx="1" fill="currentColor"/><path d="M12 13.5V8.6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="M18.4 5.6l1.6-1.6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg><span>FASTEST LAP</span></div>
+                <div class="fl-body"><span class="fl-team"></span><span class="fl-name"></span><span class="fl-time"></span></div>
+                <div class="fl-lap"></div>
+            </div>
             <div id="lights" class="hidden">
                 <span class="light"></span><span class="light"></span><span class="light"></span><span class="light"></span><span class="light"></span>
             </div>

@@ -7,7 +7,7 @@ import { LEVELS, ratioRange, resolveLevel, autoPick, adaptStep, snapLight, frame
 import { placeScenery, seedOf } from './scenery.js';
 import { SnapshotBuffer, RenderClock, sample, decodeFlags } from './netsync.js';
 import { Predictor, STEP_S } from './predict.js';
-import { gapText, driverCode, lapDelta, stepFollow, inDrsZone, drsHint } from './timing.js';
+import { gapText, driverCode, lapDelta, stepFollow, inDrsZone, drsHint, liveSectors } from './timing.js';
 import { MODES, segmentColor, cornerMask, aheadM, trackIndex, nextMode } from './racingline.js';
 
 // World units per metre come from the track JSON (track.scale = 6).
@@ -1023,6 +1023,26 @@ window.showSectorFlash = (n, time, delta, cls) => {
     clearTimeout(flashTimer);
     flashTimer = setTimeout(() => el.classList.add('hidden'), 2000);
 };
+// Every driver's sectors on the lap they're on (quali timing tower), keyed by player id
+const liveSec = {};
+window.onSectorAll = (s) => { liveSectors(liveSec, s); };
+const STOPWATCH = document.querySelector('#fl-card .stopwatch').outerHTML;
+const codeOf = (id) => { const lp = clientState.players[id]; return lp ? driverCode(lp.username) : '---'; };
+
+// F1 TV-style purple card when anyone sets the session's fastest lap
+let flTimer;
+window.showFastestLap = (fl) => {
+    const card = $('fl-card'), lp = clientState.players[fl.id];
+    card.querySelector('.fl-team').style.background = teamInfo[lp?.teamId]?.chatColor || '#888';
+    card.querySelector('.fl-name').textContent = lp ? lp.username : '—';
+    card.querySelector('.fl-time').textContent = fmtTime(fl.time);
+    card.querySelector('.fl-lap').textContent = `LAP ${fl.lap}`;
+    card.classList.remove('hidden');
+    card.style.animation = 'none'; void card.offsetWidth; card.style.animation = ''; // replay the slide-in
+    clearTimeout(flTimer);
+    flTimer = setTimeout(() => card.classList.add('hidden'), 6000);
+};
+
 window.showBanner = (text, good = false) => {
     const el = $('race-msg');
     el.textContent = text;
@@ -1058,9 +1078,14 @@ function updateHUD(withTower = true) {
     $('lt-delta').className = delta ? delta.cls : '';
     for (let i = 0; i < 3; i++) {
         const el = $(`sec-${i + 1}`), s = racing ? clientState.mySectors[i] : null;
-        el.lastElementChild.textContent = s ? s.time.toFixed(3) : `S${i + 1}`;
+        el.children[1].textContent = s ? s.time.toFixed(3) : `S${i + 1}`;
         el.className = `sec ${s ? s.cls : ''}`;
+        const best = clientState.sessionBest[i]; // purple sector: the session's best and who holds it
+        el.lastElementChild.textContent = best === null ? '' : `${best.toFixed(3)} ${codeOf(clientState.sessionBestIds[i])}`;
     }
+    const fl = clientState.fastestLap;
+    $('lt-fl').textContent = fl ? fmtTime(fl.time) : '--';
+    $('lt-fl-who').textContent = fl ? codeOf(fl.id) : '';
 
     // Session bar
     const sess = clientState.session;
@@ -1108,15 +1133,23 @@ function updateHUD(withTower = true) {
             li.append(el('span', 'tt-pos', p.rank), team, name);
             if (p.inPit && !quali) li.append(el('span', 'tt-tag', 'PIT'));
             if (p.penalty) li.append(el('span', 'tt-tag pen', `+${p.penalty}s`));
+            if (clientState.fastestLap?.id === id) { // purple stopwatch: fastest lap of the session
+                const fl = el('span', 'tt-fl');
+                fl.innerHTML = STOPWATCH;
+                li.append(fl);
+            }
             const gap = gapText(rows, i, towerMode);
             const time = el('span', 'tt-gap');
             if (quali) {
                 time.textContent = gap ? gap : fmtTime(p.bestLap);
                 if (p.bestLap !== null && p.bestLap === fastest) time.classList.add('t-purple');
                 const bars = el('span', 'tt-sectors');
-                (p.bestLapSectors || [null, null, null]).forEach((s, k) => {
+                // On a timed lap: live bars for this lap (purple / green / yellow / grey); otherwise their best lap's sectors
+                const live = p.lapStart !== null && p.lapStart !== undefined && liveSec[id];
+                if (live) live.forEach((c) => bars.appendChild(el('i', c ? c.replace('sec-', 'sb-') : '')));
+                else (p.bestLapSectors || [null, null, null]).forEach((s, k) => {
                     const best = clientState.sessionBest[k];
-                    bars.appendChild(el('i', s === null ? '' : best !== null && s <= best + 1e-9 ? 'sb-purple' : 'sb-yellow'));
+                    bars.appendChild(el('i', s === null ? '' : best !== null && s <= best + 1e-9 ? 'sb-purple' : 'sb-green'));
                 });
                 li.append(bars);
             } else if (i === 0) {
@@ -1247,6 +1280,8 @@ window.initGameVisuals = () => {
     // New session: predict from the new grid (reset on our first entry); spectators never get one, so never predict
     predictor = new Predictor(clientState.trackData, clientState.gameState?.[clientState.me]?.assist || 'off');
     sentInputs = []; carPose.clear(); carState.clear(); renderClock.t = null;
+    for (const k in liveSec) delete liveSec[k]; // new session, new timing
+    $('fl-card').classList.add('hidden');
     buildWorld(clientState.trackData);
     simStep(false); // resend what's held when a new session starts
 };

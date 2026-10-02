@@ -998,3 +998,34 @@ test('finished and DNF race cars park with zero velocity (remote clients must no
     assert.ok(b.dnf);
     assert.deepStrictEqual([b.vx, b.vy, b.speed], [0, 0, 0], 'DNF parked');
 });
+
+test('session fastest lap: only a faster valid lap takes it; everyone is told who and on which lap', () => {
+    const events = [];
+    const spyIo = { emit: (ev, d) => { if (ev === 'fastest_lap') events.push(d); }, volatile: { emit() {} } };
+    const g = new Game(spyIo, [lp('a'), lp('b')], monza, { maxLaps: 5, qualifying: false }, () => {});
+    g.release();
+    const { a, b } = g.players;
+    lap(g, a, 0, 85);
+    lap(g, b, 0, 84);
+    lap(g, a, 85, 86);                                 // slower: no change
+    b.lapValid = false;
+    lap(g, b, 84, 80);                                 // faster but invalid: never counts
+    assert.deepStrictEqual(events.map((e) => [e.id, e.lap]), [['a', 1], ['b', 1]]);
+    close(events[1].time, 84);
+    assert.deepStrictEqual({ id: g.fastestLap.id, lap: g.fastestLap.lap }, { id: 'b', lap: 1 });
+    assert.deepStrictEqual(g.initPayload().fastestLap, g.fastestLap, 'late joiners see the holder');
+});
+
+test('session best sectors record who set them, and the timing update carries both', () => {
+    const timing = [];
+    const spyIo = { emit: (ev, d) => { if (ev === 'timing') timing.push(d); }, volatile: { emit() {} } };
+    const g = new Game(spyIo, [lp('a'), lp('b')], monza, { maxLaps: 5, qualifying: false }, () => {});
+    g.release();
+    const { a, b } = g.players;
+    lap(g, a, 0, 90);                                  // a: every sector 30 s
+    lap(g, b, 0, 87);                                  // b: every sector 29 s
+    assert.deepStrictEqual(g.bestSectorIds, ['b', 'b', 'b']);
+    assert.deepStrictEqual(timing.at(-1).bestSectorIds, ['b', 'b', 'b']);
+    assert.strictEqual(timing.at(-1).fastestLap.id, 'b');
+    assert.deepStrictEqual(g.initPayload().bestSectorIds, ['b', 'b', 'b']);
+});

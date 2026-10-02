@@ -8,6 +8,8 @@ let clientState = {
     status: 'LOBBY',
     settings: { trackId: 'monza', maxLaps: 3, qualifying: true },
     sessionBest: [null, null, null], // fastest valid sector times this session
+    sessionBestIds: [null, null, null], // who set each (purple sector)
+    fastestLap: null,                // { id, time, lap }: the session's purple lap
     mySectors: [null, null, null],   // current lap: { time, cls }
     myBestSectors: [null, null, null],
     gameState: null,
@@ -248,6 +250,8 @@ socket.on('game_init', (data) => {
     clientState.netIndex = data.index || {};
     clientState.netIn = [];
     clientState.sessionBest = data.bestSectors ? [...data.bestSectors] : [null, null, null];
+    clientState.sessionBestIds = data.bestSectorIds ? [...data.bestSectorIds] : [null, null, null];
+    clientState.fastestLap = data.fastestLap || null;
     if (data.session) clientState.session = { phase: data.session.phase, endsAt: Date.now() + data.session.endsInMs };
     clientState.mySectors = [null, null, null];
     clientState.myBestSectors = [null, null, null];
@@ -278,6 +282,8 @@ socket.on('quali_results', (list) => {
 
 socket.on('timing', (t) => {
     if (t.sessionBest) clientState.sessionBest = [...t.sessionBest]; // completed valid laps only
+    if (t.bestSectorIds) clientState.sessionBestIds = [...t.bestSectorIds];
+    if (t.fastestLap !== undefined) clientState.fastestLap = t.fastestLap;
     clientState.lastTiming = t;
     if (t.id === clientState.me) {
         // Sector bests count only from laps that end valid (same rule as the server), so colour and delta agree
@@ -294,12 +300,19 @@ socket.on('timing', (t) => {
 
 socket.on('sector', (s) => {
     const i = s.sector - 1;
+    if (window.onSectorAll) window.onSectorAll(s); // every driver: live sector bars in the timing tower
     if (s.id !== clientState.me) return;
     const cls = !s.valid ? 'sec-grey' : s.sessionBest ? 'sec-purple' : s.personalBest ? 'sec-green' : 'sec-yellow';
     const prev = clientState.myBestSectors[i];
     if (s.sector === 1) clientState.mySectors = [null, null, null];
     clientState.mySectors[i] = { time: s.time, cls };
     if (window.showSectorFlash) window.showSectorFlash(s.sector, s.time, prev === null ? null : s.time - prev, cls);
+});
+
+// Someone set the session's fastest lap: the purple graphic shows on every screen
+socket.on('fastest_lap', (fl) => {
+    clientState.fastestLap = fl;
+    if (window.showFastestLap) window.showFastestLap(fl);
 });
 
 socket.on('reaction', (r) => {

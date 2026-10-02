@@ -60,3 +60,20 @@ test('drsHint explains why DRS is off', () => {
     assert.strictEqual(T.drsHint(base), 'IN DRS ZONES');
     assert.strictEqual(T.drsHint({ ...base, mode: 'quali', lap: 0 }), 'IN DRS ZONES', 'quali: no lap or gap rule');
 });
+
+test('sectorClass: purple overall best, green personal best, yellow slower, grey on an invalid lap', () => {
+    assert.strictEqual(T.sectorClass({ valid: true, sessionBest: true, personalBest: true }), 'sec-purple');
+    assert.strictEqual(T.sectorClass({ valid: true, sessionBest: false, personalBest: true }), 'sec-green');
+    assert.strictEqual(T.sectorClass({ valid: true, sessionBest: false, personalBest: false }), 'sec-yellow');
+    assert.strictEqual(T.sectorClass({ valid: false, sessionBest: true, personalBest: true }), 'sec-grey');
+});
+
+test('liveSectors: each driver\'s current lap, restarting at sector 1', () => {
+    const live = {};
+    const sec = (id, sector, sessionBest) => T.liveSectors(live, { id, sector, valid: true, sessionBest, personalBest: true });
+    sec('a', 1, true); sec('a', 2, false); sec('b', 1, false);
+    assert.deepStrictEqual(live.a, ['sec-purple', 'sec-green', null]);
+    assert.deepStrictEqual(live.b, ['sec-green', null, null]);
+    sec('a', 3, false); sec('a', 1, false);
+    assert.deepStrictEqual(live.a, ['sec-green', null, null], 'new lap clears the old bars');
+});

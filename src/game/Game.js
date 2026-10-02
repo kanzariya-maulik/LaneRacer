@@ -38,6 +38,8 @@ class Game {
         this.ticker = null;
         this.winnerCount = 0;
         this.bestSectors = [null, null, null]; // session bests, valid laps only
+        this.bestSectorIds = [null, null, null]; // who holds each (purple sector)
+        this.fastestLap = null;                // { id, time, lap }: purple lap, valid laps only
         this.lastDetect = [];                  // per DRS zone: time the last car crossed its detection point
 
         const cpCount = track.checkpoints.length;
@@ -158,7 +160,7 @@ class Game {
     initPayload() {
         // Late joiners also need the quali clock and the session-best sectors (tower colours)
         const session = this.mode === 'quali' ? { phase: 'QUALIFYING', endsInMs: Math.max(0, (QUALI_MAX_S - this.time) * 1000) } : null;
-        return { players: this.players, track: this.track, mode: this.mode, index: this.index, session, bestSectors: this.bestSectors };
+        return { players: this.players, track: this.track, mode: this.mode, index: this.index, session, bestSectors: this.bestSectors, bestSectorIds: this.bestSectorIds, fastestLap: this.fastestLap };
     }
 
     handleInput(id, input) {
@@ -436,15 +438,20 @@ class Game {
             p.sectors.forEach((s, i) => {
                 if (s === null) return;
                 if (p.bestSectors[i] === null || s < p.bestSectors[i]) p.bestSectors[i] = s;
-                if (this.bestSectors[i] === null || s < this.bestSectors[i]) this.bestSectors[i] = s;
+                if (this.bestSectors[i] === null || s < this.bestSectors[i]) { this.bestSectors[i] = s; this.bestSectorIds[i] = p.id; }
             });
         }
         if (p.lapValid && (p.bestLap === null || lapTime < p.bestLap)) {
             p.bestLap = lapTime;
             p.bestLapSectors = [...p.sectors];
         }
+        if (p.lapValid && (this.fastestLap === null || lapTime < this.fastestLap.time)) {
+            this.fastestLap = { id: p.id, time: lapTime, lap: p.lap };
+            this.io.emit('fastest_lap', this.fastestLap); // everyone's screen shows the purple fastest-lap graphic
+        }
         p.lapStart = this.time;
-        this.io.emit('timing', { id: p.id, lap: p.lap, lapTime, bestLap: p.bestLap, valid: p.lapValid, sessionBest: this.bestSectors });
+        this.io.emit('timing', { id: p.id, lap: p.lap, lapTime, bestLap: p.bestLap, valid: p.lapValid,
+            sessionBest: this.bestSectors, bestSectorIds: this.bestSectorIds, fastestLap: this.fastestLap });
         this.newLap(p);
     }
 

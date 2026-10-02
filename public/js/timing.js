@@ -47,3 +47,16 @@ export function drsHint({ mode, inPit, drs, drsAvailable, lap, inZone }) {
     if (mode === 'race' && inZone) return 'NEED < 1.0 s';
     return 'IN DRS ZONES';
 }
+
+// F1 timing colours: purple = fastest of the whole session, green = the driver's own best, yellow = slower
+export function sectorClass(s) {
+    if (!s.valid) return 'sec-grey';
+    return s.sessionBest ? 'sec-purple' : s.personalBest ? 'sec-green' : 'sec-yellow';
+}
+
+// Live sector bars per driver for the lap they're on (timing tower); sector 1 starts a fresh lap
+export function liveSectors(live, s) {
+    if (s.sector === 1 || !live[s.id]) live[s.id] = [null, null, null];
+    live[s.id][s.sector - 1] = sectorClass(s);
+    return live;
+}
