@@ -5,7 +5,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { keyboardStep, gamepadInput } from './input.js';
 import { LEVELS, ratioRange, resolveLevel, autoPick, adaptStep, snapLight, frameCapped } from './quality.js';
 import { placeScenery, seedOf } from './scenery.js';
-import { SnapshotBuffer, RenderClock, sample, decodeFlags } from './netsync.js';
+import { SnapshotBuffer, RenderClock, sample, samplePresent, decodeFlags } from './netsync.js';
 import { Predictor, STEP_S } from './predict.js';
 import { gapText, driverCode, lapDelta, stepFollow, inDrsZone, drsHint, liveSectors, resultCells } from './timing.js';
 import { MODES, segmentColor, cornerMask, aheadM, trackIndex, nextMode } from './racingline.js';
@@ -110,6 +110,17 @@ function toggleLine() {
     window.showBanner?.(`RACING LINE: ${lineMode.toUpperCase()}`, true);
 }
 
+// Assist on/off for your own car, any time (lobby select or Q / gamepad View): server and prediction switch together
+let padView = false;
+function toggleAssist() {
+    if (isSpectator()) return;
+    window.setAssist?.(store.get('lanrace.assist') === 'off' ? 'full' : 'off');
+}
+window.onAssistChange = (v) => {
+    if (predictor) { predictor.assist = v; if (predictor.car) predictor.car.assist = v; }
+    if (clientState.status !== 'LOBBY') window.showBanner?.(`ASSIST: ${v === 'off' ? 'OFF' : 'FULL'}`, true);
+};
+
 function isSpectator() {
     return !!clientState.players[clientState.me]?.isSpectating || !clientState.gameState?.[clientState.me];
 }
@@ -119,6 +130,7 @@ function onKey(e, down) {
     const key = e.key.toLowerCase();
     if (down && key === 't' && !e.repeat && clientState.status !== 'LOBBY') toggleTower();
     if (down && key === 'r' && !e.repeat && clientState.status !== 'LOBBY') toggleLine();
+    if (down && key === 'q' && !e.repeat && clientState.status !== 'LOBBY') toggleAssist();
     if (down && e.key === 'F3') { e.preventDefault(); netstatsOn = !netstatsOn; netstatsEl.classList.toggle('hidden', !netstatsOn); }
     if (down && clientState.status !== 'LOBBY' && isSpectator()) {
         if (key === 'arrowleft') spectateId = stepFollow(rankedCarIds(), spectateId, -1);
@@ -159,6 +171,9 @@ function pollInput(dt) {
     const x = !!pad?.buttons[2]?.pressed; // gamepad X / Square
     if (x && !padX && clientState.status !== 'LOBBY') toggleLine();
     padX = x;
+    const view = !!pad?.buttons[8]?.pressed; // gamepad View / Back / Select
+    if (view && !padView && clientState.status !== 'LOBBY') toggleAssist();
+    padView = view;
     simAcc = Math.min(simAcc + dt, 0.25); // a long stall doesn't fire a burst of steps
     while (simAcc >= STEP_S) { simStep(); simAcc -= STEP_S; }
 }
@@ -876,6 +891,8 @@ function updateCars(dt) {
 
 // Own car: predicted (zero input delay). Others: adaptive interpolation delay, Hermite curves, dead reckoning.
 const renderClock = new RenderClock(), carPose = new Map(), carState = new Map(), ownPose = {}; // reused every frame
+let othersMode = 'present';
+const presentClock = new RenderClock(); // 'present' mode time: server now, eased so packet jitter doesn't shake cars
 function applyNet(nowS, dt) {
     const myIdx = clientState.netIndex[clientState.me];
     for (const [pkt, at] of clientState.netIn.splice(0)) {
@@ -887,6 +904,7 @@ function applyNet(nowS, dt) {
     if (!latest || !gs) return;
     const serverT = netBuf.serverNow(nowS);
     const renderT = renderClock.advance(dt, serverT, netBuf.targetDelayS());
+    const presentT = presentClock.advance(dt, serverT, 0);
     const gameT = netBuf.gameTime(serverT);
     for (const id in gs) {
         const i = clientState.netIndex[id];
@@ -900,7 +918,8 @@ function applyNet(nowS, dt) {
         } else {
             let out = carPose.get(i), st = carState.get(i);
             if (!out) { out = {}; st = {}; carPose.set(i, out); carState.set(i, st); }
-            pose = sample(netBuf, renderT, i, out, st, scale);
+            // 'present': where the server has them now (matches the hitbox); 'smooth': interpolated, slightly behind
+            pose = othersMode === 'smooth' ? sample(netBuf, renderT, i, out, st, scale) : samplePresent(netBuf, presentT, i, out, st, scale);
             if (!pose) continue;
             decodeFlags(pose.flags, p);
         }
@@ -1139,13 +1158,13 @@ function updateHUD(withTower = true) {
         const t = clientState.trackData, total = t.cum[t.path.length];
         drsIdx = trackIndex(t.path, me.x, me.y, drsIdx, t.width);
         const lapS = (((t.cum[drsIdx] - (t.startS || 0)) % total) + total) % total;
-        hint = drsHint({ mode: me.ghost ? 'quali' : 'race', inPit: me.inPit, drs: me.drs, drsAvailable: me.drsAvailable, lap: me.lap, inZone: inDrsZone(t.drsZones || [], lapS) });
+        hint = drsHint({ mode: clientState.status === 'QUALIFYING' ? 'quali' : 'race', inPit: me.inPit, drs: me.drs, drsAvailable: me.drsAvailable, lap: me.lap, inZone: inDrsZone(t.drsZones || [], lapS) });
     }
     $('drs-hint').textContent = hint;
 
     if (withTower) {
         // Timing tower
-        const quali = Object.values(gs).some(p => p.ghost);
+        const quali = clientState.status === 'QUALIFYING' || clientState.status === 'QUALI_RESULTS'; // ghosts also mean collisions off
         const ol = $('leaderboard-list');
         ol.innerHTML = '';
         const sorted = Object.entries(gs).filter(([id]) => clientState.players[id]).sort((a, b) => a[1].rank - b[1].rank);
@@ -1312,7 +1331,8 @@ window.initGameVisuals = () => {
     netBuf = new SnapshotBuffer();
     // New session: predict from the new grid (reset on our first entry); spectators never get one, so never predict
     predictor = new Predictor(clientState.trackData, clientState.gameState?.[clientState.me]?.assist || 'off');
-    sentInputs = []; carPose.clear(); carState.clear(); renderClock.t = null;
+    sentInputs = []; carPose.clear(); carState.clear(); renderClock.t = presentClock.t = null;
+    othersMode = store.get('lanrace.others') === 'smooth' ? 'smooth' : 'present';
     for (const k in liveSec) delete liveSec[k]; // new session, new timing
     $('fl-card').classList.add('hidden');
     $('race-results').classList.add('hidden'); // next session: last race's classification goes

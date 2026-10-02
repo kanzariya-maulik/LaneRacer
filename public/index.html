@@ -42,6 +42,20 @@
                         </select>
                         <small>R / gamepad X during a race</small>
                     </label>
+                    <label class="graphics-picker">Assist:
+                        <select id="assist-select">
+                            <option value="full" selected>Full (steering + braking)</option>
+                            <option value="off">Off</option>
+                        </select>
+                        <small>Q / gamepad View during a race</small>
+                    </label>
+                    <label class="graphics-picker">Other cars:
+                        <select id="others-select">
+                            <option value="present" selected>Where they really are</option>
+                            <option value="smooth">Smoothest (slightly behind)</option>
+                        </select>
+                        <small>"Where they really are" matches the hitbox</small>
+                    </label>
 
                     <button id="btn-join" class="btn primary">Join Lobby</button>
                     
@@ -66,6 +80,12 @@
                                 <select id="setting-quali">
                                     <option value="1" selected>On (out-lap + 2 laps)</option>
                                     <option value="0">Off</option>
+                                </select>
+                            </label>
+                            <label>Collisions:
+                                <select id="setting-collisions">
+                                    <option value="1" selected>On</option>
+                                    <option value="0">Off (ghost cars)</option>
                                 </select>
                             </label>
                             <button id="btn-start" class="btn success mt-1">Start Race</button>

@@ -21,6 +21,7 @@ function sanitizeSettings(current, incoming, trackIds) {
     if (trackIds.includes(incoming.trackId)) next.trackId = incoming.trackId;
     if (Number.isFinite(incoming.maxLaps)) next.maxLaps = clamp(Math.round(incoming.maxLaps), 1, 50);
     if (typeof incoming.qualifying === 'boolean') next.qualifying = incoming.qualifying;
+    if (typeof incoming.collisions === 'boolean') next.collisions = incoming.collisions;
     return next;
 }
 
@@ -57,4 +58,7 @@ function sanitizeInputs(payload) {
         .map((i) => ({ seq: i.seq, ...sanitizeInput(i) }));
 }
 
-module.exports = { TEAMS, MAX_RACERS, sanitizeUsername, sanitizeChat, sanitizeSettings, sanitizeInput, sanitizeInputs, canJoinTeam, pickRacers };
+// Each player's own driving assist: 'full' (steering + braking help) or 'off'
+const sanitizeAssist = (a) => (a === 'off' ? 'off' : 'full');
+
+module.exports = { TEAMS, MAX_RACERS, sanitizeUsername, sanitizeChat, sanitizeSettings, sanitizeInput, sanitizeInputs, sanitizeAssist, canJoinTeam, pickRacers };

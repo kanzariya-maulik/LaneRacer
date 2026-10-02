@@ -135,7 +135,7 @@ class Game {
             const p = this.players[id];
             const flags = (p.inPit && FLAGS.inPit) | (p.limiter && FLAGS.limiter) | (p.drs && FLAGS.drs)
                 | (p.drsAvailable && FLAGS.drsAvailable) | (p.finished && FLAGS.finished)
-                | (p.lapValid && FLAGS.lapValid) | (this.mode === 'quali' && FLAGS.ghost);
+                | (p.lapValid && FLAGS.lapValid) | ((this.mode === 'quali' || this.settings.collisions === false) && FLAGS.ghost);
             c.push([this.index[id], r1(p.x), r1(p.y), +p.angle.toFixed(4), r1(p.speed), +p.steer.toFixed(3), flags,
                     r1(p.vx), r1(p.vy), +(p.tow || 0).toFixed(2), p.lastSeq]);
         }
@@ -329,7 +329,7 @@ class Game {
                     this.checkLapProgress(p);
                 }
             }
-            if (this.mode === 'race') {
+            if (this.mode === 'race' && this.settings.collisions !== false) { // host can turn contact off
                 for (let i = 0; i < ids.length; i++) {
                     for (let j = i + 1; j < ids.length; j++) {
                         const a = this.players[ids[i]], b = this.players[ids[j]];

@@ -18,6 +18,7 @@ const hostSettings = document.getElementById('host-settings');
 const setTrack = document.getElementById('setting-track');
 const setLaps = document.getElementById('setting-laps');
 const setQuali = document.getElementById('setting-quali');
+const setCollisions = document.getElementById('setting-collisions');
 const graphicsSelect = document.getElementById('graphics-select');
 try { graphicsSelect.value = localStorage.getItem('lanrace.quality') || 'auto'; } catch (e) { /* storage blocked: Auto */ }
 if (!graphicsSelect.value) graphicsSelect.value = 'auto';
@@ -34,6 +35,30 @@ lineSelect.addEventListener('change', () => {
     (window.lanraceMem ||= {})['lanrace.line'] = lineSelect.value; // applies even when storage is blocked
     try { localStorage.setItem('lanrace.line', lineSelect.value); } catch (e) { /* not remembered */ }
 });
+
+// Personal choices, remembered per browser: assist (sent to the server) and how other cars are drawn
+function remembered(id, key, fallback, onChange) {
+    const sel = document.getElementById(id);
+    try { sel.value = localStorage.getItem(key) || fallback; } catch (e) { /* storage blocked: default */ }
+    if (!sel.value) sel.value = fallback;
+    (window.lanraceMem ||= {})[key] = sel.value;
+    sel.addEventListener('change', () => {
+        window.lanraceMem[key] = sel.value;
+        try { localStorage.setItem(key, sel.value); } catch (e) { /* not remembered */ }
+        onChange?.(sel.value);
+    });
+    return sel;
+}
+const assistSelect = remembered('assist-select', 'lanrace.assist', 'full', (v) => window.setAssist?.(v));
+remembered('others-select', 'lanrace.others', 'present');
+window.setAssist = (v) => { // lobby select and the in-race Q key both land here
+    assistSelect.value = v;
+    window.lanraceMem['lanrace.assist'] = v;
+    try { localStorage.setItem('lanrace.assist', v); } catch (e) { /* not remembered */ }
+    if (lastJoin) lastJoin.assist = v;
+    if (clientState.players[clientState.me]) socket.emit('set_assist', v); // joined (also after a reconnect)
+    window.onAssistChange?.(v);
+};
 
 let isJoined = false;
 let amReady = false;
@@ -89,7 +114,7 @@ inputUser.focus();
 btnJoin.addEventListener('click', () => {
     if (!selectedTeam) return window.appendChat('SYSTEM', '#f43f5e', 'Pick a team first.');
     const username = inputUser.value.trim() || `Player${Math.floor(Math.random() * 1000)}`;
-    lastJoin = { username, teamId: selectedTeam };
+    lastJoin = { username, teamId: selectedTeam, assist: assistSelect.value };
     socket.emit('join_lobby', lastJoin);
     setJoinedUI(true);
 });
@@ -124,12 +149,14 @@ function emitSettings() {
     socket.emit('update_settings', {
         trackId: setTrack.value,
         maxLaps: parseInt(setLaps.value, 10),
-        qualifying: setQuali.value === '1'
+        qualifying: setQuali.value === '1',
+        collisions: setCollisions.value === '1'
     });
 }
 setTrack.addEventListener('change', emitSettings);
 setLaps.addEventListener('change', emitSettings);
 setQuali.addEventListener('change', emitSettings);
+setCollisions.addEventListener('change', emitSettings);
 
 chatForm.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -207,6 +234,7 @@ window.updateSettingsUI = () => {
     setTrack.value = clientState.settings.trackId;
     setLaps.value = clientState.settings.maxLaps;
     setQuali.value = clientState.settings.qualifying ? '1' : '0';
+    setCollisions.value = clientState.settings.collisions === false ? '0' : '1';
 };
 
 window.appendChat = (username, color, msg) => {

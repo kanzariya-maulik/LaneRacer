@@ -181,11 +181,24 @@ test('empty grid at lights out does not leave the server stuck in RACE', (t) => 
     c.fire('disconnect');
 });
 
-test('everyone drives with full assist, whatever the client asks for', () => {
+test('assist is each player\'s own choice: picked at join, changed any time, applied to their car in a running session', () => {
     const io = fakeIo();
     setupSocketManager(io, noNet);
-    const s = io.connect('a');
-    s.fire('join_lobby', { username: 'A', teamId: 'ferrari', assist: 'off' });
-    assert.strictEqual(io.events('lobby_state_sync').at(-1).players.a.assist, 'full');
-    s.fire('disconnect');
+    const a = io.connect('a');
+    a.fire('join_lobby', { username: 'A', teamId: 'ferrari', assist: 'off' });
+    const b = io.connect('b');
+    b.fire('join_lobby', { username: 'B', teamId: 'haas' });
+    let lob = io.events('lobby_state_sync').at(-1);
+    assert.deepStrictEqual([lob.players.a.assist, lob.players.b.assist], ['off', 'full']);
+    a.fire('update_settings', { trackId: 'monza', maxLaps: 1, qualifying: true });
+    a.fire('toggle_ready', true); b.fire('toggle_ready', true);
+    a.fire('start_game');
+    const init = io.events('game_init').at(-1);
+    assert.strictEqual(init.players.a.assist, 'off');
+    b.fire('set_assist', 'off');
+    assert.strictEqual(init.players.b.assist, 'off', 'running car switches');
+    b.fire('set_assist', 'turbo');
+    assert.strictEqual(init.players.b.assist, 'full');
+    a.fire('disconnect');
+    b.fire('disconnect');
 });

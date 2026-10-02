@@ -194,3 +194,29 @@ function fade(out, state, renderT) {
     state.lt = renderT;
     return out;
 }
+
+const SNAP_M = 5;   // corrections this big snap (reset, teleport) instead of fading
+const prior = {};   // scratch: where the previous update would put the car now
+
+// Car idx at the present server time (Rocket League style): dead-reckoned forward from its newest update along the arc,
+// so it's drawn where the server collides it. When a newer update arrives, the difference between the old and new
+// projection fades out over RECOVER_S instead of popping. out/state are per-car objects the caller keeps.
+export function samplePresent(buf, serverT, idx, out = {}, state = {}, scale = 6) {
+    let a = null, ta = 0;
+    for (let k = buf.snaps.length - 1; k >= 0 && !a; k--) { a = buf.snaps[k].cars.get(idx) || null; ta = buf.snaps[k].t; }
+    if (!a) return null;
+    arc(a, serverT - ta, scale, out);
+    if (state.src && state.src !== a) {
+        arc(state.src, serverT - state.srcT, scale, prior);
+        const k = state.blend > 0 ? state.blend / RECOVER_S : 0; // fold any fade still running into the new one
+        const ox = prior.x + (state.ox || 0) * k - out.x, oy = prior.y + (state.oy || 0) * k - out.y;
+        if (Math.hypot(ox, oy) < SNAP_M * scale) {
+            state.ox = ox; state.oy = oy;
+            state.oa = Math.atan2(Math.sin(prior.angle - out.angle), Math.cos(prior.angle - out.angle)) + (state.oa || 0) * k;
+            state.blend = RECOVER_S;
+        } else state.blend = 0;
+        state.lt = serverT;
+    }
+    state.src = a; state.srcT = ta;
+    return fade(out, state, serverT);
+}

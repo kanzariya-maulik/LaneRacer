@@ -156,3 +156,49 @@ test('render clock: a 0.3 s stall (frame dt clamped to 0.1 s) is caught up at on
     const t = clock.advance(0.1, 10 + 0.5 + 0.3, 0.05);            // 0.3 s hitch, caller clamps dt
     assert.ok(Math.abs(t - (10.8 - 0.05)) < 0.06, `lag ${(10.75 - t).toFixed(3)} s`);
 });
+
+test('samplePresent: other cars drawn where they are now (not 35–150 ms in the past), within a few cm', () => {
+    const b = new N.SnapshotBuffer(), out = {}, st = {};
+    const v = 80, at = (t) => [0, v * t, 0, 0, v, 0, 0, v, 0, 0, 0];  // straight line, 80 units/s
+    let worst = 0;
+    for (let k = 0; k < 120; k++) {
+        const t = k / 60;
+        b.push({ s: k + 1, t, c: [at(t)] }, t + 0.03);            // 30 ms network delay
+        const now = t + 0.03 + 0.008;
+        const p = N.samplePresent(b, now - 0.03, 0, out, st, 6);   // server time now (clock offset = the 30 ms)
+        if (k > 2) worst = Math.max(worst, Math.abs(p.x - v * (now - 0.03)));
+    }
+    assert.ok(worst < 0.05, `off by ${worst.toFixed(3)} units`);
+});
+
+test('samplePresent: a correction (the car braked) fades out over ~100 ms instead of popping; big jumps snap', () => {
+    const b = new N.SnapshotBuffer(), out = {}, st = {};
+    b.push({ s: 1, t: 0, c: [[0, 0, 0, 0, 60, 0, 0, 60, 0, 0, 0]] }, 0);
+    const before = { ...N.samplePresent(b, 0.1, 0, out, st, 6) };   // projected 6 units ahead
+    b.push({ s: 2, t: 0.1, c: [[0, 4, 0, 0, 20, 0, 0, 20, 0, 0, 0]] }, 0.1); // really at 4, slowing
+    const p1 = { ...N.samplePresent(b, 0.1 + 1 / 60, 0, out, st, 6) };
+    assert.ok(Math.abs(p1.x - before.x) < 1.5, `popped ${(p1.x - before.x).toFixed(2)}`);
+    const p2 = N.samplePresent(b, 0.1 + 0.15, 0, out, st, 6);
+    assert.ok(Math.abs(p2.x - (4 + 20 * 0.15)) < 0.01, 'correction gone after 150 ms');
+    b.push({ s: 3, t: 0.25, c: [[0, 500, 0, 0, 0, 0, 0, 0, 0, 0, 0]] }, 0.25); // teleport (reset)
+    assert.strictEqual(N.samplePresent(b, 0.26, 0, out, st, 6).x, 500);
+});
+
+test('present mode through a RenderClock (target delay 0): even frame steps on jittery WiFi', () => {
+    const b = new N.SnapshotBuffer(), clock = new N.RenderClock(), out = {}, st = {};
+    let seed = 9; const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    const v = 80, pend = [];
+    let lastX = null, errs = [];
+    for (let f = 0; f < 600; f++) {
+        const now = f / 60 + 0.004;
+        pend.push([f / 60 + 0.03 + (rand() * 2 - 1) * 0.02, { s: f + 1, t: f / 60, c: [[0, v * f / 60, 0, 0, v, 0, 0, v, 0, 0, 0]] }]);
+        for (let i = pend.length - 1; i >= 0; i--) if (pend[i][0] <= now) { b.push(pend[i][1], pend[i][0]); pend.splice(i, 1); }
+        if (!b.latest()) continue;
+        const t = clock.advance(1 / 60, b.serverNow(now), 0);
+        const p = N.samplePresent(b, t, 0, out, st, 6);
+        if (lastX !== null && f > 120) errs.push(Math.abs(p.x - lastX - v / 60) / (v / 60));
+        lastX = p.x;
+    }
+    errs.sort((a, c) => a - c);
+    assert.ok(errs[Math.floor(errs.length * 0.95)] < 0.05, `p95 step error ${(errs[Math.floor(errs.length * 0.95)] * 100).toFixed(1)}%`);
+});

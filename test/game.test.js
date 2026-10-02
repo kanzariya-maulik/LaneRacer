@@ -1057,3 +1057,18 @@ test('race results: final time = finish time + penalties, order and gaps after p
     assert.strictEqual(res[0].fastestLapId, 'a');
     assert.ok(!sent.some(([ev, m]) => ev === 'chat_msg' && /Result after penalties|finished P/.test(m.msg)), 'results no longer go to chat');
 });
+
+test('collisions off: race cars pass through each other and are sent as ghosts', () => {
+    let pkt = null;
+    const io2 = { emit() {}, volatile: { emit(ev, d) { if (ev === 'game_state') pkt = d; } } };
+    for (const collisions of [true, false]) {
+        const g = new Game(io2, [lp('a'), lp('b', 'haas')], monza, { maxLaps: 3, qualifying: false, collisions }, () => {});
+        g.release();
+        const { a, b } = g.players;
+        Object.assign(b, { x: a.x + 1, y: a.y, angle: a.angle, vx: 0, vy: 0 }); // overlapping
+        const bx = b.x;
+        g.update();
+        assert.strictEqual(b.x !== bx, collisions, `collisions ${collisions}: pushed apart`);
+        assert.strictEqual(!!(pkt.c[0][6] & Game.FLAGS.ghost), !collisions, 'ghost flag');
+    }
+});

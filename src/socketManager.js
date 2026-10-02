@@ -11,7 +11,7 @@ const state = {
     status: 'LOBBY', // LOBBY, QUALIFYING, QUALI_RESULTS, COUNTDOWN, RACE, FINISHED
     players: {},
     hostId: null,
-    settings: { trackId: 'monza', maxLaps: 3, qualifying: true }
+    settings: { trackId: 'monza', maxLaps: 3, qualifying: true, collisions: true }
 };
 
 let gameInstance = null;
@@ -69,7 +69,7 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
                 username: lobby.sanitizeUsername(data.username),
                 teamId: check.team.id,
                 color: check.team.chatColor,
-                assist: 'full', // everyone drives with steering + braking assist
+                assist: lobby.sanitizeAssist(data.assist), // each player's own choice, changeable any time
                 isReady: false,
                 isSpectating: state.status !== 'LOBBY'
             };
@@ -118,6 +118,15 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
 
             if (state.settings.qualifying) startQuali(io, racers);
             else startRace(io, racers);
+        });
+
+        socket.on('set_assist', (assist) => {
+            const player = state.players[socket.id];
+            if (!player) return;
+            player.assist = lobby.sanitizeAssist(assist);
+            const car = gameInstance?.players[socket.id];
+            if (car) car.assist = player.assist; // takes effect on the next tick
+            io.emit('lobby_state_sync', lobbySnapshot());
         });
 
         socket.on('net_ping', (t, ack) => { if (typeof ack === 'function') ack(t); }); // RTT for the stats overlay (TCP link)

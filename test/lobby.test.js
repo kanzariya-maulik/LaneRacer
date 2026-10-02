@@ -91,3 +91,14 @@ test('sanitizeInputs: batches of sequenced inputs, clamped; legacy single inputs
     assert.strictEqual(lobby.sanitizeInputs({ throttle: 1, brake: 0, steer: 0 }), null);
     assert.strictEqual(lobby.sanitizeInputs({ inputs: new Array(50).fill({ seq: 1, steer: 0, throttle: 0, brake: 0 }) }).length, 8, 'at most 8 per packet');
 });
+
+test('sanitizeSettings: collisions on/off (host), only real booleans', () => {
+    assert.strictEqual(lobby.sanitizeSettings(DEFAULTS, { collisions: false }, TRACK_IDS).collisions, false);
+    assert.strictEqual(lobby.sanitizeSettings({ ...DEFAULTS, collisions: false }, { collisions: 'yes' }, TRACK_IDS).collisions, false);
+});
+
+test('sanitizeAssist: full or off, anything else falls back to full', () => {
+    assert.strictEqual(lobby.sanitizeAssist('off'), 'off');
+    assert.strictEqual(lobby.sanitizeAssist('full'), 'full');
+    assert.strictEqual(lobby.sanitizeAssist('turbo'), 'full');
+});
