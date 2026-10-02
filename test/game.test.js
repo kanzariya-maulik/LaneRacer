@@ -894,7 +894,7 @@ test('late joiner: game_init carries the quali clock and the session-best sector
     assert.strictEqual(new Game(io, [lp('a')], monza, RACE, () => {}).initPayload().session, null);
 });
 
-test('input queue: one input per tick in order, duplicates and old ones ignored, capped at 4, starvation repeats', () => {
+test('input queue: one input per tick in order; a missing input is guessed in its own slot so server and client stay tick-aligned', () => {
     const g = new Game(io, [lp('a')], monza, RACE, () => {});
     g.frozen = false;
     const a = g.players.a, inp = (seq, steer) => ({ seq, steer, throttle: 1, brake: 0, drs: false });
@@ -908,14 +908,40 @@ test('input queue: one input per tick in order, duplicates and old ones ignored,
     assert.strictEqual(a.input.steer, 0.3, 'resent copies never replace the original');
     const s0 = a.starve;
     g.update();
-    assert.strictEqual(a.lastSeq, 3, 'empty queue: last input repeats');
+    assert.strictEqual(a.lastSeq, 4, 'input 4 missing: its slot runs on a repeat of input 3');
+    assert.strictEqual(a.input.steer, 0.3);
     assert.strictEqual(a.starve, s0 + 1);
-    g.handleInputs('a', [4, 5, 6, 7, 8, 9, 10].map((s) => inp(s, 0)));
+    g.handleInputs('a', [inp(4, 0.9), inp(5, 0.5)]);                // 4 arrives too late: its slot is gone
     g.update();
-    assert.strictEqual(a.lastSeq, 7, 'queue capped at 4: oldest extras dropped, then one applied');
+    assert.strictEqual(a.lastSeq, 5);
+    assert.strictEqual(a.input.steer, 0.5);
+    g.handleInputs('a', [6, 7, 8, 9, 10, 11, 12].map((s) => inp(s, 0)));
+    g.update();
+    assert.strictEqual(a.lastSeq, 9, 'queue capped at 4: skips ahead to the newest four');
     g.handleInputs('a', [inp(6, 0.5)]);
     g.update();
-    assert.strictEqual(a.lastSeq, 8, 'an input older than one already applied is never applied');
+    assert.strictEqual(a.lastSeq, 10, 'an input older than one already applied is never applied');
+});
+
+test('input queue: a client far behind the server slots (tab stall, reconnect) is re-aligned, not ignored forever', () => {
+    const g = new Game(io, [lp('a')], monza, RACE, () => {});
+    g.frozen = false;
+    const a = g.players.a, inp = (seq) => ({ seq, steer: 0, throttle: 1, brake: 0, drs: false });
+    g.handleInputs('a', [inp(100)]);
+    for (let k = 0; k < 10; k++) g.update();                         // 9 guessed slots: lastSeq 109
+    g.handleInputs('a', [inp(101), inp(102)]);
+    g.update();
+    assert.strictEqual(a.lastSeq, 101);
+});
+
+test('input queue: guessing stops when the client goes silent (controls released)', () => {
+    const g = new Game(io, [lp('a')], monza, RACE, () => {});
+    g.frozen = false;
+    const a = g.players.a;
+    g.handleInputs('a', [{ seq: 1, steer: 0, throttle: 1, brake: 0, drs: false }]);
+    for (let k = 0; k < 120; k++) g.update();
+    assert.ok(a.lastSeq < 1 + 0.3 * 60 + 2, `${a.lastSeq}`);
+    assert.strictEqual(a.input.throttle, 0);
 });
 
 test('fast update carries velocity, tow and the last applied input for reconciliation', () => {
@@ -923,11 +949,10 @@ test('fast update carries velocity, tow and the last applied input for reconcili
     const io2 = { emit() {}, volatile: { emit(ev, d) { if (ev === 'game_state') pkt = d; } } };
     const g = new Game(io2, [lp('a')], monza, RACE, () => {});
     g.frozen = false;
-    g.handleInputs('a', [{ seq: 7, steer: 0, throttle: 1, brake: 0, drs: false }]);
-    for (let k = 0; k < 30; k++) g.update();
+    for (let k = 0; k < 30; k++) { g.handleInputs('a', [{ seq: 7 + k, steer: 0, throttle: 1, brake: 0, drs: false }]); g.update(); }
     const e = pkt.c[0];
     assert.strictEqual(e.length, 11);
     assert.ok(Math.abs(e[7]) + Math.abs(e[8]) > 0, 'velocity present');
-    assert.strictEqual(e[10], 7);
+    assert.strictEqual(e[10], 36);
     assert.ok(JSON.stringify(e).length <= 75, `${JSON.stringify(e).length} bytes`);
 });

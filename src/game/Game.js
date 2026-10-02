@@ -172,6 +172,11 @@ class Game {
     handleInputs(id, list) {
         const p = this.players[id];
         if (!p) return;
+        // Far behind the server's slots (stalled tab, reconnect): re-align to this client instead of dropping it forever
+        if (list.length && Math.max(...list.map((i) => i.seq)) < p.lastSeq - INPUT_QUEUE_MAX) {
+            p.lastSeq = Math.min(...list.map((i) => i.seq)) - 1;
+            p.queue = [];
+        }
         const top = p.queue.length ? p.queue[p.queue.length - 1].seq : p.lastSeq;
         for (const i of list) if (i.seq > top && !p.queue.some((q) => q.seq === i.seq)) p.queue.push(i);
         p.queue.sort((a, b) => a.seq - b.seq);
@@ -282,11 +287,20 @@ class Game {
             for (const id of ids) {
                 const p = this.players[id];
                 if (p.inputAt !== undefined && this.clock - p.inputAt > INPUT_TIMEOUT_S) p.input = { throttle: 0, brake: 0, steer: 0, drs: false };
-                if (p.queue.length) {
-                    while (p.queue.length > INPUT_QUEUE_MAX) p.queue.shift();
+                // One input slot per tick. A missing input is guessed (last one repeated) in its own slot and its late copy
+                // dropped, so the server never runs an extra tick the client didn't: corrections stay input-sized, not a tick of travel
+                while (p.queue.length && p.queue[0].seq <= p.lastSeq) p.queue.shift();
+                if (p.queue.length > INPUT_QUEUE_MAX) {
+                    p.queue.splice(0, p.queue.length - INPUT_QUEUE_MAX);
+                    p.lastSeq = p.queue[0].seq - 1; // buffered too far ahead: skip to the newest four
+                }
+                if (p.queue.length && (p.lastSeq < 0 || p.queue[0].seq === p.lastSeq + 1)) {
                     p.input = p.queue.shift();
                     p.lastSeq = p.input.seq;
-                } else if (p.lastSeq >= 0 && this.clock - p.inputAt <= INPUT_TIMEOUT_S) p.starve++; // late input: last one repeats
+                } else if (p.lastSeq >= 0 && this.clock - p.inputAt <= INPUT_TIMEOUT_S) {
+                    p.lastSeq++;
+                    p.starve++;
+                }
             }
             if (this.mode === 'race') this.updateTow();
             for (const id of ids) {
