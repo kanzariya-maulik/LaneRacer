@@ -119,6 +119,7 @@ function onKey(e, down) {
     const key = e.key.toLowerCase();
     if (down && key === 't' && !e.repeat && clientState.status !== 'LOBBY') toggleTower();
     if (down && key === 'r' && !e.repeat && clientState.status !== 'LOBBY') toggleLine();
+    if (down && e.key === 'F3') { e.preventDefault(); netstatsOn = !netstatsOn; netstatsEl.classList.toggle('hidden', !netstatsOn); }
     if (down && clientState.status !== 'LOBBY' && isSpectator()) {
         if (key === 'arrowleft') spectateId = stepFollow(rankedCarIds(), spectateId, -1);
         if (key === 'arrowright') spectateId = stepFollow(rankedCarIds(), spectateId, 1);
@@ -1168,6 +1169,20 @@ function drawMinimap() {
 
 // ---------- loop ----------
 let last = performance.now();
+// F3 / ?stats=1: network and frame-time overlay, refreshed at 4 Hz
+const frameMs = [], netstatsEl = document.getElementById('netstats');
+let netstatsOn = new URLSearchParams(location.search).has('stats'), lastNetstats = 0;
+netstatsEl.classList.toggle('hidden', !netstatsOn);
+function drawNetstats() {
+    const f = [...frameMs].sort((a, b) => a - b), n = window.lanraceNet || {}, net = clientState.net;
+    const fmt = (v, d = 0, u = '') => (v === null || v === undefined ? '—' : v.toFixed(d) + u);
+    const mean = f.reduce((a, b) => a + b, 0) / (f.length || 1);
+    netstatsEl.textContent =
+        `fps ${fmt(1000 / mean)}  frame p95 ${fmt(f[Math.floor((f.length - 1) * 0.95)], 1, 'ms')}  max ${fmt(f.at(-1), 1, 'ms')}\n` +
+        `ping ${fmt(net.rttMs, 0, 'ms')}  jitter ${fmt(n.jitterMs, 1, 'ms')}  loss ${fmt(n.lossPct, 1, '%')}  link ${net.link}\n` +
+        `interp delay ${fmt(n.delayMs, 0, 'ms')}  prediction error ${fmt(n.predErrCm, 1, 'cm')}\n` +
+        `server tick ${fmt(net.tickMs, 2, 'ms')}  input starvation ${net.starve?.[clientState.me] ?? 0}/s`;
+}
 let fpsFrames = 0, fpsSince = performance.now(), lastHud = 0, lastTower = 0;
 const fpsHist = []; let capWarned = false; // steady 30 fps = browser frame cap, told once per page
 let autoMs = 0, autoFrames = 0; // auto-pick: frame time while driving
@@ -1177,6 +1192,8 @@ if (stats) document.body.appendChild(stats);
 function frame(now) {
     const dt = Math.min((now - last) / 1000, 0.1);
     last = now;
+    frameMs.push(dt * 1000);
+    if (frameMs.length > 120) frameMs.shift();
     if (clientState.status === 'LOBBY') return;
     pollInput(dt);
     if (!world || !clientState.gameState) return;
@@ -1193,6 +1210,7 @@ function frame(now) {
         colourLine();
         lastHud = now;
     }
+    if (netstatsOn && now - lastNetstats > 250) { lastNetstats = now; drawNetstats(); }
 
     fpsFrames++;
     const me = clientState.gameState[clientState.me];

@@ -361,6 +361,9 @@ input:focus { border: 1px solid var(--primary); }
 }
 #session-bar:empty { display: none; }
 
+/* F3 network + frame stats */
+#netstats { position: fixed; bottom: 36px; left: 8px; margin: 0; padding: 8px 10px; background: rgba(0,0,0,0.65); color: #d1fae5; font: 12px/1.45 ui-monospace, monospace; border-radius: 6px; pointer-events: none; z-index: 5; }
+
 #lights {
     position: absolute;
     top: 80px; left: 50%;
