@@ -5,7 +5,7 @@ const { withNetSim } = require('./netsim');
 
 const TRACKS = Track.loadAll(); // throws at startup if track data is missing
 const RESULTS_MS = 8000;
-const FINISH_MS = 5000;
+const FINISH_MS = 15000; // results screen time before everyone returns to the lobby
 
 const state = {
     status: 'LOBBY', // LOBBY, QUALIFYING, QUALI_RESULTS, COUNTDOWN, RACE, FINISHED

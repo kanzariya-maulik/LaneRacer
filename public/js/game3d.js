@@ -7,7 +7,7 @@ import { LEVELS, ratioRange, resolveLevel, autoPick, adaptStep, snapLight, frame
 import { placeScenery, seedOf } from './scenery.js';
 import { SnapshotBuffer, RenderClock, sample, decodeFlags } from './netsync.js';
 import { Predictor, STEP_S } from './predict.js';
-import { gapText, driverCode, lapDelta, stepFollow, inDrsZone, drsHint, liveSectors } from './timing.js';
+import { gapText, driverCode, lapDelta, stepFollow, inDrsZone, drsHint, liveSectors, resultCells } from './timing.js';
 import { MODES, segmentColor, cornerMask, aheadM, trackIndex, nextMode } from './racingline.js';
 
 // World units per metre come from the track JSON (track.scale = 6).
@@ -1013,6 +1013,33 @@ window.showQualiResults = (list) => {
         li.textContent = `P${r.position}  ${lp ? lp.username : '—'}  ${r.bestLap === null ? 'no time' : fmtTime(r.bestLap)}${gap}`;
         ol.appendChild(li);
     }
+};
+
+// Final classification for everyone: times include penalties; ▲/▼ = places won or lost to penalties
+let rrTimer = null;
+window.showRaceResults = (res) => {
+    const ol = $('rr-list');
+    ol.innerHTML = '';
+    $('rr-track').textContent = (clientState.trackData?.name || '').toUpperCase();
+    const span = (cls, text = '') => Object.assign(document.createElement('span'), { className: cls, textContent: text });
+    for (const r of res.rows) {
+        const lp = clientState.players[r.id] || clientState.gameState?.[r.id], c = resultCells(r, fmtTime);
+        const li = document.createElement('li');
+        li.className = (r.id === clientState.me ? 'me ' : '') + (r.position <= 3 && !r.dnf ? 'podium' : '');
+        const team = span('rr-team');
+        team.style.background = teamInfo[lp?.teamId]?.chatColor || '#888';
+        const best = span('rr-best' + (r.id === res.fastestLapId ? ' fl' : ''), r.bestLap === null ? '—' : fmtTime(r.bestLap));
+        if (r.id === res.fastestLapId) best.insertAdjacentHTML('afterbegin', STOPWATCH + ' ');
+        li.append(span('rr-pos', r.position), team, span('rr-name', lp?.username || '—'), span('rr-chg ' + c.changeCls, c.change),
+            span('rr-laps', r.laps), best, span('rr-pen', c.pen), span('rr-time' + (r.dnf ? ' dnf' : ''), c.time));
+        ol.appendChild(li);
+    }
+    $('race-results').classList.remove('hidden');
+    const end = Date.now() + 15000;
+    clearInterval(rrTimer);
+    const tick = () => { $('rr-count').textContent = Math.max(0, Math.ceil((end - Date.now()) / 1000)); };
+    tick();
+    rrTimer = setInterval(tick, 250);
 };
 
 let flashTimer = null, bannerTimer = null;

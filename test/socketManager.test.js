@@ -172,7 +172,7 @@ test('empty grid at lights out does not leave the server stuck in RACE', (t) => 
     c.fire('join_lobby', { username: 'C', teamId: 'haas' }); // spectator
     a.fire('disconnect');                       // grid empties before lights out; c becomes host
     advance(t, 15000);
-    advance(t, 6000); // node's mock timers run timeouts scheduled inside an interval callback on the next tick() call
+    advance(t, 16000); // results screen (FINISH_MS 15 s), then lobby. node's mock timers run timeouts scheduled inside an interval callback on the next tick() call
     assert.strictEqual(io.events('lobby_state_sync').at(-1).status, 'LOBBY');
     assert.ok(!io.events('status_change').includes('RACE'), 'stale lights timer flipped status to RACE');
     c.fire('update_settings', { qualifying: false });

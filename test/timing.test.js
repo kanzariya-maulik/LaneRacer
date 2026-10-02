@@ -77,3 +77,15 @@ test('liveSectors: each driver\'s current lap, restarting at sector 1', () => {
     sec('a', 3, false); sec('a', 1, false);
     assert.deepStrictEqual(live.a, ['sec-green', null, null], 'new lap clears the old bars');
 });
+
+test('resultCells: winner shows the final time, others the gap; penalty and places changed; DNF', () => {
+    const fmt = (t) => `T${t}`;
+    assert.deepStrictEqual(T.resultCells({ position: 1, total: 100, gap: null, penalty: 0, change: 0, dnf: false }, fmt),
+        { time: 'T100', pen: '', change: '', changeCls: '' });
+    assert.deepStrictEqual(T.resultCells({ position: 3, total: 106, gap: 6.0004, penalty: 5, change: -1, dnf: false }, fmt),
+        { time: '+6.000', pen: '+5s', change: '▼1', changeCls: 'down' });
+    assert.deepStrictEqual(T.resultCells({ position: 2, total: 102, gap: 2, penalty: 0, change: 1, dnf: false }, fmt),
+        { time: '+2.000', pen: '', change: '▲1', changeCls: 'up' });
+    assert.deepStrictEqual(T.resultCells({ position: 4, total: null, gap: null, penalty: 0, change: 0, dnf: true }, fmt),
+        { time: 'DNF', pen: '', change: '', changeCls: '' });
+});

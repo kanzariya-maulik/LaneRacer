@@ -252,6 +252,7 @@ socket.on('game_init', (data) => {
     clientState.sessionBest = data.bestSectors ? [...data.bestSectors] : [null, null, null];
     clientState.sessionBestIds = data.bestSectorIds ? [...data.bestSectorIds] : [null, null, null];
     clientState.fastestLap = data.fastestLap || null;
+    clientState.raceResults = null;
     if (data.session) clientState.session = { phase: data.session.phase, endsAt: Date.now() + data.session.endsInMs };
     clientState.mySectors = [null, null, null];
     clientState.myBestSectors = [null, null, null];
@@ -273,6 +274,11 @@ socket.on('lights', ({ count }) => {
 
 socket.on('session', ({ phase, endsInMs }) => {
     clientState.session = { phase, endsAt: endsInMs === null ? null : Date.now() + endsInMs };
+});
+
+socket.on('race_results', (res) => {
+    clientState.raceResults = res;
+    if (window.showRaceResults) window.showRaceResults(res);
 });
 
 socket.on('quali_results', (list) => {

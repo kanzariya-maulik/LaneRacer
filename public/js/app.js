@@ -227,12 +227,13 @@ window.handleStatusChange = (status) => {
     const cdOverlay = document.getElementById('countdown-overlay');
     const spOverlay = document.getElementById('spectator-overlay');
     const results = document.getElementById('quali-results');
+    const raceResults = document.getElementById('race-results');
     const lights = document.getElementById('lights');
 
     if (status === 'LOBBY') {
         screenLobby.classList.remove('hidden');
         screenGame.classList.add('hidden');
-        [cdOverlay, spOverlay, results, lights].forEach(el => el.classList.add('hidden'));
+        [cdOverlay, spOverlay, results, raceResults, lights].forEach(el => el.classList.add('hidden'));
         return;
     }
 
@@ -248,7 +249,7 @@ window.handleStatusChange = (status) => {
     if (status === 'COUNTDOWN') {
         lights.classList.remove('hidden');
         lights.querySelectorAll('.light').forEach(l => l.classList.remove('on'));
-    } else if (status === 'FINISHED') {
+    } else if (status === 'FINISHED' && !clientState.raceResults) { // the classification replaces the FINISH! banner
         cdOverlay.classList.remove('hidden');
         document.getElementById('countdown-text').innerText = 'FINISH!';
     }

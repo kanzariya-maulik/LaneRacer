@@ -417,17 +417,24 @@ class Game {
         this.io.emit('chat_msg', { username: 'SYSTEM', color: '#ff0000', msg: `${p.username}: +${LIMIT_PENALTY_S}s track limits penalty (total +${p.penalty}s)` });
     }
 
-    // Final result: finish time plus penalties, once every car has finished
+    // Final result: finish time plus penalties, once every car has finished; everyone gets the results screen
     classify() {
         this.classified = true;
         const all = Object.values(this.players);
         const list = all.filter((p) => !p.dnf).sort((a, b) => a.finishTime + a.penalty - (b.finishTime + b.penalty))
             .concat(all.filter((p) => p.dnf).sort((a, b) => b.progress - a.progress)); // DNF last, furthest first
-        const changed = list.some((p, i) => p.finishOrder !== i + 1);
+        const winner = list[0] && !list[0].dnf ? list[0].finishTime + list[0].penalty : null;
+        const rows = list.map((p, i) => {
+            const total = p.dnf ? null : p.finishTime + p.penalty;
+            return {
+                id: p.id, position: i + 1, finishTime: p.dnf ? null : p.finishTime, penalty: p.penalty, total,
+                gap: i === 0 || total === null ? null : total - winner,
+                change: p.dnf || !p.finishOrder ? 0 : p.finishOrder - (i + 1), // places won (+) or lost (−) to penalties
+                laps: p.lap, bestLap: p.bestLap, dnf: !!p.dnf,
+            };
+        });
         list.forEach((p, i) => { p.finishOrder = i + 1; });
-        if (changed) {
-            this.io.emit('chat_msg', { username: 'SYSTEM', color: '#ff0000', msg: `Result after penalties: ${list.map((p, i) => `P${i + 1} ${p.username}${p.dnf ? ' (DNF)' : ''}`).join(', ')}` });
-        }
+        this.io.emit('race_results', { rows, fastestLapId: this.fastestLap?.id ?? null });
     }
 
     recordLap(p) {

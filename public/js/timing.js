@@ -60,3 +60,10 @@ export function liveSectors(live, s) {
     live[s.id][s.sector - 1] = sectorClass(s);
     return live;
 }
+
+// Race classification row: winner's final time (penalties included), gap for the rest, penalty, places won/lost to penalties
+export function resultCells(r, fmtTime) {
+    const time = r.dnf ? 'DNF' : r.position === 1 || r.gap === null ? fmtTime(r.total) : `+${r.gap.toFixed(3)}`;
+    const change = r.change > 0 ? `▲${r.change}` : r.change < 0 ? `▼${-r.change}` : '';
+    return { time, pen: r.penalty ? `+${r.penalty}s` : '', change, changeCls: r.change > 0 ? 'up' : r.change < 0 ? 'down' : '' };
+}

@@ -428,6 +428,35 @@ input:focus { border: 1px solid var(--primary); }
     justify-content: center;
     gap: 16px;
 }
+/* Race classification (F1 TV style) */
+#race-results { position: absolute; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 8; }
+#race-results.hidden { display: none; }
+.rr-card { width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 40px); overflow: auto; background: rgba(12, 14, 28, 0.96); border-radius: 8px; box-shadow: 0 12px 40px rgba(0,0,0,0.6); color: #fff; animation: flIn 0.4s ease-out; }
+.rr-head { display: flex; align-items: center; gap: 12px; background: #e10600; padding: 10px 16px; font-weight: 900; letter-spacing: 3px; }
+.rr-title { flex: 1; font-size: 1.1rem; }
+#rr-track { font-size: 0.8rem; letter-spacing: 2px; opacity: 0.9; }
+.rr-flag { width: 26px; height: 18px; background: conic-gradient(#fff 25%, #111 0 50%, #fff 0 75%, #111 0) 0 0 / 9px 9px; border-radius: 2px; }
+.rr-cols, #rr-list li { display: grid; grid-template-columns: 40px 6px 1fr 34px 48px 96px 50px 96px; align-items: center; gap: 10px; padding: 0 16px; }
+.rr-cols { height: 26px; font-size: 0.65rem; letter-spacing: 2px; color: #94a3b8; border-bottom: 1px solid rgba(255,255,255,0.1); }
+.rr-cols span:nth-child(n+5), #rr-list li > span:nth-child(n+5) { text-align: right; }
+#rr-list { list-style: none; margin: 0; padding: 0; }
+#rr-list li { height: 34px; font-variant-numeric: tabular-nums; }
+#rr-list li:nth-child(even) { background: rgba(255,255,255,0.04); }
+#rr-list li.me { background: rgba(250, 204, 21, 0.18); }
+#rr-list li.podium .rr-pos { color: #facc15; }
+.rr-pos { font-weight: 900; font-size: 1.05rem; text-align: right; }
+.rr-team { width: 5px; height: 22px; border-radius: 2px; }
+.rr-name { font-weight: 800; letter-spacing: 1px; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rr-chg { font-size: 0.75rem; font-weight: 800; }
+.rr-chg.up { color: #4ade80; } .rr-chg.down { color: #f87171; }
+.rr-laps { color: #cbd5e1; }
+.rr-best.fl { color: #c084fc; font-weight: 800; }
+.rr-pen { color: #f87171; font-weight: 800; }
+.rr-time { font-weight: 800; }
+.rr-time.dnf { color: #94a3b8; }
+.rr-foot { padding: 10px 16px; font-size: 0.72rem; letter-spacing: 1px; color: #94a3b8; border-top: 1px solid rgba(255,255,255,0.1); }
+@media (max-width: 560px) { .rr-cols, #rr-list li { grid-template-columns: 28px 5px 1fr 30px 0 0 40px 80px; gap: 6px; padding: 0 10px; } .rr-cols span:nth-child(5), .rr-cols span:nth-child(6), .rr-laps, .rr-best { display: none; } }
+
 #quali-results h2 { font-size: 2.5rem; letter-spacing: 3px; }
 #quali-results-list {
     columns: 2;

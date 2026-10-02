@@ -1029,3 +1029,31 @@ test('session best sectors record who set them, and the timing update carries bo
     assert.strictEqual(timing.at(-1).fastestLap.id, 'b');
     assert.deepStrictEqual(g.initPayload().bestSectorIds, ['b', 'b', 'b']);
 });
+
+test('race results: final time = finish time + penalties, order and gaps after penalties, places changed, DNF last', () => {
+    const sent = [];
+    const spyIo = { emit: (ev, d) => sent.push([ev, d]), volatile: { emit() {} } };
+    const g = new Game(spyIo, [lp('a'), lp('b', 'haas'), lp('c', 'alpine'), lp('d', 'williams')], monza, { maxLaps: 1, qualifying: false }, () => {});
+    g.release();
+    const { a, b, c, d } = g.players;
+    b.penalty = 5;
+    lap(g, a, 0, 100);
+    lap(g, b, 0, 101);
+    lap(g, c, 0, 102);
+    g.time = 100 + 61; d.progress = 3;
+    g.update();                                         // d never finishes: DNF after the 60 s window
+    const res = sent.filter(([ev]) => ev === 'race_results').map(([, r]) => r);
+    assert.strictEqual(res.length, 1, 'sent once, when the race is classified');
+    const rows = res[0].rows;
+    assert.deepStrictEqual(rows.map((r) => r.id), ['a', 'c', 'b', 'd']);
+    assert.deepStrictEqual(rows.map((r) => r.position), [1, 2, 3, 4]);
+    close(rows[2].finishTime, 101); assert.strictEqual(rows[2].penalty, 5); close(rows[2].total, 106);
+    assert.strictEqual(rows[0].gap, null);
+    close(rows[1].gap, 2); close(rows[2].gap, 6);
+    assert.deepStrictEqual(rows.map((r) => r.change), [0, 1, -1, 0], 'b dropped a place to its penalty, c gained it');
+    assert.deepStrictEqual(rows.map((r) => r.dnf), [false, false, false, true]);
+    assert.strictEqual(rows[3].total, null);
+    assert.strictEqual(rows[0].laps, 1);
+    assert.strictEqual(res[0].fastestLapId, 'a');
+    assert.ok(!sent.some(([ev, m]) => ev === 'chat_msg' && /Result after penalties/.test(m.msg)), 'results no longer go to chat');
+});
