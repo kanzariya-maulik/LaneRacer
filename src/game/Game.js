@@ -1,15 +1,10 @@
-const CarPhysics = require('./CarPhysics');
 const Physics = require('./Physics');
-const Assist = require('./Assist');
+const Drive = require('../../public/js/sim/drive.js');
 const { pointAt } = require('./Track');
 
 const TICK_RATE = 60;
-const WALL_OFFSET = 80;     // world units past the track edge; Track.js checkpoints use the same
 const QUALI_LAPS = 2;       // flying laps after the out-lap
 const QUALI_MAX_S = 360;    // quali ends at this session time even if someone never finishes
-const PIT_LIMIT_KMH = 80;
-const PIT_RUNOFF_M = 2;     // barrier this far outside the pit lane edge
-const KERB_M = 1.5;          // kerbs past the track edge drive like asphalt
 const LIMIT_WARNINGS = 2;    // race: violations before penalties start
 const LIMIT_PENALTY_S = 5;
 const JUMP_PENALTY_S = 5;     // moving before lights out
@@ -17,7 +12,6 @@ const JUMP_MOVE_M = 0.5;      // further than this from the grid slot = moved
 const FINISH_WINDOW_S = 60;   // after the winner finishes, the rest have this long before they're classified DNF
 const INPUT_TIMEOUT_S = 0.3;  // no input for this long = controls released
 const DRS_GAP_S = 1;          // race: within this of the car ahead at the detection point
-const DRS_DRAG = 0.85;        // drag with the flap open (~+15 km/h top speed)
 const SLIP_MAX = 0.2;         // drag cut right behind another car…
 const SLIP_MIN_M = 5, SLIP_RANGE_M = 40, SLIP_LAT_M = 3; // …fading out by 40 m behind, only roughly in line
 
@@ -25,23 +19,6 @@ const FLAGS = { inPit: 1, limiter: 2, drs: 4, drsAvailable: 8, finished: 16, lap
 const META_FIELDS = ['lap', 'checkpoint', 'rank', 'gap', 'lapsDown', 'lastLap', 'bestLap', 'lapStart', 'bestLapSectors', 'lastValid', 'penalty'];
 const META_EVERY = 6; // ticks: info updates at 10 Hz
 const r1 = (v) => Math.round(v * 10) / 10;
-
-// Distance along the pit lane of a nearestOnPath result
-const pitAlong = (pit, n) => pit.cum[n.i] + n.t * (pit.cum[n.i + 1] - pit.cum[n.i]);
-
-// Barrier response: n points from the barrier back toward the car
-function bounce(p, nx, ny) {
-    const vn = -(p.vx * nx + p.vy * ny); // speed into the barrier
-    const v = Math.hypot(p.vx, p.vy);
-    if (vn > 0) { p.vx += vn * nx; p.vy += vn * ny; }
-    // Speed loss scales with how square-on the hit is: head-on keeps WALL_KEEP, a graze keeps almost all
-    const impact = v > 0 ? Math.max(0, vn) / v : 0;
-    const keep = 1 - (1 - CarPhysics.C.WALL_KEEP) * impact;
-    p.vx *= keep;
-    p.vy *= keep;
-    p.speed = p.vx * Math.cos(p.angle) + p.vy * Math.sin(p.angle);
-}
-
 
 class Game {
     // net: optional transport (src/webrtcManager.js) that sends game_state over the UDP DataChannel
@@ -262,87 +239,22 @@ class Game {
         this.time = 0;
     }
 
+    // Motion is shared with the browser (driveCar); the rest is the referee's job
     drive(p) {
-        const t = this.track, scale = t.scale, pit = t.pit;
-        const x0 = p.x, y0 = p.y;
-        const nearPit = (x, y) => (pit ? Physics.nearestOnPath(x, y, pit.path, false) : null);
-        const before = Physics.nearestOnTrack(p.x, p.y, t), beforePit = nearPit(p.x, p.y);
-        const grass = before.dist > t.width / 2 + KERB_M * scale && !(beforePit && beforePit.dist <= pit.width / 2 && pitAlong(pit, beforePit) >= pit.closeS);
-        const input = p.assist === 'full' && !p.inPit ? Assist.brakeAssist(p, p.input, t, before) : p.input;
-        p.dragMul = (p.drs ? DRS_DRAG : 1) * (1 - p.tow);
-        CarPhysics.step(p, input, this.dt, scale, grass, p.assist);
-
-        // Pit wall: a move across it is undone
-        const hit = pit && (Physics.crossWall(x0, y0, p.x, p.y, pit.wall) || Physics.crossWall(x0, y0, p.x, p.y, pit.closeWall));
-        if (hit) {
-            p.x = x0 + hit.nx * 0.5;
-            p.y = y0 + hit.ny * 0.5;
-            bounce(p, hit.nx, hit.ny);
-        }
-        // …and the pit entry barrier stops the whole car body, not just its centre
-        // ponytail: the pit wall stays centre-only — on the 1.5×-wide tracks it sits ~0.6 m past the line, inside the kerb
-        const o = pit && Physics.wallOverlap(p, pit.closeWall, scale);
-        if (o) { p.x += o.nx * o.depth; p.y += o.ny * o.depth; bounce(p, o.nx, o.ny); }
-
-        // Barrier: outside both the track's run-off and the pit lane's
-        const wallDist = t.width / 2 + WALL_OFFSET;
-        const pitDist = pit && pit.width / 2 + PIT_RUNOFF_M * scale;
-        const after = Physics.nearestOnTrack(p.x, p.y, t), afterPit = nearPit(p.x, p.y);
-        // The pit lane upstream of the closure barrier is off-limits (no pit stops)
-        const afterS = afterPit && pitAlong(pit, afterPit);
-        const overTrack = after.dist - wallDist, overPit = afterPit && afterS >= pit.closeS ? afterPit.dist - pitDist : Infinity;
-        if (overTrack > 0 && overPit > 0) {
-            const [near, lim] = overPit < overTrack ? [afterPit, pitDist] : [after, wallDist];
-            const nx = (p.x - near.px) / near.dist, ny = (p.y - near.py) / near.dist;
-            p.x = near.px + nx * (lim - 1);
-            p.y = near.py + ny * (lim - 1);
-            bounce(p, -nx, -ny);
-        }
-        // Barrier stops the car body: pull the centre in by how far the rectangle reaches toward it
-        const edge = Physics.nearestOnTrack(p.x, p.y, t), edgePit = nearPit(p.x, p.y);
-        const reach = (n) => n.dist > 1e-9 ? Physics.carReach(p, (p.x - n.px) / n.dist, (p.y - n.py) / n.dist, scale) : 0;
-        const inTrack = edge.dist + reach(edge) <= wallDist;
-        const inPitLane = edgePit && pitAlong(pit, edgePit) >= pit.closeS && edgePit.dist + reach(edgePit) <= pitDist;
-        if (!inTrack && !inPitLane && edge.dist <= wallDist && !(edgePit && edgePit.dist <= pitDist && pitAlong(pit, edgePit) >= pit.closeS)) {
-            const nx = (p.x - edge.px) / edge.dist, ny = (p.y - edge.py) / edge.dist;
-            const lim = wallDist - reach(edge);
-            p.x = edge.px + nx * lim; p.y = edge.py + ny * lim;
-            bounce(p, -nx, -ny);
-        }
-
-        if (pit) this.updatePit(p, after, afterPit);
+        const t = this.track, wasLimited = p.limiter;
+        const after = Drive.driveCar(p, p.input, t, this.dt);
+        if (this.mode === 'quali' && p.limiter && !wasLimited) p.lapStart = p.sectorStart = null; // crossing the pit entry line ends a timed lap
         this.checkLimits(p, after);
-
         const total = t.cum[t.path.length];
         const lapS = (((t.cum[after.i] + after.t * (t.cum[after.i + 1] - t.cum[after.i]) - t.startS) % total) + total) % total;
         this.updateDrs(p, p.lapS ?? lapS, lapS);
         p.lapS = lapS;
-
-        if ([p.x, p.y, p.vx, p.vy, p.angle].every(Number.isFinite)) {
-            p.lastSafeX = p.x;
-            p.lastSafeY = p.y;
-        } else {
-            p.x = p.lastSafeX; p.y = p.lastSafeY;
-            p.vx = p.vy = p.speed = 0;
-            if (!Number.isFinite(p.angle)) p.angle = 0;
-        }
     }
 
     // In the pit lane = on pit asphalt and off the track's (where they overlap, it's track)
     updatePit(p, near = Physics.nearestOnTrack(p.x, p.y, this.track), nearPit = Physics.nearestOnPath(p.x, p.y, this.track.pit.path, false)) {
-        const t = this.track, pit = t.pit;
         const wasLimited = p.limiter;
-        p.pitS = pitAlong(pit, nearPit);
-        p.inPit = nearPit.dist <= pit.width / 2 && near.dist > t.width / 2 && p.pitS >= pit.closeS; // closed entry isn't pit lane
-        p.limiter = p.inPit && p.pitS >= pit.limStart && p.pitS <= pit.limEnd;
-        if (p.limiter) {
-            const max = (PIT_LIMIT_KMH / 3.6) * t.scale, v = Math.hypot(p.vx, p.vy);
-            if (v > max) {
-                p.vx *= max / v;
-                p.vy *= max / v;
-                p.speed = p.vx * Math.cos(p.angle) + p.vy * Math.sin(p.angle);
-            }
-        }
+        Drive.updatePitState(p, this.track, near, nearPit);
         // Crossing the pit entry line ends a timed lap
         if (this.mode === 'quali' && p.limiter && !wasLimited) p.lapStart = p.sectorStart = null;
     }
