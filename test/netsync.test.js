@@ -32,11 +32,11 @@ test('sample interpolates between snapshots and takes angles the short way round
     assert.ok(Math.abs(Math.abs(p.angle) - Math.PI) < 0.01, `angle ${p.angle} went the long way`);
 });
 
-test('sample extrapolates up to 100 ms past the newest snapshot, then holds', () => {
+test('sample extrapolates up to 250 ms past the newest snapshot, then holds', () => {
     const b = new N.SnapshotBuffer();
     b.push(pkt(1, 0, [car(0, 0, 0, 100)]), 0);
     assert.ok(Math.abs(N.sample(b, 0.05, 0).x - 5) < 1e-9);
-    assert.ok(Math.abs(N.sample(b, 0.5, 0).x - 10) < 1e-9, 'capped at 100 ms');
+    assert.ok(Math.abs(N.sample(b, 0.5, 0).x - 25) < 1e-9, 'capped at 250 ms');
 });
 
 test('missing car indices and unknown cars are handled', () => {
@@ -48,10 +48,10 @@ test('missing car indices and unknown cars are handled', () => {
     assert.ok(N.sample(b, 0.05, 0), 'last known pose kept for a car that left');
 });
 
-test('project pushes the own car forward along its heading, capped at 100 ms', () => {
+test('project pushes the own car forward along its heading, capped at 250 ms', () => {
     const e = [0, 0, 0, Math.PI / 2, 60, 0, 0];
     assert.ok(Math.abs(N.project(e, 0.05).y - 3) < 1e-9);
-    assert.ok(Math.abs(N.project(e, 1).y - 6) < 1e-9);
+    assert.ok(Math.abs(N.project(e, 1).y - 15) < 1e-9);
 });
 
 test('decodeFlags', () => {
@@ -93,4 +93,58 @@ test('a packet from an old session (much higher seq) does not block the new one'
     assert.ok(b.push(pkt(2, 1 / 60, [car(0, 6)]), 1.12));
     assert.strictEqual(b.latest().s, 2);
     assert.deepStrictEqual(b.snaps.map((x) => x.s), [1, 2], 'old session dropped');
+});
+
+test('adaptive delay: calm network ≈ 35 ms, jittery ≈ 2 ticks + 2×p95, clamped', () => {
+    const calm = new N.SnapshotBuffer(), wild = new N.SnapshotBuffer();
+    let seed = 3; const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    for (let k = 0; k < 300; k++) {
+        calm.push(pkt(k + 1, k / 60, [car(0, k)]), 1 + k / 60);
+        wild.push(pkt(k + 1, k / 60, [car(0, k)]), 1 + k / 60 + rand() * 0.04);
+    }
+    assert.ok(Math.abs(calm.targetDelayS() - 0.035) < 0.002, `${calm.targetDelayS()}`);
+    const w = wild.targetDelayS();
+    assert.ok(w > 0.08 && w <= 0.15, `${w}`);
+});
+
+test('render clock eases to the target with ≤5% time dilation, never runs backwards, resyncs after a stall', () => {
+    const clock = new N.RenderClock();
+    let t = clock.advance(0, 10, 0.05), last = t;
+    for (let k = 0; k < 120; k++) {                      // target suddenly 50 ms further back
+        t = clock.advance(1 / 60, 10 + (k + 1) / 60, k < 60 ? 0.05 : 0.10);
+        assert.ok(t >= last, 'never backwards');
+        assert.ok(clock.rate >= 0.95 - 1e-9 && clock.rate <= 1.05 + 1e-9);
+        last = t;
+    }
+    t = clock.advance(1 / 60, 60, 0.05);                 // tab was hidden for ~48 s
+    assert.ok(Math.abs(t - (60 - 0.05)) < 1e-9, 'snaps instead of crawling');
+});
+
+test('Hermite interpolation passes through snapshots and follows the velocity between them', () => {
+    const b = new N.SnapshotBuffer();
+    // car on a circle of radius 100: positions and velocities at t=0 and t=0.1 (ω = 1 rad/s, v = 100)
+    const at = (t) => [0, 100 * Math.sin(t), 100 - 100 * Math.cos(t), t, 100, 0, 0, 100 * Math.cos(t), 100 * Math.sin(t), 0, 0];
+    b.push({ s: 1, t: 0, c: [at(0)] }, 0);
+    b.push({ s: 2, t: 0.1, c: [at(0.1)] }, 0.1);
+    const mid = N.sample(b, 0.05, 0), truth = at(0.05);
+    assert.ok(Math.hypot(mid.x - truth[1], mid.y - truth[2]) < 0.01, 'on the arc, not the chord');
+    const end = N.sample(b, 0.1, 0);
+    assert.ok(Math.abs(end.x - at(0.1)[1]) < 1e-9);
+});
+
+test('dead reckoning follows the arc for 250 ms, then holds; recovery blends instead of popping', () => {
+    const b = new N.SnapshotBuffer(), WB = 3.6 * 6;          // wheelbase in world units at scale 6
+    const steer = Math.atan(WB / 300);                        // radius 300 world units
+    b.push({ s: 1, t: 0, c: [[0, 0, 0, 0, 60, steer, 0, 60, 0, 0, 0]] }, 0);
+    const p = N.sample(b, 0.25, 0, {}, {}, 6), w = 60 / 300 * 0.25;
+    assert.ok(Math.hypot(p.x - 300 * Math.sin(w), p.y - 300 * (1 - Math.cos(w))) < 0.3, 'on the arc');
+    const held = N.sample(b, 0.6, 0, {}, {}, 6);
+    assert.ok(Math.abs(held.x - p.x) < 1e-9, 'holds after 250 ms');
+    const st = {}, out = {};
+    N.sample(b, 0.2, 0, out, st, 6);                          // extrapolating
+    const before = { x: out.x, y: out.y };
+    b.push({ s: 2, t: 0.1, c: [[0, 5.5, 0, 0, 60, 0, 0, 60, 0, 0, 0]] }, 0.2);   // reality: went straight
+    b.push({ s: 3, t: 0.3, c: [[0, 17.5, 0, 0, 60, 0, 0, 60, 0, 0, 0]] }, 0.31);
+    const after = N.sample(b, 0.2 + 1 / 60, 0, out, st, 6);
+    assert.ok(Math.hypot(after.x - before.x, after.y - before.y) < 60 / 60 * 1.5, 'no pop on recovery');
 });
