@@ -15,6 +15,14 @@ const state = {
 
 let gameInstance = null;
 
+// Prediction clients send sequenced batches; bots and old tabs send one plain input
+function applyInput(id, inputData) {
+    if (!gameInstance) return;
+    const batch = lobby.sanitizeInputs(inputData);
+    if (batch) gameInstance.handleInputs(id, batch);
+    else gameInstance.handleInput(id, lobby.sanitizeInput(inputData));
+}
+
 // Every session timer goes through later() so an empty server can cancel them all at once
 const timers = new Set();
 function later(fn, ms) {
@@ -43,7 +51,7 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
         console.log(`Player connected: ${socket.id}`);
         // WebRTC signalling over Socket.IO; inputs arriving on the UDP DataChannel go to the game like socket inputs
         net.setupPeer(socket, (id, inputData) => {
-            if (gameInstance) gameInstance.handleInput(id, lobby.sanitizeInput(inputData));
+            applyInput(id, inputData);
         });
         // Visitors see live team counts before they join
         socket.emit('lobby_state_sync', lobbySnapshot());
@@ -113,7 +121,7 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
         socket.on('input', (inputData) => {
             // Fallback while the UDP channel isn't open. Accepted in every session phase; a frozen race keeps it until lights out
             if (net.hasOpenChannel(socket.id)) return;
-            if (gameInstance) gameInstance.handleInput(socket.id, lobby.sanitizeInput(inputData));
+            applyInput(socket.id, inputData);
         });
 
         socket.on('disconnect', () => {

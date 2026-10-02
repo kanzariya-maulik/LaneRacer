@@ -84,3 +84,10 @@ test('sanitizeInput carries the DRS button as a strict boolean', () => {
     assert.strictEqual(lobby.sanitizeInput({ throttle: 1, brake: 0, steer: 0, drs: 'yes' }).drs, false);
     assert.strictEqual(lobby.sanitizeInput({ up: true }).drs, false);
 });
+
+test('sanitizeInputs: batches of sequenced inputs, clamped; legacy single inputs return null', () => {
+    assert.deepStrictEqual(lobby.sanitizeInputs({ inputs: [{ seq: 5, steer: 3, throttle: 1, brake: 0, drs: true }, { seq: 'x', steer: 0 }] }),
+        [{ seq: 5, steer: 1, throttle: 1, brake: 0, drs: true }]);
+    assert.strictEqual(lobby.sanitizeInputs({ throttle: 1, brake: 0, steer: 0 }), null);
+    assert.strictEqual(lobby.sanitizeInputs({ inputs: new Array(50).fill({ seq: 1, steer: 0, throttle: 0, brake: 0 }) }).length, 8, 'at most 8 per packet');
+});

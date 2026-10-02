@@ -11,6 +11,7 @@ const JUMP_PENALTY_S = 5;     // moving before lights out
 const JUMP_MOVE_M = 0.5;      // further than this from the grid slot = moved
 const FINISH_WINDOW_S = 60;   // after the winner finishes, the rest have this long before they're classified DNF
 const INPUT_TIMEOUT_S = 0.3;  // no input for this long = controls released
+const INPUT_QUEUE_MAX = 4;    // inputs buffered per player; a burst beyond this drops its oldest
 const DRS_GAP_S = 1;          // race: within this of the car ahead at the detection point
 const SLIP_MAX = 0.2;         // drag cut right behind another car…
 const SLIP_MIN_M = 5, SLIP_RANGE_M = 40, SLIP_LAT_M = 3; // …fading out by 40 m behind, only roughly in line
@@ -76,7 +77,8 @@ class Game {
                 gap: null,
                 lapsDown: 0,
                 joinOrder: index,
-                input: { throttle: 0, brake: 0, steer: 0 }
+                input: { throttle: 0, brake: 0, steer: 0 },
+                queue: [], lastSeq: -1, starve: 0, // prediction clients: sequenced inputs, last applied, ticks with none
             };
         });
     }
@@ -131,7 +133,8 @@ class Game {
             const flags = (p.inPit && FLAGS.inPit) | (p.limiter && FLAGS.limiter) | (p.drs && FLAGS.drs)
                 | (p.drsAvailable && FLAGS.drsAvailable) | (p.finished && FLAGS.finished)
                 | (p.lapValid && FLAGS.lapValid) | (this.mode === 'quali' && FLAGS.ghost);
-            c.push([this.index[id], r1(p.x), r1(p.y), +p.angle.toFixed(4), r1(p.speed), +p.steer.toFixed(3), flags]);
+            c.push([this.index[id], r1(p.x), r1(p.y), +p.angle.toFixed(4), r1(p.speed), +p.steer.toFixed(3), flags,
+                    r1(p.vx), r1(p.vy), +(p.tow || 0).toFixed(2), p.lastSeq]);
         }
         return { s: this.seq, t: +this.clock.toFixed(3), g: +this.time.toFixed(3), c };
     }
@@ -161,6 +164,16 @@ class Game {
         const p = this.players[id];
         if (!p) return;
         p.input = input; // kept while frozen, applies at lights out
+        p.inputAt = this.clock;
+    }
+
+    // Prediction clients: each tick applies exactly one queued input, in sequence order
+    handleInputs(id, list) {
+        const p = this.players[id];
+        if (!p) return;
+        const top = p.queue.length ? p.queue[p.queue.length - 1].seq : p.lastSeq;
+        for (const i of list) if (i.seq > top && !p.queue.some((q) => q.seq === i.seq)) p.queue.push(i);
+        p.queue.sort((a, b) => a.seq - b.seq);
         p.inputAt = this.clock;
     }
 
@@ -268,6 +281,11 @@ class Game {
             for (const id of ids) {
                 const p = this.players[id];
                 if (p.inputAt !== undefined && this.clock - p.inputAt > INPUT_TIMEOUT_S) p.input = { throttle: 0, brake: 0, steer: 0, drs: false };
+                if (p.queue.length) {
+                    while (p.queue.length > INPUT_QUEUE_MAX) p.queue.shift();
+                    p.input = p.queue.shift();
+                    p.lastSeq = p.input.seq;
+                } else if (p.lastSeq >= 0 && this.clock - p.inputAt <= INPUT_TIMEOUT_S) p.starve++; // late input: last one repeats
             }
             if (this.mode === 'race') this.updateTow();
             for (const id of ids) {

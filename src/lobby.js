@@ -49,4 +49,12 @@ function pickRacers(players, max = MAX_RACERS) {
     return { racers: eligible.slice(0, max), overflow: eligible.slice(max) };
 }
 
-module.exports = { TEAMS, MAX_RACERS, sanitizeUsername, sanitizeChat, sanitizeSettings, sanitizeInput, canJoinTeam, pickRacers };
+// Sequenced input batches from prediction clients: { inputs: [{ seq, steer, throttle, brake, drs }, …] } (newest + 5 resends)
+function sanitizeInputs(payload) {
+    if (!payload || !Array.isArray(payload.inputs)) return null;
+    return payload.inputs.slice(0, 8)
+        .filter((i) => i && Number.isInteger(i.seq) && i.seq >= 0)
+        .map((i) => ({ seq: i.seq, ...sanitizeInput(i) }));
+}
+
+module.exports = { TEAMS, MAX_RACERS, sanitizeUsername, sanitizeChat, sanitizeSettings, sanitizeInput, sanitizeInputs, canJoinTeam, pickRacers };
