@@ -51,6 +51,10 @@ function remembered(id, key, fallback, onChange) {
 }
 const assistSelect = remembered('assist-select', 'lanrace.assist', 'full', (v) => window.setAssist?.(v));
 remembered('others-select', 'lanrace.others', 'present');
+const volumeRange = document.getElementById('volume-range');
+try { volumeRange.value = localStorage.getItem('lanrace.volume') ?? 70; } catch (e) { /* default */ }
+volumeRange.addEventListener('input', () => window.lanraceAudio?.setVolume(volumeRange.value / 100));
+remembered('engine-select', 'lanrace.engine', 'all', (v) => window.lanraceAudio?.setMode(v));
 window.setAssist = (v) => { // lobby select and the in-race Q key both land here
     assistSelect.value = v;
     window.lanraceMem['lanrace.assist'] = v;
@@ -115,6 +119,7 @@ btnJoin.addEventListener('click', () => {
     if (!selectedTeam) return window.appendChat('SYSTEM', '#f43f5e', 'Pick a team first.');
     const username = inputUser.value.trim() || `Player${Math.floor(Math.random() * 1000)}`;
     lastJoin = { username, teamId: selectedTeam, assist: assistSelect.value };
+    window.lanraceAudio?.unlock(); // the click is the gesture browsers need to start sound
     socket.emit('join_lobby', lastJoin);
     setJoinedUI(true);
 });

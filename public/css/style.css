@@ -520,3 +520,14 @@ input:focus { border: 1px solid var(--primary); }
 .graphics-picker { display: block; margin: 10px 0; }
 #graphics-note { color: #94a3b8; }
 #stats { position: fixed; left: 8px; bottom: 8px; z-index: 50; background: rgba(0, 0, 0, 0.6); color: #a7f3d0; font: 12px monospace; padding: 4px 8px; border-radius: 4px; }
+
+/* F1 steering-wheel gear + shift lights */
+#gear-hud { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; margin: 0 0 6px auto; width: fit-content; }
+#rev-lights { display: flex; gap: 3px; padding: 4px 6px; background: rgba(0,0,0,0.6); border-radius: 6px; }
+#rev-lights i { width: 10px; height: 10px; border-radius: 50%; background: #1f2937; }
+#rev-lights i.on:nth-child(-n+5) { background: #22c55e; box-shadow: 0 0 6px #22c55e; }
+#rev-lights i.on:nth-child(n+6):nth-child(-n+10) { background: #ef4444; box-shadow: 0 0 6px #ef4444; }
+#rev-lights i.on:nth-child(n+11) { background: #3b82f6; box-shadow: 0 0 6px #3b82f6; }
+#rev-lights.flash i { animation: revflash 0.12s steps(1) infinite; }
+@keyframes revflash { 50% { background: #1f2937; box-shadow: none; } }
+#hud-gear { font: 900 2.4rem/1 sans-serif; color: #fff; text-shadow: 0 2px 6px #000; min-width: 1.4em; text-align: center; }

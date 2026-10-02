@@ -7,6 +7,9 @@ import { LEVELS, ratioRange, resolveLevel, autoPick, adaptStep, snapLight, frame
 import { placeScenery, seedOf } from './scenery.js';
 import { SnapshotBuffer, RenderClock, sample, samplePresent, decodeFlags } from './netsync.js';
 import { Predictor, STEP_S } from './predict.js';
+import { Gearbox, shiftLights } from './audio/gearbox.js';
+import { estimateLoad } from './audio/mix.js';
+import * as Sound from './audio/audio.js';
 import { gapText, driverCode, lapDelta, stepFollow, inDrsZone, drsHint, liveSectors, resultCells } from './timing.js';
 import { MODES, segmentColor, cornerMask, aheadM, trackIndex, nextMode } from './racingline.js';
 
@@ -32,6 +35,7 @@ const store = {
     get: (k) => { if (k in mem) return mem[k]; try { return localStorage.getItem(k); } catch (e) { return null; } },
     set: (k, v) => { mem[k] = v; try { localStorage.setItem(k, v); } catch (e) { /* storage blocked: this page only */ } },
 };
+Sound.init();
 const choice = store.get('lanrace.quality') || 'auto';
 let level = resolveLevel(choice, store.get('lanrace.quality.auto'));
 let Q = LEVELS[level];
@@ -131,6 +135,7 @@ function onKey(e, down) {
     if (down && key === 't' && !e.repeat && clientState.status !== 'LOBBY') toggleTower();
     if (down && key === 'r' && !e.repeat && clientState.status !== 'LOBBY') toggleLine();
     if (down && key === 'q' && !e.repeat && clientState.status !== 'LOBBY') toggleAssist();
+    if (down && key === 'm' && !e.repeat) window.showBanner?.(Sound.toggleMute() ? 'SOUND: MUTED' : 'SOUND: ON', true);
     if (down && e.key === 'F3') { e.preventDefault(); netstatsOn = !netstatsOn; netstatsEl.classList.toggle('hidden', !netstatsOn); }
     if (down && clientState.status !== 'LOBBY' && isSpectator()) {
         if (key === 'arrowleft') spectateId = stepFollow(rankedCarIds(), spectateId, -1);
@@ -1015,6 +1020,7 @@ function fmtClock(ms) {
 }
 
 window.handleLights = (count) => {
+    Sound.event(count > 0 ? 'beep' : 'lights_out');
     const el = $('lights');
     el.classList.remove('hidden');
     el.querySelectorAll('.light').forEach((l, i) => l.classList.toggle('on', i < count));
@@ -1274,6 +1280,54 @@ let autoMs = 0, autoFrames = 0; // auto-pick: frame time while driving
 const stats = new URLSearchParams(location.search).has('stats') ? Object.assign(document.createElement('div'), { id: 'stats' }) : null;
 if (stats) document.body.appendChild(stats);
 
+// Sound + gear HUD: gearboxes for your car and every other car (cheap), audio frame in metres (track plane)
+const ownBox = new Gearbox(), remoteBoxes = new Map(), soundOthers = [];
+const ownFrame = { rpm: 0, load: 0, limiter: false, pit: false, speedMs: 0 };
+const listenerFrame = { x: 0, y: 0, fx: 1, fy: 0, vx: 0, vy: 0 }, sndFrame = { own: null, others: soundOthers, listener: listenerFrame };
+const camDir = new THREE.Vector3();
+let lastDrs = false, hudLit = -1, hudFlash = null, hudGear = '';
+function updateSound(dt) {
+    const gs = clientState.gameState, me = gs[clientState.me], racing = !!me && !isSpectator();
+    const followId = racing ? clientState.me : spectateId;
+    let hud = null, hudSpeed = 0;
+    soundOthers.length = 0;
+    for (const id in gs) {
+        if (racing && id === clientState.me) continue;
+        const p = gs[id], v = p.speed / scale;
+        let r = remoteBoxes.get(id);
+        if (!r) { r = { box: new Gearbox(), speed: v, load: 0, o: { id } }; remoteBoxes.set(id, r); }
+        r.load = estimateLoad(r.load, (v - r.speed) / Math.max(dt, 1e-3), dt);
+        r.speed = v;
+        const g = r.box.update(v, r.load, dt, !!p.limiter), o = r.o;
+        o.x = p.x / scale; o.y = p.y / scale; o.vx = Math.cos(p.angle) * v; o.vy = Math.sin(p.angle) * v;
+        o.rpm = g.rpm; o.load = r.load; o.limiter = g.limiter; o.pit = g.pit;
+        soundOthers.push(o);
+        if (id === followId) { hud = g; hudSpeed = v; }
+    }
+    for (const id of remoteBoxes.keys()) if (!gs[id]) remoteBoxes.delete(id); // left the session
+    sndFrame.own = null;
+    if (racing) {
+        const v = me.speed / scale, g = ownBox.update(v, input.throttle, dt, !!me.limiter);
+        for (const e of g.events) Sound.event(e === 'up' ? 'shift_up' : 'shift_down');
+        if (!!me.drs !== lastDrs) { lastDrs = !!me.drs; Sound.event('drs'); }
+        ownFrame.rpm = g.rpm; ownFrame.load = input.throttle; ownFrame.limiter = g.limiter; ownFrame.pit = g.pit; ownFrame.speedMs = v;
+        sndFrame.own = ownFrame;
+        hud = g; hudSpeed = v;
+        listenerFrame.vx = Math.cos(me.angle) * v; listenerFrame.vy = Math.sin(me.angle) * v;
+    } else { listenerFrame.vx = 0; listenerFrame.vy = 0; }
+    camera.getWorldDirection(camDir);
+    const len = Math.hypot(camDir.x, camDir.z) || 1;
+    listenerFrame.x = camera.position.x / scale; listenerFrame.y = camera.position.z / scale;
+    listenerFrame.fx = camDir.x / len; listenerFrame.fy = camDir.z / len;
+    Sound.update(sndFrame);
+    // Gear + shift lights (DOM touched only on change)
+    const gear = !hud ? '' : hud.reverse ? 'R' : hudSpeed < 0.3 && hud.rpm < 4600 ? 'N' : String(hud.gear);
+    if (gear !== hudGear) { hudGear = gear; $('hud-gear').textContent = gear; }
+    const L = hud ? shiftLights(hud.rpm, hud.limiter) : { lit: 0, flash: false };
+    if (L.lit !== hudLit) { hudLit = L.lit; document.querySelectorAll('#rev-lights i').forEach((el, i) => el.classList.toggle('on', i < L.lit)); }
+    if (L.flash !== hudFlash) { hudFlash = L.flash; $('rev-lights').classList.toggle('flash', L.flash); }
+}
+
 function frame(now) {
     const dt = Math.min((now - last) / 1000, 0.1);
     last = now;
@@ -1286,6 +1340,7 @@ function frame(now) {
     updateCars(dt);
     updateWheelBatch();
     updateCamera(dt);
+    updateSound(dt);
     renderer.render(scene, camera);
 
     if (now - lastHud > 66) { // HUD and minimap at 15 Hz, timing tower at 4 Hz
@@ -1333,6 +1388,7 @@ window.initGameVisuals = () => {
     predictor = new Predictor(clientState.trackData, clientState.gameState?.[clientState.me]?.assist || 'off');
     sentInputs = []; carPose.clear(); carState.clear(); renderClock.t = presentClock.t = null;
     othersMode = store.get('lanrace.others') === 'smooth' ? 'smooth' : 'present';
+    ownBox.reset(); remoteBoxes.clear(); lastDrs = false;
     for (const k in liveSec) delete liveSec[k]; // new session, new timing
     $('fl-card').classList.add('hidden');
     $('race-results').classList.add('hidden'); // next session: last race's classification goes

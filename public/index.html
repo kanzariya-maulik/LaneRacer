@@ -56,6 +56,17 @@
                         </select>
                         <small>"Where they really are" matches the hitbox</small>
                     </label>
+                    <label class="graphics-picker">Sound volume:
+                        <input type="range" id="volume-range" min="0" max="100" value="70">
+                    </label>
+                    <label class="graphics-picker">Engine sound:
+                        <select id="engine-select">
+                            <option value="all" selected>All cars</option>
+                            <option value="mine">Mine only</option>
+                            <option value="off">Off</option>
+                        </select>
+                        <small>M mutes during a race</small>
+                    </label>
 
                     <button id="btn-join" class="btn primary">Join Lobby</button>
                     
@@ -138,6 +149,10 @@
                 </div>
                 <div id="drs-badge" class="drs-off" title="DRS — press E (gamepad Y) when green">DRS</div>
                 <div id="drs-hint"></div>
+                <div id="gear-hud">
+                    <div id="rev-lights"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+                    <div id="hud-gear">1</div>
+                </div>
                 <div class="hud-speedometer"><span id="hud-speed">0</span> KM/H</div>
             </div>
             
