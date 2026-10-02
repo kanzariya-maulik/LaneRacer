@@ -17,6 +17,7 @@ let clientState = {
     session: null,      // { phase, endsAt } — endsAt in local ms, null for open-ended
     qualiResults: null,
     lastTiming: null,
+    net: { rttMs: null, link: 'TCP', tickMs: null, starve: {} }, // F3 stats overlay
 };
 
 // ---------- WebRTC UDP DataChannel (game_state in, inputs out); Socket.IO is signalling + fallback ----------
@@ -66,6 +67,8 @@ function setupWebRTC() {
                     if (msg.type === 'STATE') {
                         // 60 Hz game state arriving over UDP
                         onFastPacket(msg.data);
+                    } else if (msg.type === 'PONG') {
+                        clientState.net.rttMs = performance.now() - msg.clientTime;
                     }
                 } catch (e) {}
             };
@@ -141,10 +144,10 @@ socket.on('webrtc_candidate', async (data) => {
 
 // ── Send game input — WebRTC UDP first, socket during handshake ─────────────
 let lastUdpRx = 0;
-window.sendUDPInput = function(inputs) {
+window.sendUDPInput = function(batch) {
     if (udpReady && rtcDataChannel && rtcDataChannel.readyState === 'open') {
         try {
-            rtcDataChannel.send(JSON.stringify({ type: 'INPUT', payload: inputs }));
+            rtcDataChannel.send(JSON.stringify({ type: 'INPUT', payload: batch }));
             // Still hearing the server over UDP: done. Quiet for 0.5 s (WiFi roam): send the socket copy too
             if (performance.now() - lastUdpRx < 500) return;
         } catch (e) {
@@ -152,8 +155,21 @@ window.sendUDPInput = function(inputs) {
         }
     }
     // Fallback to socket while UDP channel is establishing
-    socket.emit('input', inputs);
+    socket.emit('input', batch);
 };
+
+// Ping once a second for the stats overlay: over UDP when it's live, else a Socket.IO ack
+setInterval(() => {
+    const t = performance.now();
+    if (udpReady && rtcDataChannel && rtcDataChannel.readyState === 'open' && t - lastUdpRx < 500) {
+        clientState.net.link = 'UDP';
+        try { rtcDataChannel.send(JSON.stringify({ type: 'PING', clientTime: t })); } catch (e) { /* next second */ }
+    } else {
+        clientState.net.link = 'TCP';
+        socket.emit('net_ping', t, (back) => { clientState.net.rttMs = performance.now() - back; });
+    }
+}, 1000);
+socket.on('net_stats', (s) => { clientState.net.tickMs = s.tickMs; clientState.net.starve = s.starve || {}; });
 
 
 // Fast updates are queued; game3d.js drains them into its snapshot buffer every frame

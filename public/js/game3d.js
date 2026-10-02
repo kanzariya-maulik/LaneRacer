@@ -2,10 +2,11 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { keyboardStep, gamepadInput, changed } from './input.js';
+import { keyboardStep, gamepadInput } from './input.js';
 import { LEVELS, ratioRange, resolveLevel, autoPick, adaptStep, snapLight, frameCapped } from './quality.js';
 import { placeScenery, seedOf } from './scenery.js';
-import { SnapshotBuffer, sample, project, decodeFlags, INTERP_S } from './netsync.js';
+import { SnapshotBuffer, RenderClock, sample, decodeFlags } from './netsync.js';
+import { Predictor, STEP_S } from './predict.js';
 import { gapText, driverCode, lapDelta, stepFollow, inDrsZone, drsHint } from './timing.js';
 import { MODES, segmentColor, cornerMask, aheadM, trackIndex, nextMode } from './racingline.js';
 
@@ -88,7 +89,7 @@ const keys = { up: false, down: false, left: false, right: false, drs: false };
 const KEYMAP = { w: 'up', arrowup: 'up', s: 'down', arrowdown: 'down', a: 'left', arrowleft: 'left', d: 'right', arrowright: 'right', e: 'drs' };
 let input = { throttle: 0, brake: 0, steer: 0, drs: false };
 let touchInput = null;
-let lastSent = null, lastSentAt = 0;
+let predictor = null, simAcc = 0, inputSeq = 0, sentInputs = []; // client-side prediction (own car)
 let spectateId = null; // spectators follow this driver
 let towerMode = 'interval'; // timing tower gap column: 'interval' (car ahead) or 'leader'
 function toggleTower() {
@@ -134,27 +135,31 @@ window.addEventListener('keyup', (e) => onKey(e, false));
 function releaseKeys() {
     for (const k in keys) keys[k] = false;
     input = { throttle: 0, brake: 0, steer: 0, drs: false };
-    sendInput(performance.now(), true);
+    simStep(false); // the release goes out now, not at the next frame (a hidden tab has none)
 }
 window.addEventListener('blur', releaseKeys);
 document.addEventListener('visibilitychange', () => { if (document.hidden) releaseKeys(); });
 
-function sendInput(now, force = false) {
-    // ≤ 30 Hz on change, plus a 10 Hz resend: UDP may drop a packet and a lost "throttle off" must not stick
-    if (!force && (now - lastSentAt < 33 || (!changed(input, lastSent) && now - lastSentAt < 100))) return;
-    window.sendUDPInput(input);
-    lastSent = { ...input };
-    lastSentAt = now;
+// 60 Hz fixed steps: sample controls, predict own car, send newest + 5 previous (a lost UDP packet costs nothing)
+function simStep(sample = true) {
+    if (sample) {
+        const pad = gamepadInput((navigator.getGamepads ? [...navigator.getGamepads()] : []).find(Boolean));
+        input = pad || touchInput || keyboardStep(input, keys, STEP_S);
+    }
+    const stamped = { seq: ++inputSeq, steer: input.steer, throttle: input.throttle, brake: input.brake, drs: !!input.drs };
+    if (predictor && predictor.car) predictor.step(stamped);
+    sentInputs.push(stamped);
+    if (sentInputs.length > 6) sentInputs.shift();
+    window.sendUDPInput({ inputs: sentInputs });
 }
 
-function pollInput(dt, now) {
-    const pads = navigator.getGamepads ? [...navigator.getGamepads()] : [];
-    const pad = gamepadInput(pads.find(Boolean));
-    const x = !!pads.find(Boolean)?.buttons[2]?.pressed; // gamepad X / Square
+function pollInput(dt) {
+    const pad = (navigator.getGamepads ? [...navigator.getGamepads()] : []).find(Boolean);
+    const x = !!pad?.buttons[2]?.pressed; // gamepad X / Square
     if (x && !padX && clientState.status !== 'LOBBY') toggleLine();
     padX = x;
-    input = pad || touchInput || keyboardStep(input, keys, dt);
-    sendInput(now);
+    simAcc = Math.min(simAcc + dt, 0.25); // a long stall doesn't fire a burst of steps
+    while (simAcc >= STEP_S) { simStep(); simAcc -= STEP_S; }
 }
 
 // Virtual joystick for touch devices
@@ -868,22 +873,44 @@ function updateCars(dt) {
     }
 }
 
-// Pose every car from the snapshot buffer: others 50 ms behind (smooth), own car projected to "now" (instant)
-function applyNet(nowS) {
-    for (const [pkt, at] of clientState.netIn.splice(0)) netBuf.push(pkt, at);
+// Own car: predicted (zero input delay). Others: adaptive interpolation delay, Hermite curves, dead reckoning.
+const renderClock = new RenderClock(), carPose = new Map(), carState = new Map(), ownPose = {}; // reused every frame
+function applyNet(nowS, dt) {
+    const myIdx = clientState.netIndex[clientState.me];
+    for (const [pkt, at] of clientState.netIn.splice(0)) {
+        if (!netBuf.push(pkt, at) || !predictor || myIdx === undefined) continue; // duplicate / stale: dropped
+        const mine = netBuf.latest().s === pkt.s && netBuf.latest().cars.get(myIdx);
+        if (mine) predictor.onServer(mine);
+    }
     const latest = netBuf.latest(), gs = clientState.gameState;
     if (!latest || !gs) return;
     const serverT = netBuf.serverNow(nowS);
+    const renderT = renderClock.advance(dt, serverT, netBuf.targetDelayS());
+    const gameT = netBuf.gameTime(serverT);
     for (const id in gs) {
         const i = clientState.netIndex[id];
         if (i === undefined) continue;
-        const own = id === clientState.me && latest.cars.has(i);
-        const pose = own ? project(latest.cars.get(i), serverT - latest.t) : sample(netBuf, serverT - INTERP_S, i);
-        if (!pose) continue;
         const p = gs[id];
-        Object.assign(p, { x: pose.x, y: pose.y, angle: pose.angle, speed: pose.speed, steer: pose.steer }, decodeFlags(pose.flags));
-        p.curLap = p.lapStart === null || p.lapStart === undefined || p.finished ? null : Math.max(0, netBuf.gameTime(serverT) - p.lapStart);
+        let pose;
+        if (id === clientState.me && predictor && predictor.car) {
+            pose = predictor.pose(simAcc / STEP_S, ownPose);
+            const e = latest.cars.get(i);
+            if (e) decodeFlags(e[6], p);
+        } else {
+            let out = carPose.get(i), st = carState.get(i);
+            if (!out) { out = {}; st = {}; carPose.set(i, out); carState.set(i, st); }
+            pose = sample(netBuf, renderT, i, out, st, scale);
+            if (!pose) continue;
+            decodeFlags(pose.flags, p);
+        }
+        p.x = pose.x; p.y = pose.y; p.angle = pose.angle; p.speed = pose.speed; p.steer = pose.steer;
+        p.curLap = p.lapStart === null || p.lapStart === undefined || p.finished ? null : Math.max(0, gameT - p.lapStart);
     }
+    const n = window.lanraceNet || (window.lanraceNet = {}); // F3 overlay readings
+    n.delayMs = netBuf.targetDelayS() * 1000;
+    n.jitterMs = netBuf.jitterS * 1000;
+    n.lossPct = netBuf.expected ? Math.max(0, 100 * (1 - netBuf.received / netBuf.expected)) : 0;
+    n.predErrCm = predictor && predictor.car ? (predictor.lastError / scale) * 100 : null;
 }
 
 // All wheels of all cars in two instanced draws (tyre, rim); each frame copies every wheel part's world matrix
@@ -1151,9 +1178,9 @@ function frame(now) {
     const dt = Math.min((now - last) / 1000, 0.1);
     last = now;
     if (clientState.status === 'LOBBY') return;
-    pollInput(dt, now);
+    pollInput(dt);
     if (!world || !clientState.gameState) return;
-    applyNet(now / 1000);
+    applyNet(now / 1000, dt);
     updateCars(dt);
     updateWheelBatch();
     updateCamera(dt);
@@ -1199,8 +1226,11 @@ function frame(now) {
 
 window.initGameVisuals = () => {
     netBuf = new SnapshotBuffer();
+    // New session: predict from the new grid (reset on our first entry); spectators never get one, so never predict
+    predictor = new Predictor(clientState.trackData, clientState.gameState?.[clientState.me]?.assist || 'off');
+    sentInputs = []; carPose.clear(); carState.clear(); renderClock.t = null;
     buildWorld(clientState.trackData);
-    sendInput(performance.now(), true); // resend what's held when a new session starts
+    simStep(false); // resend what's held when a new session starts
 };
 renderer.setAnimationLoop(frame);
 // game_init may have arrived while this module (and three.js) was still loading

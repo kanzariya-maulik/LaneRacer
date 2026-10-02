@@ -120,6 +120,8 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
             else startRace(io, racers);
         });
 
+        socket.on('net_ping', (t, ack) => { if (typeof ack === 'function') ack(t); }); // RTT for the stats overlay (TCP link)
+
         socket.on('input', (inputData) => {
             // Fallback while the UDP channel isn't open. Accepted in every session phase; a frozen race keeps it until lights out
             if (net.hasOpenChannel(socket.id)) return;

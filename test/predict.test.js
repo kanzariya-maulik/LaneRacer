@@ -16,7 +16,7 @@ function run({ latency = 30, jitter = 20, loss = 2, seconds = 60, track = 'monza
     const g = new Game({ emit() {}, volatile: { emit(ev, d) { if (ev === 'game_state') pkt = d; } } },
         [{ id: 'a', username: 'A', teamId: 'redbull', assist: 'full' }], t, { maxLaps: 99, qualifying: false }, () => {});
     g.frozen = false;
-    const pr = new P.Predictor(t);
+    const pr = new P.Predictor(t, 'full');
     const events = [];                  // [time, fn]
     const at = (time, fn) => { if (rand() * 100 >= loss) events.push([time + (latency + (rand() * 2 - 1) * jitter) / 1000, fn]); };
     const serverPos = new Map(), clientPos = new Map();
@@ -103,4 +103,13 @@ test('bad WiFi (60±50 ms, 5% loss): still within 5 cm, no visible correction st
     const r = run({ latency: 60, jitter: 50, loss: 5, seconds: 30 });
     assert.ok(r.p95 < 0.05, `p95 ${r.p95.toFixed(3)} m`);
     assert.ok(r.maxStepM < 0.10, `largest per-step correction ${r.maxStepM.toFixed(3)} m`);
+});
+
+test('the predicted car uses the player\'s own assist setting', () => {
+    const t = Track.load('monza');
+    for (const assist of ['off', 'full']) {
+        const pr = new P.Predictor(t, assist);
+        pr.reset([0, t.path[10].x, t.path[10].y, 0, 0, 0, 0, 0, 0, 0, 1]);
+        assert.strictEqual(pr.car.assist, assist);
+    }
 });
