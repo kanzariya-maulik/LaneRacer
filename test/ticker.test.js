@@ -13,3 +13,25 @@ test('ticker: exactly one step per 16.667 ms on an uneven poll schedule, catch-u
     runs = 0; now += 1000 / 60; t.poll();
     assert.strictEqual(runs, 1, 'back to one per step, not catching up the whole second');
 });
+
+test('ticker: a wall clock set backwards (NTP) resyncs instead of stalling the game', () => {
+    let now = 50000, runs = 0;
+    const t = new Ticker(1000 / 60, () => runs++, () => now, 4);
+    t.next = now;
+    t.poll();
+    now -= 5000; runs = 0;
+    t.poll();
+    now += 1000 / 60; t.poll();
+    now += 1000 / 60; t.poll();
+    assert.ok(runs >= 2, `${runs} ticks after the jump`);
+});
+
+test('ticker: default clock is Date.now, so mocked timers drive the game in tests', (tc) => {
+    tc.mock.timers.enable({ apis: ['setInterval', 'Date'] });
+    let runs = 0;
+    const t = new Ticker(1000 / 60, () => runs++);
+    t.start();
+    for (let k = 0; k < 1000; k++) tc.mock.timers.tick(1); // mock Date jumps to the end of each tick() call
+    t.stop();
+    assert.ok(runs >= 59 && runs <= 61, `${runs}`);
+});

@@ -32,6 +32,11 @@ function fakeIo() {
     return io;
 }
 
+// Node's mock Date jumps to the end of a tick() call, so walk virtual time in 1 ms steps like the game loop polls
+function advance(t, ms) {
+    for (let k = 0; k < ms; k++) t.mock.timers.tick(1);
+}
+
 // Each test leaves the shared server state empty by disconnecting everyone
 function join(io, id, teamId, quali) {
     const s = io.connect(id);
@@ -42,23 +47,23 @@ function join(io, id, teamId, quali) {
 }
 
 test('everyone leaving during countdown cancels it, so a new host gets exactly one race', (t) => {
-    t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
+    t.mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
     const io = fakeIo();
     setupSocketManager(io, noNet);
     const a = join(io, 'a', 'ferrari', 0);
     a.fire('start_game');
-    t.mock.timers.tick(2000);
+    advance(t, 2000);
     a.fire('disconnect');
 
     const b = join(io, 'b', 'haas', 0);
     b.fire('start_game');
-    t.mock.timers.tick(10000);
+    advance(t, 10000);
     assert.strictEqual(io.events('status_change').filter(s => s === 'RACE').length, 1, 'stale lights started a second race');
     b.fire('disconnect');
 });
 
 test('lights: 1..5 one per second, out 0.5–2.5 s later; throttle before lights out is a jump start', (t) => {
-    t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
+    t.mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
     const io = fakeIo();
     setupSocketManager(io, noNet);
     const a = join(io, 'a', 'ferrari', 0);
@@ -66,23 +71,23 @@ test('lights: 1..5 one per second, out 0.5–2.5 s later; throttle before lights
     const init = io.events('game_init').at(-1);
     const car = init.players.a, x0 = car.x;
 
-    t.mock.timers.tick(5000);
+    advance(t, 5000);
     assert.deepStrictEqual(io.events('lights').map(l => l.count), [1, 2, 3, 4, 5]);
     assert.strictEqual(car.x, x0, 'car moved with no input');
     a.fire('input', { throttle: 1, brake: 0, steer: 0 }); // too early: lights out comes 0.5–2.5 s after light 5
-    t.mock.timers.tick(499);
+    advance(t, 499);
     assert.ok(!io.events('lights').some(l => l.count === 0), 'lights out too early');
-    t.mock.timers.tick(2001);
+    advance(t, 2001);
     assert.ok(io.events('lights').some(l => l.count === 0), 'lights never went out');
     assert.ok(io.events('status_change').includes('RACE'));
     assert.strictEqual(car.penalty, 5, 'jump start should cost 5 s');
-    t.mock.timers.tick(1000);
+    advance(t, 1000);
     assert.notStrictEqual(car.x, x0);
     a.fire('disconnect');
 });
 
 test('qualifying → results → race grid in best-lap order', (t) => {
-    t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
+    t.mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
     const io = fakeIo();
     setupSocketManager(io, noNet);
     const a = join(io, 'a', 'ferrari', 1);
@@ -94,11 +99,11 @@ test('qualifying → results → race grid in best-lap order', (t) => {
 
     Object.assign(quali.players.a, { bestLap: 85, finished: true });
     Object.assign(quali.players.b, { bestLap: 80, finished: true });
-    t.mock.timers.tick(50);
+    advance(t, 50);
     assert.ok(io.events('status_change').includes('QUALI_RESULTS'));
     assert.deepStrictEqual(io.events('quali_results').at(-1).map(r => [r.id, r.position]), [['b', 1], ['a', 2]]);
 
-    t.mock.timers.tick(8000);
+    advance(t, 8000);
     assert.strictEqual(io.events('status_change').at(-1), 'COUNTDOWN');
     const race = io.events('game_init').at(-1);
     assert.strictEqual(race.mode, 'race');
@@ -109,14 +114,14 @@ test('qualifying → results → race grid in best-lap order', (t) => {
 });
 
 test('no quali times → join-order grid', (t) => {
-    t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
+    t.mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
     const io = fakeIo();
     setupSocketManager(io, noNet);
     const a = join(io, 'a', 'ferrari', 1);
     const b = join(io, 'b', 'haas');
     a.fire('start_game');
-    t.mock.timers.tick(360 * 1000 + 100); // nobody ever crosses the line: the 6-minute cap ends quali
-    t.mock.timers.tick(8000);
+    advance(t, 360 * 1000 + 100); // nobody ever crosses the line: the 6-minute cap ends quali
+    advance(t, 8000);
     const race = io.events('game_init').at(-1);
     assert.strictEqual(race.mode, 'race');
     assert.strictEqual(race.players.a.x, monza.startPositions[0].x);
@@ -126,7 +131,7 @@ test('no quali times → join-order grid', (t) => {
 });
 
 test('disconnect during results drops driver from the grid', (t) => {
-    t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
+    t.mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
     const io = fakeIo();
     setupSocketManager(io, noNet);
     const a = join(io, 'a', 'ferrari', 1);
@@ -135,9 +140,9 @@ test('disconnect during results drops driver from the grid', (t) => {
     const quali = io.events('game_init').at(-1);
     Object.assign(quali.players.a, { bestLap: 85, finished: true });
     Object.assign(quali.players.b, { bestLap: 80, finished: true });
-    t.mock.timers.tick(50);
+    advance(t, 50);
     b.fire('disconnect');
-    t.mock.timers.tick(8000);
+    advance(t, 8000);
     const race = io.events('game_init').at(-1);
     assert.deepStrictEqual(Object.keys(race.players), ['a']);
     assert.strictEqual(race.players.a.x, monza.startPositions[0].x);
@@ -145,7 +150,7 @@ test('disconnect during results drops driver from the grid', (t) => {
 });
 
 test('late joiner during qualifying gets the running session', (t) => {
-    t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
+    t.mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
     const io = fakeIo();
     setupSocketManager(io, noNet);
     const a = join(io, 'a', 'ferrari', 1);
@@ -158,7 +163,7 @@ test('late joiner during qualifying gets the running session', (t) => {
 });
 
 test('empty grid at lights out does not leave the server stuck in RACE', (t) => {
-    t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
+    t.mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
     const io = fakeIo();
     setupSocketManager(io, noNet);
     const a = join(io, 'a', 'ferrari', 0);
@@ -166,8 +171,8 @@ test('empty grid at lights out does not leave the server stuck in RACE', (t) => 
     const c = io.connect('c');
     c.fire('join_lobby', { username: 'C', teamId: 'haas' }); // spectator
     a.fire('disconnect');                       // grid empties before lights out; c becomes host
-    t.mock.timers.tick(15000);
-    t.mock.timers.tick(6000); // node's mock timers run timeouts scheduled inside an interval callback on the next tick() call
+    advance(t, 15000);
+    advance(t, 6000); // node's mock timers run timeouts scheduled inside an interval callback on the next tick() call
     assert.strictEqual(io.events('lobby_state_sync').at(-1).status, 'LOBBY');
     assert.ok(!io.events('status_change').includes('RACE'), 'stale lights timer flipped status to RACE');
     c.fire('update_settings', { qualifying: false });
