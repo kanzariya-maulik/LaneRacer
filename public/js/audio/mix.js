@@ -19,9 +19,19 @@ export function pickLoops(loops, rpm) {
     return { a: i, b: i + 1, wa: Math.cos((t * Math.PI) / 2), wb: Math.sin((t * Math.PI) / 2) };
 }
 
-// Other cars don't send throttle: > +2 m/s² reads as on, < −3 m/s² as off, otherwise the last state holds
-export function estimateLoad(prevLoad, accel, dt) {
+// Other cars don't send throttle: > +2 m/s² reads as on (> +0.5 near top speed, where drag eats the power),
+// < −3 m/s² as off, otherwise the last state holds
+export function estimateLoad(prevLoad, accel, dt, speedMs = 0) {
     const a = Number.isFinite(accel) ? accel : 0, prev = Number.isFinite(prevLoad) ? prevLoad : 0;
-    const target = a > 2 ? 1 : a < -3 ? 0 : prev;
+    const on = speedMs > 60 ? 0.5 : 2;
+    const target = a > on ? 1 : a < -3 ? 0 : prev;
     return prev + (target - prev) * Math.min(1, dt * 8);
+}
+
+// Engine effects from state: pit-limiter stutter only while pushing against it, rev-limiter stutter, overrun crackle
+const FX = { stutter: 0, crackle: 0 };
+export function engineFx(rpm, load, pit, limiter) {
+    FX.stutter = pit && load > 0.3 ? 12 : limiter ? 30 : 0;
+    FX.crackle = load < 0.1 && rpm > 8000 ? Math.min(1, (rpm - 8000) / 8000) : 0;
+    return FX;
 }

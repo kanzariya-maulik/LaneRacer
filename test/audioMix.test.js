@@ -46,3 +46,21 @@ test('estimateLoad: accelerating → on throttle, braking → off, steady → ho
     assert.ok(l < 0.05);
     assert.ok(Number.isFinite(M.estimateLoad(0.5, NaN, 1 / 60)));
 });
+
+test('estimateLoad: near top speed small acceleration still reads as on throttle (drag eats most of the power)', () => {
+    let l = 0;
+    for (let k = 0; k < 60; k++) l = M.estimateLoad(l, 0.8, 1 / 60, 88);
+    assert.ok(l > 0.95, `load ${l.toFixed(2)} at 88 m/s, +0.8 m/s²`);
+    l = 0;
+    for (let k = 0; k < 60; k++) l = M.estimateLoad(l, 0.8, 1 / 60, 20);
+    assert.ok(l < 0.05, 'slow and barely accelerating: unchanged');
+});
+
+test('engineFx: pit-limiter stutter only on throttle; rev-limiter stutter; crackle only off-throttle above 8k', () => {
+    assert.deepStrictEqual(M.engineFx(4500, 0, true, false), { stutter: 0, crackle: 0 }, 'parked in the pit lane: idle, no stutter');
+    assert.strictEqual(M.engineFx(9000, 0.8, true, false).stutter, 12);
+    assert.strictEqual(M.engineFx(18000, 1, false, true).stutter, 30);
+    assert.strictEqual(M.engineFx(15000, 1, false, false).crackle, 0);
+    assert.ok(M.engineFx(16000, 0, false, false).crackle > 0.5);
+    assert.strictEqual(M.engineFx(6000, 0, false, false).crackle, 0);
+});

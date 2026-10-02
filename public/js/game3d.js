@@ -130,7 +130,7 @@ function isSpectator() {
 }
 
 function onKey(e, down) {
-    if (document.activeElement === chatInput) return;
+    if (e.target?.matches?.('input, textarea, select')) return; // typing a name or a chat line, not driving
     const key = e.key.toLowerCase();
     if (down && key === 't' && !e.repeat && clientState.status !== 'LOBBY') toggleTower();
     if (down && key === 'r' && !e.repeat && clientState.status !== 'LOBBY') toggleLine();
@@ -1284,25 +1284,26 @@ if (stats) document.body.appendChild(stats);
 const ownBox = new Gearbox(), remoteBoxes = new Map(), soundOthers = [];
 const ownFrame = { rpm: 0, load: 0, limiter: false, pit: false, speedMs: 0 };
 const listenerFrame = { x: 0, y: 0, fx: 1, fy: 0, vx: 0, vy: 0 }, sndFrame = { own: null, others: soundOthers, listener: listenerFrame };
+const silentFrame = { own: null, others: [], listener: listenerFrame };
 const camDir = new THREE.Vector3();
 let lastDrs = false, hudLit = -1, hudFlash = null, hudGear = '';
 function updateSound(dt) {
     const gs = clientState.gameState, me = gs[clientState.me], racing = !!me && !isSpectator();
     const followId = racing ? clientState.me : spectateId;
-    let hud = null, hudSpeed = 0;
+    let hud = null, hudSpeed = 0, followVx = 0, followVy = 0;
     soundOthers.length = 0;
     for (const id in gs) {
         if (racing && id === clientState.me) continue;
         const p = gs[id], v = p.speed / scale;
         let r = remoteBoxes.get(id);
-        if (!r) { r = { box: new Gearbox(), speed: v, load: 0, o: { id } }; remoteBoxes.set(id, r); }
-        r.load = estimateLoad(r.load, (v - r.speed) / Math.max(dt, 1e-3), dt);
+        if (!r) { r = { box: new Gearbox(), speed: v, load: v > 30 ? 1 : 0, o: { id } }; remoteBoxes.set(id, r); } // joined mid-race: a fast car is on throttle
+        r.load = estimateLoad(r.load, (v - r.speed) / Math.max(dt, 1e-3), dt, v);
         r.speed = v;
         const g = r.box.update(v, r.load, dt, !!p.limiter), o = r.o;
         o.x = p.x / scale; o.y = p.y / scale; o.vx = Math.cos(p.angle) * v; o.vy = Math.sin(p.angle) * v;
         o.rpm = g.rpm; o.load = r.load; o.limiter = g.limiter; o.pit = g.pit;
         soundOthers.push(o);
-        if (id === followId) { hud = g; hudSpeed = v; }
+        if (id === followId) { hud = g; hudSpeed = v; followVx = o.vx; followVy = o.vy; }
     }
     for (const id of remoteBoxes.keys()) if (!gs[id]) remoteBoxes.delete(id); // left the session
     sndFrame.own = null;
@@ -1314,7 +1315,7 @@ function updateSound(dt) {
         sndFrame.own = ownFrame;
         hud = g; hudSpeed = v;
         listenerFrame.vx = Math.cos(me.angle) * v; listenerFrame.vy = Math.sin(me.angle) * v;
-    } else { listenerFrame.vx = 0; listenerFrame.vy = 0; }
+    } else { listenerFrame.vx = followVx; listenerFrame.vy = followVy; } // spectator camera rides with the followed car
     camera.getWorldDirection(camDir);
     const len = Math.hypot(camDir.x, camDir.z) || 1;
     listenerFrame.x = camera.position.x / scale; listenerFrame.y = camera.position.z / scale;
@@ -1333,9 +1334,9 @@ function frame(now) {
     last = now;
     frameMs.push(dt * 1000);
     if (frameMs.length > 120) frameMs.shift();
-    if (clientState.status === 'LOBBY') return;
+    if (clientState.status === 'LOBBY') { Sound.update(silentFrame); return; } // engines and wind fade out in the lobby
     pollInput(dt);
-    if (!world || !clientState.gameState) return;
+    if (!world || !clientState.gameState) { Sound.update(silentFrame); return; }
     applyNet(now / 1000, dt);
     updateCars(dt);
     updateWheelBatch();

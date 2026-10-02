@@ -1,7 +1,8 @@
 // LanRace sound: the AudioContext, your car's V8, the 4 nearest other cars in 3D (HRTF + Doppler), one-shots, wind,
 // and the recording slot (public/sounds/manifest.json). Everything is driven by game3d.js through update()/event().
 import { pickVoices } from './voices.js';
-import { doppler, pickLoops } from './mix.js';
+import { doppler, pickLoops, engineFx } from './mix.js';
+import { V8Synth } from './v8.js';
 import * as S from './sfx.js';
 
 const MAX_OTHERS = 4, MAX_DIST_M = 300, REF_M = 15, PICK_EVERY_S = 0.25;
@@ -12,7 +13,7 @@ const store = {
 };
 
 let ctx = null, master = null, noise = null, wind = null, hasWorklet = false, starting = null, ready = false;
-let slots = {}, muted = false, ownVoice = null, lastPick = -1;
+let slots = {}, muted = false, ownVoice = null, lastPick = -1, broken = false, engineKind = 'none';
 let volume = Math.min(1, Math.max(0, +(store.get('lanrace.volume') ?? 70) / 100));
 let mode = ['all', 'mine', 'off'].includes(store.get('lanrace.engine')) ? store.get('lanrace.engine') : 'all';
 const others = new Map();   // car id → voice
@@ -42,12 +43,16 @@ export function unlock() {
     }
     master = ctx.createGain();
     master.gain.value = muted ? 0 : volume;
-    master.connect(ctx.destination);
+    const limiter = ctx.createDynamicsCompressor(); // a full grid at the start can sum past 1.0
+    limiter.threshold.value = -6; limiter.knee.value = 6; limiter.ratio.value = 12; limiter.attack.value = 0.003; limiter.release.value = 0.15;
+    master.connect(limiter).connect(ctx.destination);
     noise = S.makeNoise(ctx);
     wind = S.makeWind(ctx, master, noise);
     starting = (async () => {
-        try { await ctx.audioWorklet.addModule('js/audio/v8-worklet.js'); hasWorklet = true; }
-        catch (e) { console.warn('[LanRace] AudioWorklet unavailable, simple engine sound', e); }
+        // AudioWorklet needs a secure context (https or localhost): LAN players on http://<ip> get the same V8 synth
+        // through a ScriptProcessor instead
+        try { await ctx.audioWorklet.addModule('js/audio/v8-worklet.js'); hasWorklet = true; engineKind = 'worklet'; }
+        catch (e) { engineKind = ctx.createScriptProcessor ? 'script' : 'osc'; console.info(`[LanRace] engine sound via ${engineKind}`); }
         slots = await loadSlots();
         ready = true; // voices are only built once we know worklet vs fallback vs recordings
     })();
@@ -122,7 +127,27 @@ function makeVoice(spatial) {
             stop() { node.port.postMessage('stop'); node.disconnect(); out.disconnect(); },
         };
     }
-    // Fallback: saw at the firing frequency + square an octave down, through a low-pass
+    if (ctx.createScriptProcessor) { // same V8 synth on the main thread (insecure origins have no AudioWorklet)
+        const node = ctx.createScriptProcessor(1024, 0, 1), synth = new V8Synth(ctx.sampleRate, (Math.random() * 4294967295) >>> 0);
+        const target = { rpm: 4500, load: 0, cut: 0, stutter: 0, crackle: 0 }, p = { rpm: 4500, load: 0, cut: 0, stutter: 0, crackle: 0 };
+        let snap = true;
+        node.onaudioprocess = (e) => {
+            const out = e.outputBuffer.getChannelData(0);
+            for (let i = 0; i < out.length; i += 128) { // 128-sample sub-blocks, eased like the worklet
+                p.rpm = snap ? target.rpm : p.rpm + (target.rpm - p.rpm) * 0.35; snap = false;
+                p.load += (target.load - p.load) * 0.25;
+                p.cut = target.cut; p.stutter = target.stutter; p.crackle = target.crackle;
+                synth.render(out.subarray(i, i + 128), Math.min(128, out.length - i), p);
+            }
+        };
+        node.connect(out);
+        return {
+            out, panner,
+            set(rpm, load, cut, stutter, crackle) { target.rpm = rpm; target.load = load; target.cut = cut; target.stutter = stutter; target.crackle = crackle; },
+            stop() { node.onaudioprocess = null; node.disconnect(); out.disconnect(); },
+        };
+    }
+    // Last resort: saw at the firing frequency + square an octave down, through a low-pass
     const saw = ctx.createOscillator(), sq = ctx.createOscillator(), lp = ctx.createBiquadFilter(), mix = ctx.createGain();
     saw.type = 'sawtooth'; sq.type = 'square'; lp.type = 'lowpass'; lp.frequency.value = 3000; mix.gain.value = 0.25;
     saw.connect(lp); sq.connect(lp); lp.connect(mix).connect(out);
@@ -138,10 +163,23 @@ function makeVoice(spatial) {
     };
 }
 
-function fade(voice, gain) { voice.out.gain.setTargetAtTime(gain, ctx.currentTime, 0.05); }
+function fade(voice, gain) {
+    if (voice.target === gain) return; // only schedule on change
+    voice.target = gain;
+    voice.out.gain.setTargetAtTime(gain, ctx.currentTime, 0.05);
+}
 
+// Never let a sound problem take the renderer down: the first error switches audio off for this page
 export function update(frame) {
-    if (!ready || ctx.state !== 'running') return; // not unlocked/loaded yet, muted or hidden: nothing to do
+    if (!ready || broken || ctx.state !== 'running') return; // not unlocked/loaded yet, muted or hidden: nothing to do
+    try { mixFrame(frame); } catch (e) {
+        broken = true;
+        console.error('[LanRace] sound disabled after an error', e);
+        try { master.gain.value = 0; } catch (e2) { /* nothing more to do */ }
+    }
+}
+
+function mixFrame(frame) {
     const now = ctx.currentTime, L = frame.listener, lis = ctx.listener;
     if (lis.positionX) {
         lis.positionX.value = L.x; lis.positionY.value = 1.2; lis.positionZ.value = L.y;
@@ -156,12 +194,10 @@ export function update(frame) {
     const o = frame.own;
     if (o && mode !== 'off') {
         if (!ownVoice) ownVoice = makeVoice(false);
-        let rpm = o.rpm, load = o.load, crackle = 0;
+        let rpm = o.rpm, load = o.load;
         if (now < blipUntil) { rpm = Math.min(18000, rpm + 1500); load = 1; }
-        if (load < 0.1 && rpm > 8000) crackle = Math.min(1, (rpm - 8000) / 8000);
-        if (now < crackleUntil) crackle = 1;
-        const stutter = o.pit ? 12 : o.limiter ? 30 : 0;
-        ownVoice.set(rpm, load, now < cutUntil ? 1 : 0, stutter, crackle);
+        const fx = engineFx(rpm, load, o.pit, o.limiter);
+        ownVoice.set(rpm, load, now < cutUntil ? 1 : 0, fx.stutter, now < crackleUntil ? 1 : fx.crackle);
         fade(ownVoice, OWN_GAIN);
     } else if (ownVoice) fade(ownVoice, 0);
     wind.set(o ? o.speedMs : 0);
@@ -181,8 +217,8 @@ export function update(frame) {
             const vr = ((c.vx - L.vx) * dx + (c.vy - L.vy) * dy) / d; // > 0: moving away
             if (v.panner.positionX) { v.panner.positionX.value = c.x; v.panner.positionY.value = 0.5; v.panner.positionZ.value = c.y; }
             else v.panner.setPosition(c.x, 0.5, c.y);
-            const crackle = c.load < 0.1 && c.rpm > 8000 ? Math.min(1, (c.rpm - 8000) / 8000) : 0;
-            v.set(c.rpm * doppler(vr), c.load, 0, c.pit ? 12 : c.limiter ? 30 : 0, crackle);
+            const fx = engineFx(c.rpm, c.load, c.pit, c.limiter);
+            v.set(c.rpm * doppler(vr), c.load, 0, fx.stutter, fx.crackle);
             fade(v, OTHER_GAIN);
         }
     } else if (others.size) {
@@ -196,11 +232,12 @@ export function event(name) {
     const now = ctx.currentTime;
     if (name === 'shift_up') { cutUntil = now + 0.025; }
     if (name === 'shift_down') { blipUntil = now + 0.06; crackleUntil = now + 0.15; }
+    if ((name === 'shift_up' || name === 'shift_down') && mode === 'off') return;
     if (slots[name] && !Array.isArray(slots[name])) return S.playBuffer(ctx, master, slots[name]);
     if (name === 'beep') S.beep(ctx, master, 1000, 0.12);
     else if (name === 'lights_out') S.beep(ctx, master, 1600, 0.3);
     else if (name === 'drs') S.clunk(ctx, master, noise);
-    else if (name === 'shift_up' && mode !== 'off') S.bark(ctx, master, noise);
+    else if (name === 'shift_up') S.bark(ctx, master, noise);
 }
 
 export function setVolume(v) {
@@ -225,5 +262,6 @@ export function toggleMute() {
 }
 
 export function debug() {
-    return { state: ctx ? ctx.state : 'none', worklet: hasWorklet, voices: (ownVoice ? 1 : 0) + others.size, slots: Object.keys(slots), mode, volume, muted };
+    const audible = (ownVoice && ownVoice.target > 0 ? 1 : 0) + [...others.values()].filter((v) => v.target > 0).length;
+    return { state: ctx ? ctx.state : 'none', worklet: hasWorklet, engine: engineKind, voices: (ownVoice ? 1 : 0) + others.size, audible, slots: Object.keys(slots), mode, volume, muted, broken };
 }
