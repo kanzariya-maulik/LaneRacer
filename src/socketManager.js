@@ -1,6 +1,7 @@
 const Game = require('./game/Game');
 const Track = require('./game/Track');
 const lobby = require('./lobby');
+const { withNetSim } = require('./netsim');
 
 const TRACKS = Track.loadAll(); // throws at startup if track data is missing
 const RESULTS_MS = 8000;
@@ -22,6 +23,7 @@ function applyInput(id, inputData) {
     if (batch) gameInstance.handleInputs(id, batch);
     else gameInstance.handleInput(id, lobby.sanitizeInput(inputData));
 }
+const applyInputLater = withNetSim(applyInput); // NET_SIM: fake WiFi on incoming inputs too
 
 // Every session timer goes through later() so an empty server can cancel them all at once
 const timers = new Set();
@@ -51,7 +53,7 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
         console.log(`Player connected: ${socket.id}`);
         // WebRTC signalling over Socket.IO; inputs arriving on the UDP DataChannel go to the game like socket inputs
         net.setupPeer(socket, (id, inputData) => {
-            applyInput(id, inputData);
+            applyInputLater(id, inputData);
         });
         // Visitors see live team counts before they join
         socket.emit('lobby_state_sync', lobbySnapshot());
@@ -121,7 +123,7 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
         socket.on('input', (inputData) => {
             // Fallback while the UDP channel isn't open. Accepted in every session phase; a frozen race keeps it until lights out
             if (net.hasOpenChannel(socket.id)) return;
-            applyInput(socket.id, inputData);
+            applyInputLater(socket.id, inputData);
         });
 
         socket.on('disconnect', () => {

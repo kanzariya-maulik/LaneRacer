@@ -1,5 +1,6 @@
 const Physics = require('./Physics');
 const Drive = require('../../public/js/sim/drive.js');
+const Ticker = require('../ticker');
 const { pointAt } = require('./Track');
 
 const TICK_RATE = 60;
@@ -34,7 +35,7 @@ class Game {
         this.time = 0;                     // race clock (s), starts at lights out
         this.clock = 0;                    // session clock (s) for client interpolation, never frozen
         this.frozen = mode === 'race';     // race: lights still on — cars can move, but that's a jump start
-        this.loopPath = null;
+        this.ticker = null;
         this.winnerCount = 0;
         this.bestSectors = [null, null, null]; // session bests, valid laps only
         this.lastDetect = [];                  // per DRS zone: time the last car crossed its detection point
