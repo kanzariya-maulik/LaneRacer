@@ -114,16 +114,30 @@ function remembered(id, key, fallback, onChange) {
 remembered('others-select', 'lanrace.others', 'present');
 remembered('autobrake-select', 'lanrace.autobrake', 'off');
 
+function updateSliderTrack(slider) {
+    if (!slider) return;
+    const min = parseFloat(slider.min) || 0;
+    const max = parseFloat(slider.max) || 100;
+    const val = parseFloat(slider.value) || 0;
+    const pct = Math.max(0, Math.min(100, ((val - min) / (max - min)) * 100));
+    slider.style.setProperty('--fill-pct', `${pct}%`);
+}
+
 const volumeRange = document.getElementById('volume-range');
 const volumeVal = document.getElementById('volume-val');
 try {
     const v = localStorage.getItem('lanrace.volume') ?? 70;
-    if (volumeRange) volumeRange.value = v;
+    if (volumeRange) {
+        volumeRange.value = v;
+        updateSliderTrack(volumeRange);
+    }
     if (volumeVal) volumeVal.textContent = `${v}%`;
 } catch (e) {}
 if (volumeRange) {
+    updateSliderTrack(volumeRange);
     volumeRange.addEventListener('input', () => {
         if (volumeVal) volumeVal.textContent = `${volumeRange.value}%`;
+        updateSliderTrack(volumeRange);
         window.lanraceAudio?.setVolume(volumeRange.value / 100);
         try { localStorage.setItem('lanrace.volume', volumeRange.value); } catch (e) {}
     });
@@ -139,10 +153,12 @@ if (musicVolumeRange) {
     try {
         const mv = localStorage.getItem('lanrace.musicVolume') ?? 50;
         musicVolumeRange.value = mv;
+        updateSliderTrack(musicVolumeRange);
         if (musicVolumeVal) musicVolumeVal.textContent = `${mv}%`;
     } catch (e) {}
     musicVolumeRange.addEventListener('input', () => {
         if (musicVolumeVal) musicVolumeVal.textContent = `${musicVolumeRange.value}%`;
+        updateSliderTrack(musicVolumeRange);
         window.lanraceAudio?.setMusicVolume(musicVolumeRange.value / 100);
         try { localStorage.setItem('lanrace.musicVolume', musicVolumeRange.value); } catch (e) {}
     });
@@ -175,9 +191,15 @@ function parseAssistVal(v) {
 
 window.setAssist = (v) => {
     const { steer, brake } = parseAssistVal(v);
-    if (assistSteerSlider) assistSteerSlider.value = steer;
+    if (assistSteerSlider) {
+        assistSteerSlider.value = steer;
+        updateSliderTrack(assistSteerSlider);
+    }
     if (assistSteerVal) assistSteerVal.textContent = `${steer}%`;
-    if (assistBrakeSlider) assistBrakeSlider.value = brake;
+    if (assistBrakeSlider) {
+        assistBrakeSlider.value = brake;
+        updateSliderTrack(assistBrakeSlider);
+    }
     if (assistBrakeVal) assistBrakeVal.textContent = `${brake}%`;
 
     const str = `${steer},${brake}`;
@@ -195,6 +217,8 @@ function getAssistValStr() {
 }
 
 function updateAssistFromSliders() {
+    if (assistSteerSlider) updateSliderTrack(assistSteerSlider);
+    if (assistBrakeSlider) updateSliderTrack(assistBrakeSlider);
     window.setAssist(getAssistValStr());
 }
 
@@ -316,6 +340,7 @@ function getTeamMembers() {
 
 const teamPreviewCard = document.getElementById('team-preview-card');
 const teamPreviewImg = document.getElementById('team-preview-img');
+const lobbyCarBgImg = document.getElementById('lobby-car-bg-img');
 const teamPreviewName = document.getElementById('team-preview-name');
 const teamPreviewCar = document.getElementById('team-preview-car');
 const btnOpenTeamModal = document.getElementById('btn-open-team-modal');
@@ -346,11 +371,11 @@ teamSelectModal?.addEventListener('click', (e) => {
 
 function updateTeamPreview() {
     const active = teams.find(t => t.id === selectedTeam) || teams[0];
-    if (active && teamPreviewName) {
-        teamPreviewName.textContent = active.name;
+    if (active) {
+        if (teamPreviewName) teamPreviewName.textContent = active.name;
         if (teamPreviewCar) teamPreviewCar.textContent = active.car;
-        if (teamPreviewImg) teamPreviewImg.src = `liveries/${active.id}-thumb.png`;
         if (teamPreviewCard) teamPreviewCard.style.borderColor = active.chatColor || '#3b82f6';
+        window.set3DShowroomTeam?.(active.id);
     }
 }
 

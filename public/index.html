@@ -12,7 +12,11 @@
     <!-- LOBBY SCREEN -->
     <div id="lobby-screen" class="screen">
         <div class="lobby-container">
-            <h1 class="glow-title">LAN RACE</h1>
+            <!-- Header with 3D Spinning Car to the left of LAN RACE title -->
+            <div class="lobby-header-showroom">
+                <canvas id="lobby-3d-canvas" class="lobby-3d-canvas"></canvas>
+                <h1 class="glow-title">LAN RACE</h1>
+            </div>
             
             <div class="lobby-panels">
                 <!-- Left Panel: Settings & Profile (Top Bar + 3 Columns) -->
@@ -25,7 +29,7 @@
                         </div>
 
                         <div id="team-preview-card" class="team-preview-card" onclick="window.openTeamModal?.()" title="Click to change team">
-                            <img id="team-preview-img" src="liveries/redbull-thumb.png" alt="Car Livery" class="team-preview-thumb">
+                            <span id="team-preview-dot" class="team-preview-dot">🏎️</span>
                             <span id="team-preview-name" class="team-preview-name">Mercedes</span>
                             <span id="team-preview-car" class="team-preview-car">W14</span>
                         </div>
@@ -362,6 +366,7 @@
     <script src="/socket.io/socket.io.js"></script>
     <script src="js/socket.js"></script>
     <script src="js/app.js"></script>
+    <script type="module" src="js/showroom3d.js"></script>
     <script type="module" src="js/game3d.js"></script>
 </body>
 </html>
