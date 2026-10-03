@@ -55,7 +55,8 @@ const btnStart = document.getElementById('btn-start');
 const inputUser = document.getElementById('username');
 const teamGrid = document.getElementById('team-grid');
 const controlsPanel = document.getElementById('player-controls');
-const hostSettings = document.getElementById('host-settings');
+const hostSettingsColumn = document.getElementById('host-settings-column');
+const hostStatusBadge = document.getElementById('host-status-badge');
 
 const setTrack = document.getElementById('setting-track');
 const setLaps = document.getElementById('setting-laps');
@@ -82,8 +83,11 @@ if (!graphicsSelect.value) graphicsSelect.value = 'auto';
 graphicsSelect.addEventListener('change', () => {
     (window.lanraceMem ||= {})['lanrace.quality'] = graphicsSelect.value; // applies even when storage is blocked
     try { localStorage.setItem('lanrace.quality', graphicsSelect.value); } catch (e) { /* not remembered */ }
-    document.getElementById('graphics-note').textContent = graphicsSelect.value === 'high' || window.lanraceQuality?.level === 'high'
-        ? ' Applies next race (anti-aliasing after a page reload)' : ' Applies next race';
+    const gNote = document.getElementById('graphics-note');
+    if (gNote) {
+        gNote.textContent = graphicsSelect.value === 'high' || window.lanraceQuality?.level === 'high'
+            ? ' Applies next race (anti-aliasing after a page reload)' : ' Applies next race';
+    }
 });
 const lineSelect = document.getElementById('line-select');
 try { lineSelect.value = localStorage.getItem('lanrace.line') || 'corners'; } catch (e) { /* storage blocked: default */ }
@@ -109,16 +113,39 @@ function remembered(id, key, fallback, onChange) {
 }
 remembered('others-select', 'lanrace.others', 'present');
 remembered('autobrake-select', 'lanrace.autobrake', 'off');
+
 const volumeRange = document.getElementById('volume-range');
-try { volumeRange.value = localStorage.getItem('lanrace.volume') ?? 70; } catch (e) { /* default */ }
-volumeRange.addEventListener('input', () => window.lanraceAudio?.setVolume(volumeRange.value / 100));
+const volumeVal = document.getElementById('volume-val');
+try {
+    const v = localStorage.getItem('lanrace.volume') ?? 70;
+    if (volumeRange) volumeRange.value = v;
+    if (volumeVal) volumeVal.textContent = `${v}%`;
+} catch (e) {}
+if (volumeRange) {
+    volumeRange.addEventListener('input', () => {
+        if (volumeVal) volumeVal.textContent = `${volumeRange.value}%`;
+        window.lanraceAudio?.setVolume(volumeRange.value / 100);
+        try { localStorage.setItem('lanrace.volume', volumeRange.value); } catch (e) {}
+    });
+}
+
 remembered('engine-select', 'lanrace.engine', 'all', (v) => window.lanraceAudio?.setMode(v));
 remembered('engine-type-select', 'lanrace.engineType', 'v6', (v) => window.lanraceAudio?.setEngineType(v));
 remembered('music-select', 'lanrace.music', 'off', (v) => window.lanraceAudio?.setMusicTrack(v));
+
 const musicVolumeRange = document.getElementById('music-volume-range');
+const musicVolumeVal = document.getElementById('music-volume-val');
 if (musicVolumeRange) {
-    try { musicVolumeRange.value = localStorage.getItem('lanrace.musicVolume') ?? 50; } catch (e) {}
-    musicVolumeRange.addEventListener('input', () => window.lanraceAudio?.setMusicVolume(musicVolumeRange.value / 100));
+    try {
+        const mv = localStorage.getItem('lanrace.musicVolume') ?? 50;
+        musicVolumeRange.value = mv;
+        if (musicVolumeVal) musicVolumeVal.textContent = `${mv}%`;
+    } catch (e) {}
+    musicVolumeRange.addEventListener('input', () => {
+        if (musicVolumeVal) musicVolumeVal.textContent = `${musicVolumeRange.value}%`;
+        window.lanraceAudio?.setMusicVolume(musicVolumeRange.value / 100);
+        try { localStorage.setItem('lanrace.musicVolume', musicVolumeRange.value); } catch (e) {}
+    });
 }
 
 // 2 Independent Assist Sliders (Steering & Braking, 0-100%)
@@ -396,7 +423,19 @@ renderTeamGrid();
 function setJoinedUI(joined) {
     isJoined = joined;
     btnJoin.classList.toggle('hidden', joined);
-    controlsPanel.classList.toggle('hidden', !joined);
+    const amHost = clientState.hostId === clientState.me;
+    if (joined) {
+        if (amHost) {
+            btnStart.classList.remove('hidden');
+            btnReady.classList.add('hidden');
+        } else {
+            btnReady.classList.remove('hidden');
+            btnStart.classList.add('hidden');
+        }
+    } else {
+        btnReady.classList.add('hidden');
+        btnStart.classList.add('hidden');
+    }
     renderTeamGrid();
 }
 
@@ -490,6 +529,7 @@ window.updateLobbyUI = () => {
 
         const statusNode = document.createElement('span');
         statusNode.className = 'player-status';
+
         if (player.isSpectating) {
             statusNode.classList.add('spectating');
             statusNode.textContent = 'Spectating';
@@ -522,9 +562,23 @@ window.updateLobbyUI = () => {
     }
 
     if (amHost) {
-        hostSettings.classList.remove('hidden');
+        if (hostSettingsColumn) {
+            hostSettingsColumn.classList.add('is-host');
+            hostSettingsColumn.classList.remove('is-non-host');
+        }
+        if (hostStatusBadge) {
+            hostStatusBadge.textContent = '👑 Host';
+            hostStatusBadge.className = 'host-badge host-active';
+        }
+        if (setTrack) setTrack.disabled = false;
+        if (setLaps) setLaps.disabled = false;
+        if (setQuali) setQuali.disabled = false;
+        if (setCollisions) setCollisions.disabled = false;
+        if (setBot) setBot.disabled = false;
+
         btnReady.classList.add('hidden');
-        btnStart.classList.remove('hidden');
+        if (isJoined) btnStart.classList.remove('hidden');
+        else btnStart.classList.add('hidden');
 
         if (!window._hasEmittedSavedSettings) {
             window._hasEmittedSavedSettings = true;
@@ -534,7 +588,20 @@ window.updateLobbyUI = () => {
             } catch (e) {}
         }
     } else {
-        hostSettings.classList.add('hidden');
+        if (hostSettingsColumn) {
+            hostSettingsColumn.classList.add('is-non-host');
+            hostSettingsColumn.classList.remove('is-host');
+        }
+        if (hostStatusBadge) {
+            hostStatusBadge.textContent = '🔒 Host Only';
+            hostStatusBadge.className = 'host-badge host-locked';
+        }
+        if (setTrack) setTrack.disabled = true;
+        if (setLaps) setLaps.disabled = true;
+        if (setQuali) setQuali.disabled = true;
+        if (setCollisions) setCollisions.disabled = true;
+        if (setBot) setBot.disabled = true;
+
         btnStart.classList.add('hidden');
         if (isJoined) btnReady.classList.remove('hidden');
         else btnReady.classList.add('hidden');

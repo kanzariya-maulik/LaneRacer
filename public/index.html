@@ -15,114 +15,123 @@
             <h1 class="glow-title">LAN RACE</h1>
             
             <div class="lobby-panels">
-                <!-- Left Panel: Settings & Profile (3 Columns + Host Settings) -->
+                <!-- Left Panel: Settings & Profile (Top Bar + 3 Columns) -->
                 <div class="panel profile-panel">
-                    <h2>Driving & Lobby Configuration</h2>
-
-                    <div class="settings-grid-3col">
-                        <!-- Column 1: Profile & Join Actions -->
-                        <div class="settings-column-card">
-                            <h3 class="column-title">👤 Driver Profile</h3>
-                            
-                            <label class="setting-field">
-                                <span class="setting-label">Driver Name</span>
-                                <input type="text" id="username" placeholder="Username" maxlength="15">
-                            </label>
-                            
-                            <div class="team-preview-container">
-                                <span class="setting-label">Team & Livery</span>
-                                <div id="team-preview-card" class="team-preview-card" onclick="window.openTeamModal?.()" title="Click to change team">
-                                    <img id="team-preview-img" src="liveries/redbull-thumb.png" alt="Car Livery">
-                                    <div class="team-preview-info">
-                                        <span id="team-preview-name" class="team-preview-name">Red Bull Racing</span>
-                                        <span id="team-preview-car" class="team-preview-car">RB19</span>
-                                    </div>
-                                    <button type="button" id="btn-open-team-modal" onclick="event.stopPropagation(); window.openTeamModal?.()" class="btn small primary">Change</button>
-                                </div>
-                            </div>
-
-                            <div class="action-buttons-box">
-                                <button id="btn-join" class="btn primary">Join Lobby</button>
-                                <div id="player-controls" class="hidden flex-row gap-2">
-                                    <button id="btn-ready" class="btn success">Ready Up</button>
-                                    <button id="btn-start" class="btn success hidden">Start Race</button>
-                                </div>
-                            </div>
-
-                            <div class="assist-sliders-box mt-1">
-                                <label class="graphics-picker">Steering Assist: <span id="assist-steer-val">100%</span>
-                                    <input type="range" id="assist-steer-slider" min="0" max="100" value="100" step="1">
-                                </label>
-                                <label class="graphics-picker">Braking Assist: <span id="assist-brake-val">100%</span>
-                                    <input type="range" id="assist-brake-slider" min="0" max="100" value="100" step="1">
-                                </label>
-                            </div>
+                    <!-- Top Profile & Actions Header Bar -->
+                    <div class="profile-top-bar">
+                        <div class="profile-user-group">
+                            <span class="profile-title-label">Your Profile</span>
+                            <input type="text" id="username" placeholder="Username" maxlength="15" autocomplete="off">
                         </div>
 
-                        <!-- Column 2: Visuals & Handling -->
-                        <div class="settings-column-card">
-                            <h3 class="column-title">🎮 Visuals & Handling</h3>
-                            
-                            <label class="graphics-picker">Graphics Quality:
-                                <select id="graphics-select">
+                        <div id="team-preview-card" class="team-preview-card" onclick="window.openTeamModal?.()" title="Click to change team">
+                            <img id="team-preview-img" src="liveries/redbull-thumb.png" alt="Car Livery" class="team-preview-thumb">
+                            <span id="team-preview-name" class="team-preview-name">Mercedes</span>
+                            <span id="team-preview-car" class="team-preview-car">W14</span>
+                        </div>
+
+                        <button type="button" id="btn-open-team-modal" onclick="event.stopPropagation(); window.openTeamModal?.()" class="btn-top-select">Select Team</button>
+
+                        <div class="top-action-controls">
+                            <button id="btn-join" class="btn-top-action btn-join">Join Lobby</button>
+                            <button id="btn-ready" class="btn-top-action btn-ready hidden">Ready Up</button>
+                            <button id="btn-start" class="btn-top-action btn-start hidden">Start Race</button>
+                        </div>
+                    </div>
+
+                    <!-- 3-Column Settings Layout -->
+                    <div class="settings-grid-3col">
+                        <!-- Column 1: DRIVING AND DISPLAY -->
+                        <div class="settings-column">
+                            <h3 class="column-heading">DRIVING AND DISPLAY</h3>
+
+                            <div class="setting-item">
+                                <label for="graphics-select">Graphics</label>
+                                <select id="graphics-select" class="custom-select">
                                     <option value="auto" selected>Auto</option>
                                     <option value="low">Low</option>
                                     <option value="medium">Medium</option>
                                     <option value="high">High</option>
                                 </select>
-                            </label>
-                            
-                            <label class="graphics-picker">Racing Line:
-                                <select id="line-select">
+                            </div>
+
+                            <div class="setting-item">
+                                <label for="line-select">Racing line</label>
+                                <select id="line-select" class="custom-select">
                                     <option value="off">Off</option>
                                     <option value="corners" selected>Corners only</option>
-                                    <option value="full">Full Track</option>
+                                    <option value="full">Full</option>
                                 </select>
-                            </label>
-                            
-                            <label class="graphics-picker">Other Cars Netplay:
-                                <select id="others-select">
-                                    <option value="present" selected>Real Position</option>
-                                    <option value="smooth">Smoothest</option>
-                                </select>
-                            </label>
-                            
-                            <label class="graphics-picker">Release W to Brake:
-                                <select id="autobrake-select">
+                            </div>
+
+                            <div class="setting-item">
+                                <div class="setting-slider-header">
+                                    <label for="assist-steer-slider">Steering Assist</label>
+                                    <span id="assist-steer-val" class="slider-val">100%</span>
+                                </div>
+                                <input type="range" id="assist-steer-slider" min="0" max="100" value="100" step="1" class="custom-slider">
+                            </div>
+
+                            <div class="setting-item">
+                                <div class="setting-slider-header">
+                                    <label for="assist-brake-slider">Braking Assist</label>
+                                    <span id="assist-brake-val" class="slider-val">100%</span>
+                                </div>
+                                <input type="range" id="assist-brake-slider" min="0" max="100" value="100" step="1" class="custom-slider">
+                            </div>
+
+                            <div class="setting-item">
+                                <label for="autobrake-select">Release W to Brake</label>
+                                <select id="autobrake-select" class="custom-select">
                                     <option value="off" selected>Off</option>
                                     <option value="on">On (Lift W = Brake)</option>
                                 </select>
-                            </label>
+                            </div>
+
+                            <div class="setting-item">
+                                <label for="others-select">Other cars</label>
+                                <select id="others-select" class="custom-select">
+                                    <option value="present" selected>Real Position</option>
+                                    <option value="smooth">Smoothest</option>
+                                </select>
+                            </div>
                         </div>
 
-                        <!-- Column 3: Audio & Music Settings -->
-                        <div class="settings-column-card">
-                            <h3 class="column-title">🎵 Sound & Music</h3>
-                            
-                            <label class="graphics-picker">Engine Sound Style:
-                                <select id="engine-type-select">
+                        <!-- Column 2: AUDIO -->
+                        <div class="settings-column">
+                            <h3 class="column-heading">AUDIO</h3>
+
+                            <div class="setting-item">
+                                <div class="setting-slider-header">
+                                    <label for="volume-range">Sound volume</label>
+                                    <span id="volume-val" class="slider-val">70%</span>
+                                </div>
+                                <input type="range" id="volume-range" min="0" max="100" value="70" class="custom-slider">
+                            </div>
+
+                            <div class="setting-item">
+                                <label for="engine-select">Engine sound</label>
+                                <select id="engine-select" class="custom-select">
+                                    <option value="all" selected>All cars</option>
+                                    <option value="mine">Mine only</option>
+                                    <option value="off">Off</option>
+                                </select>
+                            </div>
+
+                            <div class="setting-item">
+                                <label for="engine-type-select">Engine Sound Style</label>
+                                <select id="engine-type-select" class="custom-select">
                                     <option value="v6" selected>F1 1.6L V6 Turbo (Modern Growl & Turbo)</option>
                                     <option value="muscle">7.0L V8 Muscle (Deep Bass Rumble & Thump)</option>
                                     <option value="screamer">F1 Classic Screamer (High-RPM Howl)</option>
                                     <option value="rotary">2.6L 4-Rotor Wankel (787B Shriek)</option>
                                     <option value="boxer">4.0L Flat-6 GT3 (Throaty Boxer Rasp)</option>
                                 </select>
-                            </label>
-                            
-                            <label class="graphics-picker">Engine Audio Mode:
-                                <select id="engine-select">
-                                    <option value="all" selected>All cars</option>
-                                    <option value="mine">Mine only</option>
-                                    <option value="off">Off</option>
-                                </select>
-                            </label>
-                            
-                            <label class="graphics-picker">Sound Volume:
-                                <input type="range" id="volume-range" min="0" max="100" value="70">
-                            </label>
-                            
-                            <label class="graphics-picker">Race Music Track:
-                                <select id="music-select">
+                            </div>
+
+                            <div class="setting-item">
+                                <label for="music-select">Race Music</label>
+                                <select id="music-select" class="custom-select">
                                     <option value="off" selected>Off (Engine Only)</option>
                                     <option value="synthwave">Synthwave Velocity</option>
                                     <option value="eurobeat">Eurobeat Rush</option>
@@ -130,51 +139,64 @@
                                     <option value="arcade">8-Bit Arcade Sprint</option>
                                     <option value="lofi">Sunset Cruise (Chill)</option>
                                 </select>
-                            </label>
-                            
-                            <label class="graphics-picker">Music Volume:
-                                <input type="range" id="music-volume-range" min="0" max="100" value="50">
-                            </label>
+                            </div>
+
+                            <div class="setting-item">
+                                <div class="setting-slider-header">
+                                    <label for="music-volume-range">Music Volume</label>
+                                    <span id="music-volume-val" class="slider-val">50%</span>
+                                </div>
+                                <input type="range" id="music-volume-range" min="0" max="100" value="50" class="custom-slider">
+                            </div>
                         </div>
-                    </div>
-                    
-                    <!-- Host Settings Section (Displayed below the 3 columns) -->
-                    <div id="host-settings" class="hidden host-settings-card mt-1">
-                        <div class="host-header-bar">
-                            <h3>👑 Host Race Settings</h3>
-                        </div>
-                        <div class="settings-grid-host">
-                            <label>Track:
-                                <select id="setting-track">
-                                    <option value="monza">Monza</option>
+
+                        <!-- Column 3: HOST SETTINGS (Always visible, locked for non-host) -->
+                        <div id="host-settings-column" class="settings-column host-settings-column">
+                            <div class="column-heading-wrapper">
+                                <h3 class="column-heading">HOST SETTINGS</h3>
+                                <span id="host-status-badge" class="host-badge">Host Only</span>
+                            </div>
+
+                            <div class="setting-item">
+                                <label for="setting-track">Track</label>
+                                <select id="setting-track" class="custom-select">
+                                    <option value="monza" selected>Monza</option>
                                     <option value="spa">Spa-Francorchamps</option>
                                     <option value="silverstone">Silverstone</option>
                                     <option value="suzuka">Suzuka</option>
                                     <option value="sakhir">Bahrain (Sakhir)</option>
                                 </select>
-                            </label>
-                            <label>Qualifying:
-                                <select id="setting-quali">
+                            </div>
+
+                            <div class="setting-item">
+                                <label for="setting-laps">Laps</label>
+                                <input type="number" id="setting-laps" min="1" max="50" value="3" class="custom-input">
+                            </div>
+
+                            <div class="setting-item">
+                                <label for="setting-quali">Qualifying</label>
+                                <select id="setting-quali" class="custom-select">
                                     <option value="2" selected>On (out-lap + 2 laps)</option>
                                     <option value="1">On (out-lap + 1 lap)</option>
                                     <option value="0">Off</option>
                                 </select>
-                            </label>
-                            <label>Laps:
-                                <input type="number" id="setting-laps" min="1" max="50" value="3">
-                            </label>
-                            <label>Collisions:
-                                <select id="setting-collisions">
+                            </div>
+
+                            <div class="setting-item">
+                                <label for="setting-collisions">Collisions</label>
+                                <select id="setting-collisions" class="custom-select">
                                     <option value="1" selected>On</option>
                                     <option value="0">Off (ghost cars)</option>
                                 </select>
-                            </label>
-                            <label>AI Computer Car:
-                                <select id="setting-bot">
+                            </div>
+
+                            <div class="setting-item">
+                                <label for="setting-bot">AI Computer Car</label>
+                                <select id="setting-bot" class="custom-select">
                                     <option value="0" selected>Off</option>
                                     <option value="1">On (1 AI Bot)</option>
                                 </select>
-                            </label>
+                            </div>
                         </div>
                     </div>
                 </div>
