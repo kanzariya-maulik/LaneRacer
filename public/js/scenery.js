@@ -1,5 +1,5 @@
 // Deterministic trackside scenery from the circuit's own shape. Pure, shared by game3d.js and the node tests.
-export const WALL_OFFSET = 80;          // world units past the track edge (src/game/Game.js)
+export const WALL_OFFSET = 80;          // world units past the track edge (public/js/sim/drive.js)
 const SLOW_MS = 150 / 3.6;              // corners slower than this get gravel, tyre walls, a grandstand
 const TEXTS = ['LAN RACE', 'FULL SEND', 'DRS ZONE', 'BOX BOX', 'LIGHTS OUT', 'PUSH PUSH'];
 

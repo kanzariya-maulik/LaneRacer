@@ -15,12 +15,12 @@ import { MODES, segmentColor, cornerMask, aheadM, trackIndex, nextMode } from '.
 
 // World units per metre come from the track JSON (track.scale = 6).
 const WHEEL_RADIUS_M = 0.36;  // scripts/car_parts.py WHEEL_RADIUS
-const WALL_OFFSET = 80;       // src/game/Player.js invisible wall beyond the track edge
+const WALL_OFFSET = 80;       // public/js/sim/drive.js barrier beyond the track edge
 const CHASE_BACK_M = 10, CHASE_UP_M = 4, LOOK_AHEAD_M = 6;
 const CAM_TURN_SMOOTH = 8; // 1/s; time-based so lag doesn't grow at low frame rates
-const KERB_TURN = 0.05;
-const TAG_FULL_M = 40, TAG_GONE_M = 120; // name labels fade out between these camera distances       // rad per path segment (~10 m) → radius under ~200 m gets kerbs
-const PIT_RUNOFF_M = 2; // src/game/Game.js barrier outside the pit lane
+const KERB_TURN = 0.05;       // rad per path segment (~10 m) → radius under ~200 m gets kerbs
+const TAG_FULL_M = 40, TAG_GONE_M = 120; // name labels fade out between these camera distances
+const PIT_RUNOFF_M = 2; // public/js/sim/drive.js barrier outside the pit lane
 const teamInfo = {};
 fetch('teams.json').then(r => r.json()).then((list) => { for (const t of list) teamInfo[t.id] = t; });
 

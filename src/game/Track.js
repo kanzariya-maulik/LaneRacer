@@ -7,15 +7,15 @@ const RacingLine = require('./RacingLine');
 const TRACK_IDS = ['monza', 'spa', 'silverstone', 'suzuka', 'sakhir'];
 const DATA_DIR = path.join(__dirname, '..', '..', 'data', 'tracks');
 const CHECKPOINT_COUNT = 16;
-const GRID_SLOTS = 20;
+const GRID_SLOTS = 22; // 11 teams x 2 drivers
 const GRID_GAP_M = 8;  // metres between consecutive (staggered) grid slots
-const WALL_OFFSET = 80; // matches the invisible wall in Game.js
+const WALL_OFFSET = 80; // matches public/js/sim/drive.js
 // 2022 constructors' order, then the Suzuka special in its own garage
 const GARAGE_ORDER = ['redbull', 'ferrari', 'mercedes', 'alpine', 'mclaren', 'alfaromeo', 'astonmartin', 'haas', 'alphatauri', 'williams', 'redbull-suzuka'];
 const GARAGE_PITCH_M = 18;
 const BOX_GAP_M = 9;
 const CLOSE_RAMP_M = 60;  // the barrier angles back this far, so a car meeting it glances off onto the track
-const PIT_RUNOFF_M = 2;   // matches Game.js
+const PIT_RUNOFF_M = 2;   // matches public/js/sim/drive.js
 const WALL_CLEAR_M = 0.5; // pit wall only where it stays this far off the track edge
 
 // cum[i] = distance along the loop to path[i]; cum[n] = full lap length
@@ -68,8 +68,9 @@ function buildPit(raw, circuit, track) {
         if (run.length > wall.length) { wall = run; wallFrom = runFrom; }
     }
 
-    // Garages centred on the start line (slid along if needed to stay beside the pit wall),
-    // garage 1 nearest the pit exit; boxes in the lane on the garage side
+    // Garages centred on the start line (slid along if needed to stay beside the pit wall), garage 1 nearest the
+    // pit exit, or the pit entry where circuits.json says garagesFrom: "entry"; boxes in the lane on the garage side
+    const dir = circuit.garagesFrom === 'entry' ? -1 : 1;
     const pitch = GARAGE_PITCH_M * scale, reach = 5.5 * pitch;
     const wallLo = cum[wallFrom], wallHi = cum[wallFrom + Math.max(0, wall.length - 1)];
     // Limiter only where the pit wall keeps track cars out of the pit lane
@@ -77,7 +78,7 @@ function buildPit(raw, circuit, track) {
     const margin = reach + 5 * scale;
     const centre = Math.max(wallLo + margin, Math.min(startOnPit, wallHi - margin));
     const garages = GARAGE_ORDER.map((teamId, k) => {
-        const s = centre + (5 - k) * pitch;
+        const s = centre + dir * (5 - k) * pitch;
         const c = pointAt(pts, cum, s, false);
         const boxes = [-1, 1].map((d) => lateral(pointAt(pts, cum, s + (d * BOX_GAP_M * scale) / 2, false), (-trackSide * half) / 2));
         return { teamId, s, x: c.x, y: c.y, angle: c.angle, boxes };
@@ -122,11 +123,13 @@ function build(raw, circuit = {}) {
         }
     }
 
-    // Staggered two-column grid behind the start line; -1 = driver's left (y points down the screen)
+    // Staggered two-column grid behind the start line, or behind a separate grid line where the circuit has one
+    // (gridLineM metres past the timing line: Monza, Suzuka); -1 = driver's left (y points down the screen)
+    const gridS = startS + (circuit.gridLineM || 0) * scale;
     const pole = circuit.poleSide === 'right' ? 1 : -1;
     const startPositions = [];
     for (let i = 0; i < GRID_SLOTS; i++) {
-        const p = pointAt(pts, cum, startS - (i + 1) * GRID_GAP_M * scale);
+        const p = pointAt(pts, cum, gridS - (i + 1) * GRID_GAP_M * scale);
         startPositions.push(lateral(p, (i % 2 === 0 ? pole : -pole) * (width / 4)));
     }
 

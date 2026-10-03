@@ -290,8 +290,9 @@ test('race cars still start on the grid', () => {
 });
 
 test('quali: out-lap from the garage; timing starts at the first line crossing after pit exit', () => {
-    // redbull-suzuka is the last garage, before the line, so the car crosses the line in the pit lane
-    const g = new Game(io, [lp('a', 'redbull-suzuka')], monza, QUALI, () => {}, 'quali');
+    // The garage furthest from pit exit is before the line, so the car crosses the line in the pit lane
+    const first = monza.pit.garages.reduce((a, b) => (b.s < a.s ? b : a)).teamId;
+    const g = new Game(io, [lp('a', first)], monza, QUALI, () => {}, 'quali');
     const p = g.players.a, pit = monza.pit;
     const from = Physics.nearestOnPath(p.x, p.y, pit.path, false).i;
     let crossed = false;

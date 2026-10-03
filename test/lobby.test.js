@@ -69,13 +69,13 @@ test('canJoinTeam rejects third player on a team', () => {
     assert.strictEqual(lobby.canJoinTeam(players, 'haas').ok, true);
 });
 
-test('pickRacers caps at 20 and skips spectators', () => {
+test('pickRacers caps at 22 and skips spectators', () => {
     const players = {};
-    for (let i = 0; i < 22; i++) players[`p${i}`] = { id: `p${i}`, isSpectating: false };
+    for (let i = 0; i < 24; i++) players[`p${i}`] = { id: `p${i}`, isSpectating: false };
     players.spec = { id: 'spec', isSpectating: true };
     const { racers, overflow } = lobby.pickRacers(players);
-    assert.strictEqual(racers.length, 20);
-    assert.deepStrictEqual(overflow.map(p => p.id), ['p20', 'p21']);
+    assert.strictEqual(racers.length, 22);
+    assert.deepStrictEqual(overflow.map(p => p.id), ['p22', 'p23']);
     assert.ok(!racers.some(p => p.id === 'spec'));
 });
 

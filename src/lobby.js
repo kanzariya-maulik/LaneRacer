@@ -1,7 +1,7 @@
 // Pure lobby rules — no sockets, so they can be unit tested.
 const TEAMS = require('../public/teams.json');
 
-const MAX_RACERS = 20; // grid slots per track
+const MAX_RACERS = 22; // grid slots per track (src/game/Track.js GRID_SLOTS)
 
 function sanitizeUsername(name) {
     const clean = typeof name === 'string' ? name.trim().slice(0, 15) : '';
