@@ -48,17 +48,29 @@ export function drsHint({ mode, inPit, drs, drsAvailable, lap, inZone }) {
     return 'IN DRS ZONES';
 }
 
-// F1 timing colours: purple = fastest of the whole session, green = the driver's own best, yellow = slower
-export function sectorClass(s) {
+// F1 timing colours, decided when drawn so they change live: purple = this driver holds the session best with this
+// time right now, green = a personal best (also a purple someone has since beaten), yellow = slower, grey = invalid lap.
+// s: { id, sector (1-3), time, valid, personalBest }; best / bestIds: the live session bests and their holders
+export function sectorClass(s, best, bestIds) {
     if (!s.valid) return 'sec-grey';
-    return s.sessionBest ? 'sec-purple' : s.personalBest ? 'sec-green' : 'sec-yellow';
+    const i = s.sector - 1;
+    if (bestIds[i] === s.id && best[i] !== null && s.time <= best[i] + 1e-9) return 'sec-purple';
+    return s.personalBest ? 'sec-green' : 'sec-yellow';
 }
 
-// Live sector bars per driver for the lap they're on (timing tower); sector 1 starts a fresh lap
+// Live sector times per driver for the lap they're on (timing tower), coloured when drawn; sector 1 starts a fresh lap
 export function liveSectors(live, s) {
     if (s.sector === 1 || !live[s.id]) live[s.id] = [null, null, null];
-    live[s.id][s.sector - 1] = sectorClass(s);
+    live[s.id][s.sector - 1] = s;
     return live;
+}
+
+// Your last lap: purple while it is the session's fastest, green once beaten (still your best), red if deleted
+export function lastLapClass(last, best, fastest, deleted) {
+    if (deleted) return 't-red';
+    if (last === null || last === undefined) return '';
+    if (fastest !== null && fastest !== undefined && last <= fastest + 1e-9) return 't-purple';
+    return best !== null && best !== undefined && last <= best + 1e-9 ? 't-green' : '';
 }
 
 // Race classification row: winner's final time (penalties included), gap for the rest, penalty, places won/lost to penalties

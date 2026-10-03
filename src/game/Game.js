@@ -37,8 +37,10 @@ class Game {
         this.frozen = mode === 'race';     // race: lights still on — cars can move, but that's a jump start
         this.ticker = null;
         this.winnerCount = 0;
-        this.bestSectors = [null, null, null]; // session bests, valid laps only
-        this.bestSectorIds = [null, null, null]; // who holds each (purple sector)
+        this.bestSectors = [null, null, null]; // live session bests (purple): completed valid laps + laps still valid
+        this.bestSectorIds = [null, null, null]; // who holds each
+        this.doneSectors = [null, null, null]; // bests from completed valid laps only (kept if the driver leaves)
+        this.doneSectorIds = [null, null, null];
         this.fastestLap = null;                // { id, time, lap }: purple lap, valid laps only
         this.lastDetect = [];                  // per DRS zone: time the last car crossed its detection point
 
@@ -187,6 +189,21 @@ class Game {
 
     removePlayer(id) {
         delete this.players[id];
+        this.refreshBests(); // their lap in progress no longer counts
+    }
+
+    // Live session-best sectors, F1 style: a sector counts the moment it's set on a lap that is still valid, and stops
+    // counting if that lap is deleted. Everyone is told whenever the holder or time changes.
+    refreshBests() {
+        const best = [...this.doneSectors], ids = [...this.doneSectorIds];
+        for (const p of Object.values(this.players)) {
+            if (!p.lapValid) continue;
+            p.sectors.forEach((s, i) => { if (s !== null && (best[i] === null || s < best[i])) { best[i] = s; ids[i] = p.id; } });
+        }
+        if (best.every((s, i) => s === this.bestSectors[i] && ids[i] === this.bestSectorIds[i])) return;
+        this.bestSectors = best;
+        this.bestSectorIds = ids;
+        this.io.emit('session_best', { sessionBest: best, bestSectorIds: ids });
     }
 
     start() {
@@ -405,6 +422,7 @@ class Game {
         if (this.mode === 'quali') {
             p.lapValid = false; // quali: lap deleted (race: warnings / penalties only)
             this.io.emit('track_limits', { id: p.id, kind: 'deleted' });
+            this.refreshBests(); // its sectors stop counting: purple goes back to the previous holder
             return;
         }
         p.limits++;
@@ -441,13 +459,14 @@ class Game {
         const lapTime = this.time - p.lapStart;
         p.lastLap = lapTime;
         p.lastValid = p.lapValid;
-        if (p.lapValid) { // bests only from completed valid laps
+        if (p.lapValid) { // personal bests only from completed valid laps
             p.sectors.forEach((s, i) => {
                 if (s === null) return;
                 if (p.bestSectors[i] === null || s < p.bestSectors[i]) p.bestSectors[i] = s;
-                if (this.bestSectors[i] === null || s < this.bestSectors[i]) { this.bestSectors[i] = s; this.bestSectorIds[i] = p.id; }
+                if (this.doneSectors[i] === null || s < this.doneSectors[i]) { this.doneSectors[i] = s; this.doneSectorIds[i] = p.id; }
             });
         }
+        this.refreshBests(); // a lap that ended invalid (deleted mid-lap without a refresh) drops out here
         if (p.lapValid && (p.bestLap === null || lapTime < p.bestLap)) {
             p.bestLap = lapTime;
             p.bestLapSectors = [...p.sectors];
@@ -477,6 +496,7 @@ class Game {
         p.sectors[i] = time;
         p.sectorStart = this.time;
         this.io.emit('sector', { id: p.id, lap: p.lap + 1, sector: n, time, valid: p.lapValid, personalBest, sessionBest });
+        if (p.lapValid) this.refreshBests(); // purple now, not when the lap ends
     }
 
     checkLapProgress(p) {

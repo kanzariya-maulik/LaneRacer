@@ -10,7 +10,7 @@ import { Predictor, STEP_S } from './predict.js';
 import { Gearbox, shiftLights } from './audio/gearbox.js';
 import { estimateLoad } from './audio/mix.js';
 import * as Sound from './audio/audio.js';
-import { gapText, driverCode, lapDelta, stepFollow, inDrsZone, drsHint, liveSectors, resultCells } from './timing.js';
+import { gapText, driverCode, lapDelta, stepFollow, inDrsZone, drsHint, liveSectors, resultCells, sectorClass, lastLapClass } from './timing.js';
 import { MODES, segmentColor, cornerMask, aheadM, trackIndex, nextMode } from './racingline.js';
 
 // World units per metre come from the track JSON (track.scale = 6).
@@ -1113,23 +1113,23 @@ function updateHUD(withTower = true) {
     const gs = clientState.gameState;
     const me = gs[clientState.me];
     const racing = me && !isSpectator();
-    const fastest = Math.min(...Object.values(gs).map(p => (p.bestLap === null ? Infinity : p.bestLap)));
+    const fastest = clientState.fastestLap?.time ?? Infinity; // the server's session fastest lap (kept if its holder leaves)
+    const sec = (s) => sectorClass(s, clientState.sessionBest, clientState.sessionBestIds); // live: purple → green when beaten
 
     $('hud-total').innerText = Object.keys(gs).length;
     $('hud-rank').innerText = racing ? me.rank : '--';
     $('hud-lap').innerText = racing ? lapLabel(me.lap) : '--';
     $('hud-speed').innerText = racing ? kmh(me.speed) : '--';
 
-    // Own lap times: purple = fastest overall, green = personal best
+    // Own lap times: purple while it's the session fastest, green once beaten (still your personal best)
     const curEl = $('lt-current');
     curEl.innerText = racing ? fmtTime(me.curLap) : '--';
     curEl.classList.toggle('t-red', !!racing && me.lapValid === false);
     const lastEl = $('lt-last');
     const deleted = !!racing && me.lastValid === false;
     lastEl.innerText = racing ? fmtTime(me.lastLap) + (deleted ? ' DELETED' : '') : '--';
-    lastEl.classList.toggle('t-red', deleted);
-    lastEl.classList.toggle('t-purple', !deleted && !!racing && me.lastLap !== null && me.lastLap === fastest);
-    lastEl.classList.toggle('t-green', !deleted && !!racing && me.lastLap !== null && me.lastLap === me.bestLap && me.lastLap !== fastest);
+    const lastCls = racing ? lastLapClass(me.lastLap, me.bestLap, clientState.fastestLap?.time, deleted) : '';
+    for (const c of ['t-red', 't-purple', 't-green']) lastEl.classList.toggle(c, c === lastCls);
     $('lt-best').innerText = racing ? fmtTime(me.bestLap) : '--';
     const delta = racing && !deleted ? lapDelta(me.lastLap, me.bestLap) : null;
     $('lt-delta').textContent = delta ? delta.text : '';
@@ -1137,7 +1137,7 @@ function updateHUD(withTower = true) {
     for (let i = 0; i < 3; i++) {
         const el = $(`sec-${i + 1}`), s = racing ? clientState.mySectors[i] : null;
         el.children[1].textContent = s ? s.time.toFixed(3) : `S${i + 1}`;
-        el.className = `sec ${s ? s.cls : ''}`;
+        el.className = `sec ${s ? sec(s) : ''}`;
         const best = clientState.sessionBest[i]; // purple sector: the session's best and who holds it
         el.lastElementChild.textContent = best === null ? '' : `${best.toFixed(3)} ${codeOf(clientState.sessionBestIds[i])}`;
     }
@@ -1200,14 +1200,14 @@ function updateHUD(withTower = true) {
             const time = el('span', 'tt-gap');
             if (quali) {
                 time.textContent = gap ? gap : fmtTime(p.bestLap);
-                if (p.bestLap !== null && p.bestLap === fastest) time.classList.add('t-purple');
+                if (p.bestLap !== null && clientState.fastestLap?.id === id && p.bestLap <= fastest + 1e-9) time.classList.add('t-purple');
                 const bars = el('span', 'tt-sectors');
                 // On a timed lap: live bars for this lap (purple / green / yellow / grey); otherwise their best lap's sectors
                 const live = p.lapStart !== null && p.lapStart !== undefined && liveSec[id];
-                if (live) live.forEach((c) => bars.appendChild(el('i', c ? c.replace('sec-', 'sb-') : '')));
-                else (p.bestLapSectors || [null, null, null]).forEach((s, k) => {
-                    const best = clientState.sessionBest[k];
-                    bars.appendChild(el('i', s === null ? '' : best !== null && s <= best + 1e-9 ? 'sb-purple' : 'sb-green'));
+                if (live) live.forEach((s) => bars.appendChild(el('i', s ? sec(s).replace('sec-', 'sb-') : '')));
+                else (p.bestLapSectors || [null, null, null]).forEach((s, k) => { // their best lap: green unless they still hold purple
+                    if (s === null) return bars.appendChild(el('i', ''));
+                    bars.appendChild(el('i', sec({ id, sector: k + 1, time: s, valid: true, personalBest: true }).replace('sec-', 'sb-')));
                 });
                 li.append(bars);
             } else if (i === 0) {

@@ -658,12 +658,49 @@ test('a sector from a lap deleted later is never a best', () => {
     crossLine(g, a, 10);
     for (let k = 1; k <= monza.sectorCps[1]; k++) { g.time = 10 + k; a.x = cps[k].x; a.y = cps[k].y; g.checkLapProgress(a); }
     assert.ok(sectorsOf(events, 'a')[0].sessionBest, 'S1 looked purple live');
-    a.lapValid = false;                 // runs wide in S2
-    lap(g, a, 10 + monza.sectorCps[1], 80);
-    assert.deepStrictEqual(g.bestSectors, [null, null, null]);
+    assert.strictEqual(g.bestSectorIds[0], 'a');
+    g.checkLimits(a, { dist: monza.width }); // runs wide in S2: lap deleted
+    assert.deepStrictEqual(g.bestSectors, [null, null, null], 'deleted lap stops counting at once');
+    lap(g, a, 10 + monza.sectorCps[1], 80);  // finishes the deleted lap (and drives on into the next)
     assert.deepStrictEqual(a.bestSectors, [null, null, null]);
     const timing = events.filter(([ev]) => ev === 'timing').map(([, d]) => d).at(-1);
-    assert.deepStrictEqual(timing.sessionBest, [null, null, null]);
+    assert.deepStrictEqual(timing.sessionBest, [null, null, null], 'no best from the deleted lap at the line');
+});
+
+// Drive p from the line to the end of sector 1 in `secs` seconds (quali: crosses the line first)
+function sector1(g, p, start, secs) {
+    crossLine(g, p, start);
+    const cps = g.track.checkpoints, end = g.track.sectorCps[1];
+    for (let k = 1; k <= end; k++) { g.time = start + (secs * k) / end; p.x = cps[k].x; p.y = cps[k].y; g.checkLapProgress(p); }
+}
+const bestEvents = (events) => events.filter(([ev]) => ev === 'session_best').map(([, d]) => d);
+
+test('live session best: a faster sector 1 takes purple the moment it is set, mid-lap, and everyone is told', () => {
+    const { events, io: sio } = spy();
+    const g = new Game(sio, [lp('a'), lp('b')], monza, QUALI, () => {}, 'quali');
+    const { a, b } = g.players;
+    sector1(g, a, 10, 30);
+    assert.deepStrictEqual([g.bestSectorIds[0], g.bestSectors[0]], ['a', 30], 'A holds S1 before finishing the lap');
+    sector1(g, b, 20, 28);
+    assert.deepStrictEqual([g.bestSectorIds[0], g.bestSectors[0]], ['b', 28], 'B takes S1 while A is still on track');
+    const last = bestEvents(events).at(-1);
+    assert.deepStrictEqual([last.bestSectorIds[0], last.sessionBest[0]], ['b', 28]);
+    assert.deepStrictEqual(g.initPayload().bestSectorIds[0], 'b', 'late joiners see the live holder');
+});
+
+test('live session best: a lap deleted for track limits hands purple back to the previous holder', () => {
+    const { events, io: sio } = spy();
+    const g = new Game(sio, [lp('a'), lp('b')], monza, QUALI, () => {}, 'quali');
+    const { a, b } = g.players;
+    crossLine(g, a, 10);
+    lap(g, a, 10, 90);                                  // A: valid lap, S1 ≈ 30 s
+    const aS1 = a.bestSectors[0];
+    sector1(g, b, 200, 25);
+    assert.strictEqual(g.bestSectorIds[0], 'b');
+    g.checkLimits(b, { dist: monza.width });            // B runs wide: lap deleted
+    assert.strictEqual(b.lapValid, false);
+    assert.deepStrictEqual([g.bestSectorIds[0], g.bestSectors[0]], ['a', aS1]);
+    assert.strictEqual(bestEvents(events).at(-1).bestSectorIds[0], 'a');
 });
 
 test('race: track limits warn or penalise but never delete the lap', () => {

@@ -10,7 +10,7 @@ let clientState = {
     sessionBest: [null, null, null], // fastest valid sector times this session
     sessionBestIds: [null, null, null], // who set each (purple sector)
     fastestLap: null,                // { id, time, lap }: the session's purple lap
-    mySectors: [null, null, null],   // current lap: { time, cls }
+    mySectors: [null, null, null],   // current lap: the server's sector events { id, sector, time, valid, personalBest }
     myBestSectors: [null, null, null],
     gameState: null,
     trackData: null, // static track geometry
@@ -287,7 +287,7 @@ socket.on('quali_results', (list) => {
 });
 
 socket.on('timing', (t) => {
-    if (t.sessionBest) clientState.sessionBest = [...t.sessionBest]; // completed valid laps only
+    if (t.sessionBest) clientState.sessionBest = [...t.sessionBest]; // live session bests (see session_best)
     if (t.bestSectorIds) clientState.sessionBestIds = [...t.bestSectorIds];
     if (t.fastestLap !== undefined) clientState.fastestLap = t.fastestLap;
     clientState.lastTiming = t;
@@ -308,11 +308,17 @@ socket.on('sector', (s) => {
     const i = s.sector - 1;
     if (window.onSectorAll) window.onSectorAll(s); // every driver: live sector bars in the timing tower
     if (s.id !== clientState.me) return;
-    const cls = !s.valid ? 'sec-grey' : s.sessionBest ? 'sec-purple' : s.personalBest ? 'sec-green' : 'sec-yellow';
+    const cls = !s.valid ? 'sec-grey' : s.sessionBest ? 'sec-purple' : s.personalBest ? 'sec-green' : 'sec-yellow'; // the flash: colour as set
     const prev = clientState.myBestSectors[i];
     if (s.sector === 1) clientState.mySectors = [null, null, null];
-    clientState.mySectors[i] = { time: s.time, cls };
+    clientState.mySectors[i] = s; // the HUD colours it live (timing.js sectorClass): purple turns green when beaten
     if (window.showSectorFlash) window.showSectorFlash(s.sector, s.time, prev === null ? null : s.time - prev, cls);
+});
+
+// Live session-best sectors changed hands (or a deleted lap gave one back): every screen recolours on its next redraw
+socket.on('session_best', ({ sessionBest, bestSectorIds }) => {
+    clientState.sessionBest = [...sessionBest];
+    clientState.sessionBestIds = [...bestSectorIds];
 });
 
 // Someone set the session's fastest lap: the purple graphic shows on every screen

@@ -61,21 +61,38 @@ test('drsHint explains why DRS is off', () => {
     assert.strictEqual(T.drsHint({ ...base, mode: 'quali', lap: 0 }), 'IN DRS ZONES', 'quali: no lap or gap rule');
 });
 
-test('sectorClass: purple overall best, green personal best, yellow slower, grey on an invalid lap', () => {
-    assert.strictEqual(T.sectorClass({ valid: true, sessionBest: true, personalBest: true }), 'sec-purple');
-    assert.strictEqual(T.sectorClass({ valid: true, sessionBest: false, personalBest: true }), 'sec-green');
-    assert.strictEqual(T.sectorClass({ valid: true, sessionBest: false, personalBest: false }), 'sec-yellow');
-    assert.strictEqual(T.sectorClass({ valid: false, sessionBest: true, personalBest: true }), 'sec-grey');
+test('sectorClass: decided live against the current session best: purple holder, green personal best, yellow, grey', () => {
+    const best = [28, 40, 25], ids = ['a', 'b', 'a'];
+    const s = (id, sector, time, personalBest = true, valid = true) => ({ id, sector, time, personalBest, valid });
+    assert.strictEqual(T.sectorClass(s('a', 1, 28), best, ids), 'sec-purple', 'holder of the session best');
+    assert.strictEqual(T.sectorClass(s('a', 2, 41), best, ids), 'sec-green', 'personal best, not the session best');
+    assert.strictEqual(T.sectorClass(s('a', 2, 43, false), best, ids), 'sec-yellow');
+    assert.strictEqual(T.sectorClass(s('a', 1, 28, true, false), best, ids), 'sec-grey', 'invalid lap');
+    assert.strictEqual(T.sectorClass(s('b', 1, 28), best, ids), 'sec-green', 'same time but not the holder');
 });
 
-test('liveSectors: each driver\'s current lap, restarting at sector 1', () => {
+test('sectorClass: A\'s purple S1 turns green the moment B beats it', () => {
+    const aS1 = { id: 'a', sector: 1, time: 30, personalBest: true, valid: true };
+    assert.strictEqual(T.sectorClass(aS1, [30, null, null], ['a', null, null]), 'sec-purple');
+    assert.strictEqual(T.sectorClass(aS1, [29.5, null, null], ['b', null, null]), 'sec-green');
+});
+
+test('liveSectors: each driver\'s current lap (times, coloured when drawn), restarting at sector 1', () => {
     const live = {};
-    const sec = (id, sector, sessionBest) => T.liveSectors(live, { id, sector, valid: true, sessionBest, personalBest: true });
-    sec('a', 1, true); sec('a', 2, false); sec('b', 1, false);
-    assert.deepStrictEqual(live.a, ['sec-purple', 'sec-green', null]);
-    assert.deepStrictEqual(live.b, ['sec-green', null, null]);
-    sec('a', 3, false); sec('a', 1, false);
-    assert.deepStrictEqual(live.a, ['sec-green', null, null], 'new lap clears the old bars');
+    const sec = (id, sector, time) => T.liveSectors(live, { id, sector, time, valid: true, personalBest: true });
+    sec('a', 1, 30); sec('a', 2, 40); sec('b', 1, 31);
+    assert.deepStrictEqual(live.a.map((x) => x && x.time), [30, 40, null]);
+    assert.deepStrictEqual(live.b.map((x) => x && x.time), [31, null, null]);
+    sec('a', 3, 25); sec('a', 1, 29);
+    assert.deepStrictEqual(live.a.map((x) => x && x.time), [29, null, null], 'new lap clears the old bars');
+});
+
+test('lastLapClass: your last lap is purple while it is the session fastest, green once someone beats it', () => {
+    assert.strictEqual(T.lastLapClass(84, 84, 84, false), 't-purple');
+    assert.strictEqual(T.lastLapClass(84, 84, 83.5, false), 't-green', 'beaten: still your personal best');
+    assert.strictEqual(T.lastLapClass(86, 84, 83.5, false), '', 'slower than your best');
+    assert.strictEqual(T.lastLapClass(80, 84, 83.5, true), 't-red', 'deleted lap');
+    assert.strictEqual(T.lastLapClass(null, null, null, false), '');
 });
 
 test('resultCells: winner shows the final time, others the gap; penalty and places changed; DNF', () => {
