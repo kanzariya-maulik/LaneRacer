@@ -11,22 +11,45 @@ function run(p, seconds = 0.4, seed = 7) {
     return out;
 }
 const rms = (a, from = 0, to = a.length) => { let s = 0; for (let i = from; i < to; i++) s += a[i] * a[i]; return Math.sqrt(s / (to - from)); };
-function peakHz(a) { // strongest frequency 100–4000 Hz (10 Hz steps) over the last 0.2 s
+function peakHz(a) { // strongest frequency 100–4000 Hz over the last 0.2 s: Hann window (main lobe ±10 Hz), 5 Hz steps
     const n = SR * 0.2, x = a.subarray(a.length - n);
     let best = 0, bestF = 0;
-    for (let f = 100; f <= 4000; f += 10) {
+    for (let f = 100; f <= 4000; f += 5) {
         let re = 0, im = 0;
-        for (let k = 0; k < n; k++) { const w = (2 * Math.PI * f * k) / SR; re += x[k] * Math.cos(w); im += x[k] * Math.sin(w); }
+        for (let k = 0; k < n; k++) { const w = (2 * Math.PI * f * k) / SR, h = (0.5 - 0.5 * Math.cos((2 * Math.PI * k) / n)) * x[k]; re += h * Math.cos(w); im += h * Math.sin(w); }
         const m = re * re + im * im;
         if (m > best) { best = m; bestF = f; }
     }
     return bestF;
 }
 
-test('the dominant pitch is the V8 firing frequency (rpm/60 × 4) at 6k, 12k and 18k rpm', () => {
+test('the dominant pitch is the V8 firing frequency (rpm/60 × 4, × PITCH) at 6k, 12k and 18k rpm', () => {
     for (const rpm of [6000, 12000, 18000]) {
-        const want = (rpm / 60) * 4, got = peakHz(run({ rpm, load: 1 }));
+        const want = (rpm / 60) * 4 * V.PITCH, got = peakHz(run({ rpm, load: 1 }));
         assert.ok(Math.abs(got - want) / want <= 0.05, `${rpm} rpm: peak ${got} Hz, want ${want}`);
+    }
+});
+
+// Energy by frequency over the last 0.1 s: Hann window, 10 Hz bins to 12 kHz (the window's main lobe is ±20 Hz, so no
+// harmonic falls between bins)
+function brightness(a) {
+    const n = SR * 0.1, x = a.subarray(a.length - n);
+    let tot = 0, high = 0, cent = 0;
+    for (let f = 10; f <= 12000; f += 10) {
+        let re = 0, im = 0;
+        for (let k = 0; k < n; k++) { const w = (0.5 - 0.5 * Math.cos((2 * Math.PI * k) / n)) * x[k], ph = (2 * Math.PI * f * k) / SR; re += w * Math.cos(ph); im += w * Math.sin(ph); }
+        const e = re * re + im * im;
+        tot += e; cent += f * e;
+        if (f >= 2000) high += e;
+    }
+    return { centroid: cent / tot, highShare: high / tot };
+}
+
+test('full-load scream: at 16k and 18k rpm the sound centres near 3 kHz, at least 35% of it above 2 kHz', () => {
+    for (const rpm of [16000, 18000]) {
+        const b = brightness(run({ rpm, load: 1 }));
+        assert.ok(b.centroid >= 2500 && b.centroid <= 4500, `${rpm} rpm: centroid ${b.centroid.toFixed(0)} Hz`);
+        assert.ok(b.highShare >= 0.35, `${rpm} rpm: ${(100 * b.highShare).toFixed(0)}% above 2 kHz`);
     }
 });
 

@@ -80,6 +80,15 @@ test('standing on the throttle at the start revs to the launch rpm; idle otherwi
     assert.ok(Math.abs(r.rpm - G.IDLE) < 200, `${r.rpm}`);
 });
 
+test('launch: full throttle from rest holds at least launch rpm through 1st (clutch slip), no dip at 30 km/h', () => {
+    const box = new G.Gearbox();
+    for (let k = 0; k < 60; k++) box.update(0, 1, 1 / 60); // revs up on the grid
+    for (let v = 0; v <= 60; v += 0.5) { // ~2 s off the line
+        const r = box.update(kmh(v), 1, 1 / 60);
+        assert.ok(r.rpm >= G.LAUNCH - 200, `${r.rpm.toFixed(0)} rpm at ${v} km/h`);
+    }
+});
+
 test('rev limiter is reported at the top of 7th with throttle on; pit limiter flag passes through', () => {
     const box = new G.Gearbox();
     accelerate(box, 380);

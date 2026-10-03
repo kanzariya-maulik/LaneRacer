@@ -7,7 +7,6 @@ export const IDLE = 4500;
 export const LAUNCH = 11000;     // holding throttle on the grid / crawling in 1st
 export const DOWN_BELOW = 16000; // shift down when the lower gear would sit below this (braking or coasting)
 export const SHIFT_GAP_S = 0.12;
-const LAUNCH_KMH = 30;
 const BOG_RPM = 8000;            // on throttle but this low in gear (after a spin, a shunt): kick down
 const RPM_RATE = 25;             // 1/s: rpm follows its target this fast (~40 ms)
 
@@ -39,7 +38,8 @@ export class Gearbox {
             }
         }
         let target = Math.max(IDLE, Math.min(REV_LIMIT, rpmIn(kmh, this.gear)));
-        if (this.gear === 1 && kmh < LAUNCH_KMH && thr > 0.3) target = Math.max(target, IDLE + (LAUNCH - IDLE) * thr);
+        // 1st on throttle: the clutch slips at launch rpm until the gear's own rpm catches up (no bog off the line)
+        if (this.gear === 1 && thr > 0.3) target = Math.max(target, IDLE + (LAUNCH - IDLE) * thr);
         this.rpm += (target - this.rpm) * Math.min(1, dt * RPM_RATE);
         if (!Number.isFinite(this.rpm)) this.rpm = IDLE;
         o.gear = this.gear;
