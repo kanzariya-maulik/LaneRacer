@@ -25,10 +25,12 @@ function convert(csvText, meta) {
     const widths = rows.map(r => r[2] + r[3]).sort((a, b) => a - b);
     const width = Math.round(widths[Math.floor(widths.length / 2)] * WIDTH_MULT * SCALE);
     // CSV y points north; game y points down the screen, so flip it
-    const pts = rows
-        .filter((_, i) => i % STEP === 0)
-        .map(([x, y]) => ({ x: +(x * SCALE).toFixed(1), y: +(-y * SCALE).toFixed(1) }));
-    return { id: meta.id, name: meta.name, scale: SCALE, width, path: pts };
+    const kept = rows.filter((_, i) => i % STEP === 0);
+    const pts = kept.map(([x, y]) => ({ x: +(x * SCALE).toFixed(1), y: +(-y * SCALE).toFixed(1) }));
+    // The real track edges (white lines) at each point, metres from the centreline: [driver's right, left]. Flipping y
+    // keeps right as right in the game (y down the screen, 'right' = clockwise of the heading)
+    const edges = kept.map((r) => [+r[2].toFixed(2), +r[3].toFixed(2)]);
+    return { id: meta.id, name: meta.name, scale: SCALE, width, path: pts, edges };
 }
 
 async function main() {
@@ -37,7 +39,10 @@ async function main() {
         const res = await fetch(BASE + src.file + '.csv');
         if (!res.ok) throw new Error(`${src.file}: HTTP ${res.status}`);
         const track = convert(await res.text(), src);
-        fs.writeFileSync(path.join(OUT_DIR, `${src.id}.json`), JSON.stringify(track));
+        // Keep what the later importers added (pit lane, elevation): this one only owns the centreline and widths
+        const file = path.join(OUT_DIR, `${src.id}.json`), old = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : {};
+        if (old.path && JSON.stringify(old.path) !== JSON.stringify(track.path)) throw new Error(`${src.id}: centreline changed upstream; re-run npm run tracks`);
+        fs.writeFileSync(file, JSON.stringify({ ...old, ...track }));
         console.log(`${src.id}: ${track.path.length} points, width ${track.width}`);
     }
 }

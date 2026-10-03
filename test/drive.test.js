@@ -2,6 +2,7 @@ const { test, before } = require('node:test');
 const assert = require('node:assert');
 const Track = require('../src/game/Track');
 const Game = require('../src/game/Game');
+const Physics = require('../src/game/Physics');
 
 let D;
 before(async () => { D = await import('../public/js/sim/drive.js'); });
@@ -30,3 +31,44 @@ test('driveCar on the client copy of the track (JSON round trip, as sent in game
         for (const f of ['x', 'y', 'vx', 'vy', 'angle']) assert.strictEqual(b[f], a[f], `${id} ${f}`);
     }
 });
+
+test('driveCar feels the real hills: full throttle up Raidillon (Spa) ends slower than the same run with the hills flattened', () => {
+    const spa = Track.load('spa'), flat = { ...spa, grade: null, vcurv: null };
+    const i = spa.cum.findIndex((c) => c / spa.scale >= 1150), a = spa.path[i], b = spa.path[i + 1]; // climbing out of Eau Rouge
+    const run = (t) => {
+        const p = { x: a.x, y: a.y, angle: Math.atan2(b.y - a.y, b.x - a.x), vx: 0, vy: 0, speed: 0, steer: 0, assist: 'off' };
+        const v0 = 60 * t.scale; p.vx = Math.cos(p.angle) * v0; p.vy = Math.sin(p.angle) * v0; p.speed = v0;
+        for (let k = 0; k < 90; k++) { // steer at the centreline 3 points ahead
+            const n = Physics.nearestOnTrack(p.x, p.y, t), ah = t.path[(n.i + 3) % t.path.length];
+            let d = Math.atan2(ah.y - p.y, ah.x - p.x) - p.angle; d = Math.atan2(Math.sin(d), Math.cos(d));
+            D.driveCar(p, { throttle: 1, brake: 0, steer: Math.max(-1, Math.min(1, d * 3)) }, t, 1 / 60);
+        }
+        return { v: p.speed / t.scale, grade: p.grade };
+    };
+    const hill = run(spa), level = run(flat);
+    assert.ok(hill.grade > 0.05, `grade felt ${hill.grade}`);
+    assert.ok(hill.v < level.v - 1, `uphill ${hill.v.toFixed(1)} m/s vs flat ${level.v.toFixed(1)} m/s`);
+});
+
+// Suzuka's bridge: the back straight over the road beneath, each level with its own walls
+const suzuka = Track.load('suzuka'), bridge = suzuka.bridges[0];
+const launch = (rd, turn, v) => { // at the crossing on road rd, heading turned by `turn` (rad), v m/s
+    const angle = rd.angle + turn, s = v * suzuka.scale;
+    return { x: bridge.x, y: bridge.y, angle, vx: Math.cos(angle) * s, vy: Math.sin(angle) * s, speed: s, steer: 0, assist: 'off', roadI: rd.i }; // arrived along rd
+};
+const outward = (rd, p) => (-Math.sin(rd.angle) * (p.x - bridge.x) + Math.cos(rd.angle) * (p.y - bridge.y)) / suzuka.scale; // m right
+const COAST = { throttle: 0, brake: 0, steer: 0 };
+
+test('bridge: a car on the upper road drives straight over, untouched by the underpass walls beneath it', () => {
+    const p = launch(bridge.upper, 0, 60);
+    for (let k = 0; k < 40; k++) D.driveCar(p, COAST, suzuka, 1 / 60);
+    assert.ok(p.speed / suzuka.scale > 55, `slowed to ${(p.speed / suzuka.scale).toFixed(1)} m/s`);
+});
+
+for (const level of ['lower', 'upper']) {
+    test(`bridge: a car on the ${level} road swerving at the side wall is stopped by it`, () => {
+        const rd = bridge[level], p = launch(rd, 1.2, 30), wall = suzuka.width / 2 / suzuka.scale + 1;
+        for (let k = 0; k < 30; k++) D.driveCar(p, COAST, suzuka, 1 / 60); // ~70 deg at the wall, still alongside it
+        assert.ok(outward(rd, p) < wall + 0.1, `went ${outward(rd, p).toFixed(1)} m out, wall at ${wall.toFixed(1)} m`);
+    });
+}

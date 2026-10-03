@@ -159,3 +159,19 @@ test('DRS drag cut adds 25–35 km/h of top speed', async () => {
     const gain = top(DRS_DRAG) - top(1);
     assert.ok(gain > 25 && gain < 35, `+${gain.toFixed(1)} km/h`);
 });
+
+// Elevation (car.grade: rise per metre along the heading; car.vcurv: 1/m, + compression, − crest)
+test('hills: coasting up a 10% grade loses ~1 m/s more per second than on the flat; downhill gains it', () => {
+    const coast = (grade) => { const c = Object.assign(mk(50), { grade }); for (let i = 0; i < 60; i++) step(c, { throttle: 0, brake: 0, steer: 0 }, DT, S); return c.speed / S; };
+    const flat = coast(0), up = coast(0.1), down = coast(-0.1);
+    assert.ok(Math.abs(flat - up - C.G * 0.1) < 0.1, `uphill ${flat - up} m/s`);
+    assert.ok(Math.abs(down - flat - C.G * 0.1) < 0.1, `downhill ${down - flat} m/s`);
+});
+
+test('hills: a compression adds cornering grip, a crest takes it away (the car goes light)', () => {
+    const turn = (vcurv) => { const c = Object.assign(mk(60), { vcurv }), d0 = vDir(c); for (let i = 0; i < 12; i++) step(c, COAST_LOCK, DT, S); return vDir(c) - d0; };
+    const flat = turn(0), comp = turn(1 / 600), crest = turn(-1 / 600); // Eau Rouge-like radius at 216 km/h: ±0.6 g
+    assert.ok(comp > flat * 1.2, `compression ${comp} vs ${flat}`);
+    assert.ok(crest < flat * 0.8, `crest ${crest} vs ${flat}`);
+    assert.ok(Number.isFinite(turn(-1)), 'airborne-hard crest stays finite');
+});

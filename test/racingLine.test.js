@@ -11,8 +11,8 @@ for (const id of Track.TRACK_IDS) {
     test(`${id}: racing line stays on track, within grip and the assist's speeds`, () => {
         const t = tracks[id], rl = t.racingLine, n = t.path.length;
         assert.ok(rl && rl.offset.length === n && rl.speed.length === n && rl.phase.length === n);
-        const lim = t.width / 2 - 1.5 * t.scale + 0.06; // + rounding
-        rl.offset.forEach((o, i) => assert.ok(Math.abs(o) <= lim, `point ${i} offset ${o} past ${lim}`));
+        const m = 1.5 * t.scale - 0.06; // inside the real white lines, + rounding (offset + = driver's right)
+        rl.offset.forEach((o, i) => assert.ok(o <= t.edgeR[i] - m && o >= -(t.edgeL[i] - m), `point ${i} offset ${o} past the white line`));
         const k = RL.curvatures(RL.linePoints(t.path, rl.offset), t.scale);
         rl.speed.forEach((v, i) => {
             assert.ok(v * v * k[i] <= RL.latMax(v) * 1.01 + 0.5, `point ${i}: ${v} m/s needs more grip than the car has`);
@@ -49,8 +49,8 @@ test('pit side keeps clear of the closed pit entry', () => {
         const t = tracks[id];
         if (!t.pit) continue;
         const { side, idx } = RL.pitWindow(t);
-        const lim = t.width / 2 - 3 * t.scale + 0.06;
-        for (const i of idx) assert.ok(side * t.racingLine.offset[i] <= lim, `${id} point ${i} too close to the pit entry`);
+        const lim = (i) => (side > 0 ? t.edgeR[i] : t.edgeL[i]) - 3 * t.scale + 0.06;
+        for (const i of idx) assert.ok(side * t.racingLine.offset[i] <= lim(i), `${id} point ${i} too close to the pit entry`);
     }
 });
 

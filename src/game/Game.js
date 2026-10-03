@@ -1,7 +1,7 @@
 const Physics = require('./Physics');
 const Drive = require('../../public/js/sim/drive.js');
 const Ticker = require('../ticker');
-const { pointAt } = require('./Track');
+const { pointAt, edgeAt } = require('./Track');
 
 const TICK_RATE = 60;
 const QUALI_LAPS = 2;       // flying laps after the out-lap
@@ -411,12 +411,15 @@ class Game {
         });
     }
 
-    // All four wheels past the white line, once per excursion; pit lane, quali out-lap exempt
+    // All four wheels past the real white line (t.limit), once per excursion; pit lane, quali out-lap exempt, and so is
+    // rejoining from the pit exit until the car is first back inside the line
     checkLimits(p, near) {
         const t = this.track;
-        if (near.dist <= t.width / 2) { p.offLimits = false; return; }
+        if (p.inPit) p.fromPit = true;
+        const line = edgeAt(t, near, p.x, p.y); // the real white line on this side, here
+        if (near.dist <= line) { p.offLimits = false; p.fromPit = false; return; } // inside it (the run-off beyond is asphalt)
         if (this.frozen) return; // lights still on: jump starts are judged separately
-        if (p.offLimits || p.inPit || near.dist <= t.width / 2 + Physics.CAR_HALF_WIDTH_M * t.scale) return;
+        if (p.offLimits || p.inPit || p.fromPit || near.dist <= line + Physics.CAR_HALF_WIDTH_M * t.scale) return;
         if (this.mode === 'quali' && (p.lapStart === null || p.finished)) return;
         p.offLimits = true;
         if (this.mode === 'quali') {

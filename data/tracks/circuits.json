@@ -1,61 +1,188 @@
 {
   "monza": {
-    "startLineM": 14,
-    "gridLineM": 304,
+    "startLineM": 13,
+    "gridLineM": 307,
     "poleSide": "left",
     "garagesFrom": "entry",
     "limiterStartM": 60,
     "limiterEndM": 677,
-    "sources": ["start line = timing/finish line: F1 live-timing track outline (api.multiviewer.app circuits/39/2023) fitted to TUMFTM, 3.3 m RMS, lap start at +14 m", "grid line: 2023 race Position feed, pole car 304 m past the timing line (matches '620 m pole to T1')", "pole side: no source found, kept from web search 2026-10-01", "garages: 2023 race pit-stop positions, Red Bull nearest pit entry then 2022 constructors' order", "limiter: 60 m inside each end of OSM way 38168747", "sectors: 2023 qualifying TimingData mini-sectors 8/7/10 on the live-timing outline", "DRS: FIA notes (2021 preview PDF, same in 2023 coverage): detect 95 m before T7 / activate 170 m after T7; detect 20 m before T11 / activate 115 m after the line; ends at T8 and T1 braking (estimated) — [detectM, startM, endM] from the start line"],
-    "unconfirmed": ["poleSide", "limiterStartM", "limiterEndM", "drs"],
-    "sector2M": 1912,
-    "sector3M": 3729,
-    "drs": [[5207, 115, 790], [2779, 3044, 3830]]
+    "sources": [
+      "start line = timing line: F1 official track outline (MultiViewer, lap start) fitted with the 2023 race car positions, 13 m from TUMFTM row 0",
+      "grid line: 2023 race telemetry, all cars parked on the grid ~8 m apart, pole car 299 m past the timing line (gridLineM = pole + 8 m)",
+      "pole side: no source found, kept from web search 2026-10-01",
+      "garages: 2023 race pit-stop positions, Red Bull nearest pit entry then 2022 constructors' order",
+      "limiter: 60 m inside each end of OSM way 38168747",
+      "sectors: 2023 qualifying TimingData mini-sectors 8/7/10 on the live-timing outline",
+      "DRS: FIA notes (2021 preview PDF, same in 2023 coverage): detect 95 m before T7 / activate 170 m after T7; detect 20 m before T11 / activate 115 m after the line; ends at T8 and T1 braking (estimated) — [detectM, startM, endM] from the start line"
+    ],
+    "unconfirmed": [
+      "poleSide",
+      "limiterStartM",
+      "limiterEndM",
+      "drs"
+    ],
+    "sector2M": 1913,
+    "sector3M": 3730,
+    "drs": [
+      [
+        5208,
+        116,
+        791
+      ],
+      [
+        2780,
+        3045,
+        3831
+      ]
+    ]
   },
   "spa": {
-    "startLineM": 0,
+    "startLineM": 10,
     "poleSide": "right",
     "garagesFrom": "entry",
     "limiterStartM": 60,
     "limiterEndM": 657,
-    "sources": ["start line = FIA control line (timing, sectors, flag), measured on the FIA 2023 Belgian GP event notes map at -15 +/- 25 m from TUMFTM row 0; the separate race start line is ~110-210 m further on, not measured", "pole side: FIA 2023 pit-lane sheet, pole box on the pit (right) side", "garages: FIA 2023 pit-lane sheet, Red Bull nearest pit entry then 2022 constructors' order", "limiter: 60 m inside each end of OSM way 323851541", "sectors: FIA 2023 event notes, S1 line 145 m before T5, S2 line 48 m before T15", "DRS: FIA 2023 event notes, detect 240 m before T2 / activate 230 m after T4; detect 160 m before T18 / activate 30 m after T19 (from the chicane exit); ends at T5 and T1 braking (estimated) — [detectM, startM, endM] from the start line"],
-    "unconfirmed": ["gridLineM", "limiterStartM", "limiterEndM"],
-    "sector2M": 2280,
-    "sector3M": 5090,
-    "drs": [[820, 1520, 2290], [6590, 6865, 260]]
+    "sources": [
+      "start line = timing line: F1 official track outline (MultiViewer, lap start) fitted with the 2023 race car positions, 10 m from TUMFTM row 0",
+      "grid line: 2023 race telemetry, all cars parked on the grid ~8 m apart, pole car 115 m past the timing line (gridLineM = pole + 8 m)",
+      "pole side: FIA 2023 pit-lane sheet, pole box on the pit (right) side",
+      "garages: FIA 2023 pit-lane sheet, Red Bull nearest pit entry then 2022 constructors' order",
+      "limiter: 60 m inside each end of OSM way 323851541",
+      "sectors: FIA 2023 event notes, S1 line 145 m before T5, S2 line 48 m before T15",
+      "DRS: FIA 2023 event notes, detect 240 m before T2 / activate 230 m after T4; detect 160 m before T18 / activate 30 m after T19 (from the chicane exit); ends at T5 and T1 braking (estimated) — [detectM, startM, endM] from the start line"
+    ],
+    "unconfirmed": [
+      "limiterStartM",
+      "limiterEndM"
+    ],
+    "sector2M": 2270,
+    "sector3M": 5080,
+    "drs": [
+      [
+        810,
+        1510,
+        2280
+      ],
+      [
+        6580,
+        6855,
+        250
+      ]
+    ],
+    "gridLineM": 123
   },
   "silverstone": {
-    "startLineM": 135,
+    "startLineM": 3,
     "poleSide": "left",
     "limiterStartM": 430,
     "limiterEndM": 1075,
-    "sources": ["start line: OSM node raceway=start/finish, aligned onto TUMFTM (+135 m, 2.5 m off-centre)", "pole side: racing line into Abbey (right-hander), no primary source", "garages: Silverstone puts the top teams mid pit lane for the grandstands (Speedcafe 2023), which the game can't do: kept nearest pit exit", "limiter: where OSM way 227902927 meets the straight (430 m) to 50 m before its end", "sectors: by landmark (S2 on Wellington Straight, S3 at the start of Hangar Straight)", "DRS: 2023 FIA notes as reported by formularapida.net, detect 25 m before T3 / activate 30 m after T5; detect at T11 / activate at T14; ends at T6 and T15 braking — [detectM, startM, endM] from the start line"],
-    "unconfirmed": ["poleSide", "limiterStartM", "limiterEndM", "garage order direction", "sector2M", "sector3M", "drs"],
-    "sector2M": 1500,
-    "sector3M": 4100,
-    "drs": [[730, 1140, 1760], [3570, 4075, 4810]]
+    "sources": [
+      "start line = timing line: F1 official track outline (MultiViewer, lap start) fitted with the 2023 race car positions, 3 m from TUMFTM row 0",
+      "grid line: 2023 race telemetry, all cars parked on the grid ~8 m apart, pole car 118 m past the timing line (gridLineM = pole + 8 m)",
+      "pole side: racing line into Abbey (right-hander), no primary source",
+      "garages: Silverstone puts the top teams mid pit lane for the grandstands (Speedcafe 2023), which the game can't do: kept nearest pit exit",
+      "limiter: where OSM way 227902927 meets the straight (430 m) to 50 m before its end",
+      "sectors: by landmark (S2 on Wellington Straight, S3 at the start of Hangar Straight)",
+      "DRS: 2023 FIA notes as reported by formularapida.net, detect 25 m before T3 / activate 30 m after T5; detect at T11 / activate at T14; ends at T6 and T15 braking — [detectM, startM, endM] from the start line"
+    ],
+    "unconfirmed": [
+      "poleSide",
+      "limiterStartM",
+      "limiterEndM",
+      "garage order direction",
+      "sector2M",
+      "sector3M",
+      "drs"
+    ],
+    "sector2M": 1632,
+    "sector3M": 4232,
+    "drs": [
+      [
+        862,
+        1272,
+        1892
+      ],
+      [
+        3702,
+        4207,
+        4942
+      ]
+    ],
+    "gridLineM": 126
   },
   "suzuka": {
-    "startLineM": 10,
-    "gridLineM": 320,
+    "startLineM": 6,
+    "gridLineM": 313,
     "poleSide": "left",
     "limiterStartM": 60,
     "limiterEndM": 826,
-    "sources": ["start line = timing/control line: F1 live-timing track outline (api.multiviewer.app circuits/46/2023) fitted to TUMFTM, 2.9 m RMS, at ~10 m", "grid line: 2023 race Position feed, pole car ~313 m past the timing line, grid in real order 8 m apart", "pole side: left since 1991 (RaceFans), not visible in timing data", "garages: 2023 race pit-stop positions, Red Bull nearest pit exit then 2022 constructors' order", "limiter: 60 m inside each end of OSM way 120917578", "sectors: Verstappen's 2023 pole lap sector times on his live-timing positions (two laps agree within 10 m)", "DRS: 2023 FIA notes as reported by formularapida.net, detect 50 m before T16 / activate 100 m before the control line; ends at T1 braking from the 2023 qualifying speed trace — [detectM, startM, endM] from the start line"],
-    "unconfirmed": ["poleSide", "limiterStartM", "limiterEndM", "drs"],
-    "sector2M": 2175,
-    "sector3M": 4694,
-    "drs": [[5335, 5701, 690]]
+    "sources": [
+      "start line = timing line: F1 official track outline (MultiViewer, lap start) fitted with the 2023 race car positions, 6 m from TUMFTM row 0",
+      "grid line: 2023 race telemetry, all cars parked on the grid ~8 m apart, pole car 305 m past the timing line (gridLineM = pole + 8 m)",
+      "pole side: left since 1991 (RaceFans), not visible in timing data",
+      "garages: 2023 race pit-stop positions, Red Bull nearest pit exit then 2022 constructors' order",
+      "limiter: 60 m inside each end of OSM way 120917578",
+      "sectors: Verstappen's 2023 pole lap sector times on his live-timing positions (two laps agree within 10 m)",
+      "DRS: 2023 FIA notes as reported by formularapida.net, detect 50 m before T16 / activate 100 m before the control line; ends at T1 braking from the 2023 qualifying speed trace — [detectM, startM, endM] from the start line"
+    ],
+    "unconfirmed": [
+      "poleSide",
+      "limiterStartM",
+      "limiterEndM",
+      "drs"
+    ],
+    "sector2M": 2179,
+    "sector3M": 4698,
+    "drs": [
+      [
+        5339,
+        5705,
+        694
+      ]
+    ]
   },
   "sakhir": {
-    "startLineM": 0,
+    "startLineM": 31,
     "poleSide": "left",
     "limiterStartM": 60,
     "limiterEndM": 711,
-    "sources": ["start line: official F1 circuit map puts the line ~750 m before the T1 apex, ~0 on TUMFTM (RaceFans' '336 m grid to T1' conflicts and was not used)", "pole side: RaceFans track information ('left-hand side'), no primary source", "garages: no source found, kept nearest pit exit", "limiter: 60 m inside each end of OSM way 187123422", "sectors: official F1 circuit map colours (S2 shortly before T5, S3 just after T12)", "DRS: 2023 coverage (RaceFans, Speedcafe, formularapida.net), three zones with their own detection: detect 110 m before T14 / activate 250 m after T15; detect 50 m before T1 / activate 23 m after T3; detect 10 m before T9 / activate 50 m after T10; ends at T1, T4 and T11 braking — [detectM, startM, endM] from the start line"],
-    "unconfirmed": ["startLineM", "poleSide", "limiterStartM", "limiterEndM", "garage order direction", "sector2M", "sector3M", "drs"],
-    "sector2M": 1750,
-    "sector3M": 3930,
-    "drs": [[4810, 5250, 650], [690, 975, 1430], [2620, 2775, 3340]]
+    "sources": [
+      "start line = timing line: F1 official track outline (MultiViewer, lap start) fitted with the 2023 race car positions, 31 m from TUMFTM row 0",
+      "grid line: 2023 race telemetry, all cars parked on the grid ~8 m apart, pole car 223 m past the timing line (gridLineM = pole + 8 m)",
+      "pole side: RaceFans track information ('left-hand side'), no primary source",
+      "garages: no source found, kept nearest pit exit",
+      "limiter: 60 m inside each end of OSM way 187123422",
+      "sectors: official F1 circuit map colours (S2 shortly before T5, S3 just after T12)",
+      "DRS: 2023 coverage (RaceFans, Speedcafe, formularapida.net), three zones with their own detection: detect 110 m before T14 / activate 250 m after T15; detect 50 m before T1 / activate 23 m after T3; detect 10 m before T9 / activate 50 m after T10; ends at T1, T4 and T11 braking — [detectM, startM, endM] from the start line"
+    ],
+    "unconfirmed": [
+      "poleSide",
+      "limiterStartM",
+      "limiterEndM",
+      "garage order direction",
+      "sector2M",
+      "sector3M",
+      "drs"
+    ],
+    "sector2M": 1719,
+    "sector3M": 3899,
+    "drs": [
+      [
+        4779,
+        5219,
+        619
+      ],
+      [
+        659,
+        944,
+        1399
+      ],
+      [
+        2589,
+        2744,
+        3309
+      ]
+    ],
+    "gridLineM": 231
   }
 }

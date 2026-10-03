@@ -108,11 +108,11 @@ function pitWindow(t) {
 }
 
 function compute(t) {
-    const P = t.path, n = P.length, N = normals(P), lim = t.width / 2 - MARGIN_M * t.scale;
-    const lo = new Array(n).fill(-lim), hi = new Array(n).fill(lim);
+    const P = t.path, n = P.length, N = normals(P), m = MARGIN_M * t.scale; // inside the real white lines (+ = driver's right)
+    const lo = t.edgeL.map((e) => -(e - m)), hi = t.edgeR.map((e) => e - m);
     if (t.pit) {
-        const { side, idx } = pitWindow(t), pl = t.width / 2 - PIT_MARGIN_M * t.scale;
-        for (const i of idx) { if (side > 0) hi[i] = Math.min(hi[i], pl); else lo[i] = Math.max(lo[i], -pl); }
+        const { side, idx } = pitWindow(t), pm = PIT_MARGIN_M * t.scale;
+        for (const i of idx) { if (side > 0) hi[i] = Math.min(hi[i], t.edgeR[i] - pm); else lo[i] = Math.max(lo[i], -(t.edgeL[i] - pm)); }
     }
     // Minimum curvature: pull each point toward the 4th-order smooth of its neighbours, along its normal
     const o = new Array(n).fill(0);

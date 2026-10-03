@@ -18,6 +18,14 @@ test('safe speed: a straight line is flat out', () => {
     for (const v of Assist.safeSpeeds(line, 6).slice(3, -3)) assert.strictEqual(v, Assist.MAX_SAFE);
 });
 
+test('safe speed: a corner over a crest is slower (the car goes light), a compression is not counted on', () => {
+    const arc = Array.from({ length: 40 }, (_, i) => ({ x: Math.cos(i / 10) * 80 * 6, y: Math.sin(i / 10) * 80 * 6 })); // R 80 m
+    const flat = Assist.safeSpeeds(arc, 6)[20];
+    const crest = Assist.safeSpeeds(arc, 6, arc.map(() => -0.002))[20];
+    assert.ok(crest < flat * 0.95, `${(crest * 3.6).toFixed(0)} vs ${(flat * 3.6).toFixed(0)} km/h`);
+    assert.strictEqual(Assist.safeSpeeds(arc, 6, arc.map(() => 0.002))[20], flat);
+});
+
 const Physics = require('../src/game/Physics');
 const CarPhysics = require('../src/game/CarPhysics');
 

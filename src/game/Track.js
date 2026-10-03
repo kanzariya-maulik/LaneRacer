@@ -3,12 +3,14 @@ const path = require('path');
 const Physics = require('./Physics');
 const Assist = require('./Assist');
 const RacingLine = require('./RacingLine');
+const Elevation = require('../../public/js/sim/elevation.js'); // shared with the browser
 
 const TRACK_IDS = ['monza', 'spa', 'silverstone', 'suzuka', 'sakhir'];
 const DATA_DIR = path.join(__dirname, '..', '..', 'data', 'tracks');
 const CHECKPOINT_COUNT = 16;
 const GRID_SLOTS = 22; // 11 teams x 2 drivers
 const GRID_GAP_M = 8;  // metres between consecutive (staggered) grid slots
+const WIDTH_MULT = 1.5; // scripts/import-tracks.js: the road is drawn this much wider than the real track (run-off)
 const WALL_OFFSET = 80; // matches public/js/sim/drive.js
 // 2022 constructors' order, then the Suzuka special in its own garage
 const GARAGE_ORDER = ['redbull', 'ferrari', 'mercedes', 'alpine', 'mclaren', 'alfaromeo', 'astonmartin', 'haas', 'alphatauri', 'williams', 'redbull-suzuka'];
@@ -40,6 +42,15 @@ function pointAt(pts, cum, s, closed = true) {
 }
 
 const along = (cum, n) => cum[n.i] + n.t * (cum[n.i + 1] - cum[n.i]);
+
+// The real track edge (white line, world units from the centreline) beside point (x, y), on its side of the road.
+// near: Physics.nearestOnTrack(x, y, t). Track limits are judged here; the road beyond is asphalt run-off.
+function edgeAt(t, near, x, y) {
+    const P = t.path, n = P.length, a = P[near.i], b = P[(near.i + 1) % n];
+    const right = -(b.y - a.y) * (x - near.px) + (b.x - a.x) * (y - near.py) > 0; // right = clockwise of the heading (y down)
+    const e = right ? t.edgeR : t.edgeL;
+    return e[near.i] + (e[(near.i + 1) % n] - e[near.i]) * near.t;
+}
 // Offset sideways along L = (-sin a, cos a)
 const lateral = (p, off) => ({ x: p.x - Math.sin(p.angle) * off, y: p.y + Math.cos(p.angle) * off, angle: p.angle });
 
@@ -98,6 +109,56 @@ function buildPit(raw, circuit, track) {
     return { path: pts, width: raw.pit.width, cum, len, entryS, exitS, span, startOnPit, trackSide, limStart: limLo, limEnd: limHi, wall, garages, garageSpan, closeS, closeWall, fitM: raw.pit.fitM };
 }
 
+// Where the track crosses itself at two heights (Suzuka's figure-8): a bridge. The upper road runs over a deck between
+// parapets; the lower one passes between two walls beneath it. Each wall stops only the cars on its own level
+// (drive.js: the road a car is on comes from its heading). Walls: { i (a centreline point of that road), a, b }
+const BRIDGE_MARGIN_M = 1; // deck and walls this far beyond the drawn road edges
+const CUTTING_M = 30;       // the underpass walls carry on this far past the deck: the lower road's cutting
+function buildBridges(t) {
+    const P = t.path, n = P.length, half = t.width / 2, m = BRIDGE_MARGIN_M * t.scale, bridges = [];
+    for (let i = 0; i < n; i++) for (let j = i + 3; j < n - (i === 0 ? 1 : 0); j++) {
+        const a = P[i], b = P[(i + 1) % n], c = P[j], d = P[(j + 1) % n], r = (b.x - a.x) * (d.y - c.y) - (b.y - a.y) * (d.x - c.x);
+        if (!r) continue;
+        const u = ((c.x - a.x) * (d.y - c.y) - (c.y - a.y) * (d.x - c.x)) / r, v = ((c.x - a.x) * (b.y - a.y) - (c.y - a.y) * (b.x - a.x)) / r;
+        if (u < 0 || u > 1 || v < 0 || v > 1) continue;
+        const road = (k, f) => ({ i: k, angle: Math.atan2(P[(k + 1) % n].y - P[k].y, P[(k + 1) % n].x - P[k].x), h: t.z ? t.z[k] + (t.z[(k + 1) % n] - t.z[k]) * f : 0 });
+        const ri = road(i, u), rj = road(j, v);
+        ri.s = t.cum[i] + u * (t.cum[i + 1] - t.cum[i]); rj.s = t.cum[j] + v * (t.cum[j + 1] - t.cum[j]); // lap distance at the crossing
+        const [upper, lower] = ri.h >= rj.h ? [ri, rj] : [rj, ri];
+        const sin = Math.max(0.3, Math.abs(Math.sin(upper.angle - lower.angle)));
+        const x = a.x + (b.x - a.x) * u, y = a.y + (b.y - a.y) * u;
+        const span = (2 * (half + 2 * m)) / sin, under = (2 * (half + m)) / sin + 2 * CUTTING_M * t.scale; // deck length; walled cutting
+        // The road every 5 m along `len` centred on the crossing: { x, y, angle, h (m) }; the deck, the cutting and their
+        // walls all follow these, so they curve and slope with the real roads
+        const total = t.cum[n];
+        const along = (rd, len) => {
+            const out = [], step = 5 * t.scale, k = Math.ceil(len / 2 / step);
+            for (let q = -k; q <= k; q++) {
+                const s = rd.s + (q * len) / (2 * k), p = pointAt(P, t.cum, s), w = ((s % total) + total) % total;
+                let e = 0; while (t.cum[e + 1] < w) e++;
+                const f = (w - t.cum[e]) / (t.cum[e + 1] - t.cum[e] || 1);
+                out.push({ x: p.x, y: p.y, angle: p.angle, h: t.z ? t.z[e] + (t.z[(e + 1) % n] - t.z[e]) * f : 0 });
+            }
+            return out;
+        };
+        const cut = along(lower, under);
+        const edge = (line, side) => line.map((p) => ({ x: p.x - Math.sin(p.angle) * side * (half + m), y: p.y + Math.cos(p.angle) * side * (half + m) }));
+        // A skew deck, as the roads cross at an angle: a parallelogram whose sides are the upper road's edges and whose
+        // ends rest on the cutting walls (outer faces, 1 m thick), so it sits on them however steep the crossing
+        const dir = (a) => ({ x: Math.cos(a), y: Math.sin(a) }), nrm = (a) => ({ x: -Math.sin(a), y: Math.cos(a) });
+        const meet = (p, d, q, e) => { const k = ((q.x - p.x) * e.y - (q.y - p.y) * e.x) / (d.x * e.y - d.y * e.x); return { x: p.x + d.x * k, y: p.y + d.y * k }; };
+        const corner = (su, sl) => {
+            const nu = nrm(upper.angle), nl = nrm(lower.angle), eu = half + m, el = half + 2 * m;
+            return meet({ x: x + nu.x * su * eu, y: y + nu.y * su * eu }, dir(upper.angle), { x: x + nl.x * sl * el, y: y + nl.y * sl * el }, dir(lower.angle));
+        };
+        const corners = [corner(1, -1), corner(1, 1), corner(-1, 1), corner(-1, -1)];
+        bridges.push({ x, y, upper, lower, span, under, cut, corners,
+            walls: [{ i: upper.i, pts: [corners[0], corners[1]] }, { i: upper.i, pts: [corners[3], corners[2]] }, // parapets
+                { i: lower.i, pts: edge(cut, 1) }, { i: lower.i, pts: edge(cut, -1) }] });                         // cutting walls
+    }
+    return bridges;
+}
+
 function build(raw, circuit = {}) {
     const { path: pts, width, scale } = raw;
     const cum = cumulative(pts);
@@ -126,19 +187,35 @@ function build(raw, circuit = {}) {
     // Staggered two-column grid behind the start line, or behind a separate grid line where the circuit has one
     // (gridLineM metres past the timing line: Monza, Suzuka); -1 = driver's left (y points down the screen)
     const gridS = startS + (circuit.gridLineM || 0) * scale;
+    const limit = width / WIDTH_MULT / 2; // median real half-width (where per-point edges are missing)
+    // Real edges (white lines) per point from TUMFTM, right and left of the driver, kept on the drawn road
+    const edge = (k) => pts.map((_, i) => Math.min(raw.edges ? raw.edges[i][k] * scale : limit, width / 2 - 0.5 * scale));
+    const edgeR = edge(0), edgeL = edge(1);
+    const edgeOf = (s, side) => { // at lap distance s; side +1 right, -1 left
+        const total = cum[pts.length]; s = ((s % total) + total) % total;
+        let i = 0; while (cum[i + 1] < s) i++;
+        const e = side > 0 ? edgeR : edgeL, f = (s - cum[i]) / (cum[i + 1] - cum[i] || 1);
+        return e[i] + (e[(i + 1) % pts.length] - e[i]) * f;
+    };
+    const gridLine = circuit.gridLineM ? pointAt(pts, cum, gridS) : null; // the painted start line, ahead of pole
     const pole = circuit.poleSide === 'right' ? 1 : -1;
     const startPositions = [];
     for (let i = 0; i < GRID_SLOTS; i++) {
         const p = pointAt(pts, cum, gridS - (i + 1) * GRID_GAP_M * scale);
-        startPositions.push(lateral(p, (i % 2 === 0 ? pole : -pole) * (width / 4)));
+        const side = i % 2 === 0 ? pole : -pole, s = gridS - (i + 1) * GRID_GAP_M * scale;
+        startPositions.push(lateral(p, side * (edgeOf(s, side) / 2))); // centre of the real lane on that side
     }
 
     // DRS zones as lap distances from the start line (world units)
     const lapS = (m) => ((((m * scale) % total) + total) % total);
     const drsZones = (circuit.drs || []).map(([d, a, b]) => ({ detectS: lapS(d), startS: lapS(a), endS: lapS(b) }));
 
-    const track = { id: raw.id, name: raw.name, scale, width, path: pts, cum, start, startS, drsZones, checkpoints, sectorCps, startPositions, safeSpeed: Assist.safeSpeeds(pts, scale), pit: null };
+    // z: real elevation per path point (metres above the lowest point); grade / vcurv: slope and crest / compression for
+    // the car physics (public/js/sim/elevation.js)
+    const shape = raw.z ? Elevation.profile(raw.z, cum, scale) : { grade: null, vcurv: null };
+    const track = { id: raw.id, name: raw.name, scale, width, limit, edgeR, edgeL, gridLine, path: pts, z: raw.z || null, grade: shape.grade, vcurv: shape.vcurv, cum, start, startS, drsZones, checkpoints, sectorCps, startPositions, safeSpeed: Assist.safeSpeeds(pts, scale, shape.vcurv), pit: null };
     if (raw.pit) track.pit = buildPit(raw, circuit, track);
+    track.bridges = buildBridges(track);
     track.racingLine = RacingLine.compute(track); // visual guide, sent to clients in game_init
     return track;
 }
@@ -156,4 +233,4 @@ function loadAll() {
     return tracks;
 }
 
-module.exports = { TRACK_IDS, GARAGE_ORDER, load, loadAll, build, pointAt };
+module.exports = { TRACK_IDS, GARAGE_ORDER, load, loadAll, build, pointAt, edgeAt };

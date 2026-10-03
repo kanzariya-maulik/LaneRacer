@@ -3,8 +3,8 @@ const assert = require('node:assert');
 const Track = require('../src/game/Track');
 const Physics = require('../src/game/Physics');
 
-let S;
-before(async () => { S = await import('../public/js/scenery.js'); });
+let S, E;
+before(async () => { S = await import('../public/js/scenery.js'); E = await import('../public/js/sim/elevation.js'); });
 const tracks = Track.loadAll();
 
 for (const id of Track.TRACK_IDS) {
@@ -27,6 +27,98 @@ for (const id of Track.TRACK_IDS) {
     });
 }
 
+// Same offsets as game3d.js offsetPoints: normal from the previous and next points
+function offsetPoints(P, off) {
+    const n = P.length;
+    return P.map((p, i) => {
+        const a = P[(i - 1 + n) % n], b = P[(i + 1) % n], l = Math.hypot(b.x - a.x, b.y - a.y) || 1, o = typeof off === 'number' ? off : off[i];
+        return { x: p.x - ((b.y - a.y) / l) * o, y: p.y + ((b.x - a.x) / l) * o };
+    });
+}
+// Points on the asphalt every 3 m: { x, y, h (road height, m), i (segment) }
+function asphalt(t, fn) {
+    const P = t.path, n = P.length, half = t.width / 2;
+    for (let i = 0; i < n; i++) {
+        const a = P[i], b = P[(i + 1) % n], len = Math.hypot(b.x - a.x, b.y - a.y), nx = -(b.y - a.y) / len, ny = (b.x - a.x) / len;
+        for (let s = 0; s < len; s += 3 * t.scale) for (let l = -half * 0.9; l <= half * 0.9; l += 3 * t.scale) {
+            const f = s / len;
+            fn({ x: a.x + (b.x - a.x) * f + nx * l, y: a.y + (b.y - a.y) * f + ny * l, h: t.z[i] + (t.z[(i + 1) % n] - t.z[i]) * f, i });
+        }
+    }
+}
+
+for (const id of Track.TRACK_IDS) {
+    test(`${id}: no grass verge lies over any asphalt (hairpins, bridges, slopes)`, () => {
+        const t = tracks[id], P = t.path, n = P.length, half = t.width / 2, CELL = 20 * t.scale, grid = new Map();
+        const key = (x, y) => `${Math.floor(x / CELL)},${Math.floor(y / CELL)}`;
+        for (const dir of [1, -1]) {
+            const A = offsetPoints(P, dir * half), B = offsetPoints(P, S.vergeReach(t, dir).map((r) => dir * r));
+            for (let i = 0; i < n; i++) {
+                const j = (i + 1) % n, h = Math.max(t.z[i], t.z[j]);
+                for (const tri of [[A[i], B[i], B[j]], [A[i], B[j], A[j]]]) {
+                    const xs = tri.map((p) => p.x), ys = tri.map((p) => p.y);
+                    for (let cx = Math.floor(Math.min(...xs) / CELL); cx <= Math.floor(Math.max(...xs) / CELL); cx++)
+                        for (let cy = Math.floor(Math.min(...ys) / CELL); cy <= Math.floor(Math.max(...ys) / CELL); cy++) {
+                            const k = `${cx},${cy}`; if (!grid.has(k)) grid.set(k, []); grid.get(k).push({ tri, h, i });
+                        }
+                }
+            }
+        }
+        const side = (p, a, b) => (p.x - b.x) * (a.y - b.y) - (a.x - b.x) * (p.y - b.y);
+        const inside = (p, [a, b, c]) => { const d = [side(p, a, b), side(p, b, c), side(p, c, a)]; return !(d.some((v) => v < 0) && d.some((v) => v > 0)); };
+        const bad = [];
+        asphalt(t, (p) => {
+            // the verge is drawn 0.05 m under the asphalt (0.3 vs 0.6 world units): higher than that and it shows
+            for (const v of grid.get(key(p.x, p.y)) || []) if (v.h > p.h + 0.05 && inside(p, v.tri)) { bad.push(Math.round(t.cum[p.i] / t.scale)); break; }
+        });
+        assert.deepStrictEqual([...new Set(bad)], [], `${id}: grass over the road at metres`);
+    });
+
+    // The ground as game3d.js builds it: banked between roads, 256 x 256 grid, pressed down under asphalt and kerbs
+    const ground = (() => {
+        let g = null;
+        return () => {
+            if (g) return g;
+            const t = tracks[id], P = t.path, SEGS = 256;
+            const xs = P.map((p) => p.x), ys = P.map((p) => p.y), gw = Math.max(...xs) - Math.min(...xs) + 8000, gh = Math.max(...ys) - Math.min(...ys) + 8000;
+            const x0 = (Math.min(...xs) + Math.max(...xs) - gw) / 2, y0 = (Math.min(...ys) + Math.max(...ys) - gh) / 2, N = SEGS + 1, cw = gw / SEGS, ch = gh / SEGS;
+            const vr = { 1: S.vergeReach(t, 1), [-1]: S.vergeReach(t, -1) };
+            const H = S.terrainHeights(t, x0, y0, gw, gh, SEGS, S.terrainGround(t, vr), 0.6, t.width / 2 + 1.5 * t.scale);
+            const at = (x, y) => { // the triangle three.js draws there (cell corners a (0,0) b (0,1) c (1,1) d (1,0), split b-d)
+                const u = (x - x0) / cw, v = (y - y0) / ch, ix = Math.floor(u), iy = Math.floor(v), fu = u - ix, fv = v - iy;
+                const A = H[iy * N + ix], B = H[(iy + 1) * N + ix], Cc = H[(iy + 1) * N + ix + 1], D = H[iy * N + ix + 1];
+                return fu + fv <= 1 ? A * (1 - fu - fv) + D * fu + B * fv : Cc * (fu + fv - 1) + B * (1 - fu) + D * (1 - fv);
+            };
+            return (g = { at, vr });
+        };
+    })();
+
+    test(`${id}: the terrain never rises through the road`, () => {
+        const { at } = ground();
+        let worst = -Infinity;
+        asphalt(tracks[id], (p) => { worst = Math.max(worst, at(p.x, p.y) - p.h); });
+        assert.ok(worst < 0.05, `${id}: terrain ${worst.toFixed(2)} m above the road`);
+    });
+
+    test(`${id}: no road floats: just past every verge edge the ground is within the 3 m grass skirt (bridges excepted)`, () => {
+        const t = tracks[id], P = t.path, n = P.length, { at, vr } = ground(), bad = [], crossings = [];
+        for (let i = 0; i < n; i++) for (let j = i + 3; j < n - (i === 0 ? 1 : 0); j++) { // where the track crosses itself
+            const a = P[i], b = P[(i + 1) % n], c = P[j], d = P[(j + 1) % n], r = (b.x - a.x) * (d.y - c.y) - (b.y - a.y) * (d.x - c.x);
+            if (!r) continue;
+            const u = ((c.x - a.x) * (d.y - c.y) - (c.y - a.y) * (d.x - c.x)) / r, v = ((c.x - a.x) * (b.y - a.y) - (c.y - a.y) * (b.x - a.x)) / r;
+            if (u >= 0 && u <= 1 && v >= 0 && v <= 1) crossings.push({ x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u });
+        }
+        for (let i = 0; i < n; i++) {
+            const a = P[i], b = P[(i + 1) % n], len = Math.hypot(b.x - a.x, b.y - a.y), nx = -(b.y - a.y) / len, ny = (b.x - a.x) / len;
+            for (const dir of [1, -1]) {
+                const o = dir * (vr[dir][i] + 1 * t.scale), x = a.x + nx * o, y = a.y + ny * o, near = Physics.nearestOnTrack(x, y, t);
+                if (crossings.some((c) => Math.hypot(x - c.x, y - c.y) < 50 * t.scale)) continue; // at a bridge: open beneath
+                if (t.z[i] - at(x, y) > 3) bad.push(Math.round(t.cum[i] / t.scale));
+            }
+        }
+        assert.deepStrictEqual([...new Set(bad)], [], `${id}: roads floating at metres`);
+    });
+}
 test('scenery is deterministic and scales with density', () => {
     const t = tracks.monza;
     assert.deepStrictEqual(S.placeScenery(t, 0.6, 42), S.placeScenery(t, 0.6, 42));

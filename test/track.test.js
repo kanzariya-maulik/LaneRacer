@@ -133,6 +133,35 @@ for (const id of Track.TRACK_IDS) {
     });
 }
 
+// Published height differences (m): Spa ~102, Suzuka ~40, Sakhir ~20, Silverstone ~12, Monza ~15
+const ELEVATION_RANGE = { spa: [80, 130], suzuka: [30, 55], sakhir: [10, 30], silverstone: [6, 20], monza: [8, 25] };
+for (const id of Track.TRACK_IDS) {
+    test(`${id}: real elevation, one height per path point, ${ELEVATION_RANGE[id].join('-')} m range`, () => {
+        const t = tracks[id];
+        assert.strictEqual(t.z.length, t.path.length);
+        assert.ok(t.z.every(Number.isFinite) && Math.min(...t.z) === 0);
+        const range = Math.max(...t.z);
+        assert.ok(range >= ELEVATION_RANGE[id][0] && range <= ELEVATION_RANGE[id][1], `${range} m`);
+        // smoothed: no step between neighbouring points (~10 m apart) steeper than 25 %
+        t.z.forEach((h, i) => assert.ok(Math.abs(t.z[(i + 1) % t.z.length] - h) < 2.5, `step at point ${i}`));
+    });
+}
+
+test('suzuka: the figure-8 crossover is a bridge, the back straight several metres over the road beneath', () => {
+    const t = tracks.suzuka, P = t.path, n = P.length;
+    const cross = (a, b, c, d) => {
+        const r = (b.x - a.x) * (d.y - c.y) - (b.y - a.y) * (d.x - c.x);
+        if (!r) return false;
+        const u = ((c.x - a.x) * (d.y - c.y) - (c.y - a.y) * (d.x - c.x)) / r, v = ((c.x - a.x) * (b.y - a.y) - (c.y - a.y) * (b.x - a.x)) / r;
+        return u >= 0 && u <= 1 && v >= 0 && v <= 1;
+    };
+    const hits = [];
+    for (let i = 0; i < n; i++) for (let j = i + 3; j < n - (i === 0 ? 1 : 0); j++) if (cross(P[i], P[(i + 1) % n], P[j], P[(j + 1) % n])) hits.push([i, j]);
+    assert.strictEqual(hits.length, 1, 'one crossing');
+    const [i, j] = hits[0];
+    assert.ok(t.z[j] - t.z[i] > 4, `back straight ${t.z[j]} m over ${t.z[i]} m`);
+});
+
 test('build fails loudly on missing files', () => {
     assert.throws(() => Track.load('nope'), /Missing track data/);
 });

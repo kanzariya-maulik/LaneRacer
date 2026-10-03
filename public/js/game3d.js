@@ -4,7 +4,8 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { keyboardStep, gamepadInput } from './input.js';
 import { LEVELS, ratioRange, resolveLevel, autoPick, adaptStep, snapLight, frameCapped } from './quality.js';
-import { placeScenery, seedOf } from './scenery.js';
+import { placeScenery, seedOf, vergeReach, terrainHeights, terrainGround } from './scenery.js';
+import { heightAt } from './sim/elevation.js';
 import { SnapshotBuffer, RenderClock, sample, samplePresent, decodeFlags } from './netsync.js';
 import { Predictor, STEP_S } from './predict.js';
 import { Gearbox, shiftLights } from './audio/gearbox.js';
@@ -15,12 +16,16 @@ import { MODES, segmentColor, cornerMask, aheadM, trackIndex, nextMode } from '.
 
 // World units per metre come from the track JSON (track.scale = 6).
 const WHEEL_RADIUS_M = 0.36;  // scripts/car_parts.py WHEEL_RADIUS
+const WHEELBASE_M = 3.6, TRACK_WIDTH_M = 1.6; // contact patches for the body's pitch and roll on the road (sim C.WHEELBASE)
 const WALL_OFFSET = 80;       // public/js/sim/drive.js barrier beyond the track edge
 const CHASE_BACK_M = 10, CHASE_UP_M = 4, LOOK_AHEAD_M = 6;
 const CAM_TURN_SMOOTH = 8; // 1/s; time-based so lag doesn't grow at low frame rates
 const KERB_TURN = 0.05;       // rad per path segment (~10 m) → radius under ~200 m gets kerbs
 const TAG_FULL_M = 40, TAG_GONE_M = 120; // name labels fade out between these camera distances
 const PIT_RUNOFF_M = 2; // public/js/sim/drive.js barrier outside the pit lane
+const ELEVATION_SCALE = 1;  // real heights (track z); raise to exaggerate flat circuits like Monza
+const SKIRT_M = 3;          // grass hanging from each verge edge, down to the banked ground
+const TERRAIN_SINK_M = 0.6; // ground beyond the verge sits this far below the road, so its coarse grid never pokes through
 const teamInfo = {};
 fetch('teams.json').then(r => r.json()).then((list) => { for (const t of list) teamInfo[t.id] = t; });
 
@@ -43,6 +48,9 @@ window.lanraceQuality = { choice, level };
 
 // Antialias is fixed for the page's lifetime: it follows the level chosen at load
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: Q.antialias, powerPreference: 'high-performance' });
+// Reading each shader's error log forces the GPU driver to finish compiling it there and then (a 2 s stall at a session's
+// start in profiles); errors are a developer concern, the console still shows WebGL's own
+renderer.debug.checkShaderErrors = false;
 let res = { ...ratioRange(level, window.devicePixelRatio), good: 0 };
 res.ratio = res.start;
 renderer.setPixelRatio(res.ratio);
@@ -227,9 +235,51 @@ function updateJoystick(touch) {
     };
 }
 
+// ---------- ground ----------
+const GROUND_COARSE = 64, GROUND_FINE = 256; // grid cells a side: at once, then from the worker
+let terrainWorker, groundJob = 0;
+// The fine ground grid in a worker (terrain-worker.js); without workers, on this thread after the first frame
+function fineGround(t, reach, grid, done) {
+    const id = ++groundJob, finish = (H) => { if (id === groundJob) done(H); };
+    const here = () => setTimeout(() => finish(terrainHeights(t, grid.x0, grid.y0, grid.w, grid.h, grid.segs, terrainGround(t, reach), grid.sink, grid.carve)), 0);
+    if (terrainWorker === undefined) {
+        try {
+            const w = new Worker(new URL('./terrain-worker.js', import.meta.url), { type: 'module' }), pending = new Map();
+            w.onmessage = ({ data }) => { const job = pending.get(data.id); pending.delete(data.id); job?.done(data.H); };
+            w.onerror = (e) => { // finish what was asked of it here, and stop using it
+                console.warn('[LanRace] terrain worker failed, building on the main thread', e);
+                terrainWorker = null;
+                for (const job of pending.values()) job.here();
+                pending.clear();
+            };
+            terrainWorker = { w, pending };
+        } catch (e) { terrainWorker = null; }
+    }
+    if (!terrainWorker) return here();
+    terrainWorker.pending.set(id, { done: finish, here });
+    terrainWorker.w.postMessage({ id, t: { path: t.path, z: t.z, width: t.width, scale: t.scale, bridges: t.bridges }, reach, ...grid });
+}
+
 // ---------- track geometry ----------
 let world = null;
 let scale = 6;
+let elev = null; // the current track: road heights (the physics feels them too, in sim/elevation.js)
+// Road height in world units under a world point, and the terrain a little below it
+// angle (optional): the road a car heading that way is on, so at Suzuka's bridge it stays on its own level
+const roadY = (x, y, angle, hint) => (elev ? heightAt(elev, x, y, angle, hint).h * scale * ELEVATION_SCALE : 0);
+// Terrain: under the lowest road within the barriers (never over the lower road at a bridge)
+let groundFn = null; // this track's ground height (m), set when the world is built (scenery.js terrainGround)
+const groundY = (x, y) => (groundFn ? groundFn(x, y) * scale * ELEVATION_SCALE : 0) - TERRAIN_SINK_M * scale;
+// Height of every point of a polyline: the centreline uses its own z, anything else (pit lane, walls) looks it up
+const heightCache = new WeakMap();
+function heights(path) {
+    let h = heightCache.get(path);
+    if (!h) {
+        h = elev && path === elev.path && elev.z ? elev.z.map((z) => z * scale * ELEVATION_SCALE) : path.map((p) => roadY(p.x, p.y));
+        heightCache.set(path, h);
+    }
+    return h;
+}
 let bounds = null;
 let snapCamera = true;
 const cars = {}; // playerId -> { root, wheels, teamId }
@@ -244,7 +294,7 @@ function getBounds(path) {
     return b;
 }
 
-// Offset every path point sideways (positive = left of travel in screen space)
+// Offset every path point sideways (positive = left of travel in screen space); offset: one number or one per point
 function offsetPoints(path, offset) {
     const n = path.length;
     return path.map((p, i) => {
@@ -252,7 +302,8 @@ function offsetPoints(path, offset) {
         let dx = next.x - prev.x, dy = next.y - prev.y;
         const len = Math.hypot(dx, dy) || 1;
         dx /= len; dy /= len;
-        return { x: p.x - dy * offset, y: p.y + dx * offset };
+        const o = typeof offset === 'number' ? offset : offset[i];
+        return { x: p.x - dy * o, y: p.y + dx * o };
     });
 }
 
@@ -293,7 +344,7 @@ function coloredMesh(pos, col, uv = null, opts = {}) {
 
 // Flat band between two sideways offsets, only on segments where keep(i); opts.map tiles every opts.repeatM metres
 function strip(path, from, to, y, keep, colorAt, opts = {}) {
-    const a = offsetPoints(path, from), b = offsetPoints(path, to);
+    const a = offsetPoints(path, from), b = offsetPoints(path, to), H = heights(path);
     const pos = [], col = [], uv = [];
     const rep = (opts.repeatM || 8) * scale;
     let along = 0;
@@ -301,9 +352,9 @@ function strip(path, from, to, y, keep, colorAt, opts = {}) {
         const j = (i + 1) % path.length;
         const seg = Math.hypot(path[j].x - path[i].x, path[j].y - path[i].y);
         if (keep(i)) {
-            const c = colorAt(i), v0 = along / rep, v1 = (along + seg) / rep;
-            pos.push(a[i].x, y, a[i].y, b[i].x, y, b[i].y, b[j].x, y, b[j].y,
-                     a[i].x, y, a[i].y, b[j].x, y, b[j].y, a[j].x, y, a[j].y);
+            const c = colorAt(i), v0 = along / rep, v1 = (along + seg) / rep, yi = y + H[i], yj = y + H[j];
+            pos.push(a[i].x, yi, a[i].y, b[i].x, yi, b[i].y, b[j].x, yj, b[j].y,
+                     a[i].x, yi, a[i].y, b[j].x, yj, b[j].y, a[j].x, yj, a[j].y);
             uv.push(0, v0, 1, v0, 1, v1, 0, v0, 1, v1, 0, v1);
             for (let k = 0; k < 6; k++) col.push(c.r, c.g, c.b);
         }
@@ -336,14 +387,14 @@ function asphaltTexture() {
 
 // Vertical wall at one sideways offset
 function wall(path, offset, height, keep, colorAt) {
-    const a = offsetPoints(path, offset);
+    const a = offsetPoints(path, offset), H = heights(path);
     const pos = [], col = [];
     for (let i = 0; i < path.length; i++) {
         if (!keep(i)) continue;
         const j = (i + 1) % path.length;
-        const c = colorAt(i);
-        pos.push(a[i].x, 0, a[i].y, a[j].x, 0, a[j].y, a[j].x, height, a[j].y,
-                 a[i].x, 0, a[i].y, a[j].x, height, a[j].y, a[i].x, height, a[i].y);
+        const c = colorAt(i), hi = H[i], hj = H[j];
+        pos.push(a[i].x, hi, a[i].y, a[j].x, hj, a[j].y, a[j].x, hj + height, a[j].y,
+                 a[i].x, hi, a[i].y, a[j].x, hj + height, a[j].y, a[i].x, hi + height, a[i].y);
         for (let k = 0; k < 6; k++) col.push(c.r, c.g, c.b);
     }
     return coloredMesh(pos, col);
@@ -379,7 +430,7 @@ function startLine(start, width) {
     const geo = new THREE.PlaneGeometry(2 * scale, width);
     geo.rotateX(-Math.PI / 2);
     const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: tex }));
-    m.position.set(start.x, 1.0, start.y);
+    m.position.set(start.x, 1.0 + roadY(start.x, start.y), start.y);
     m.rotation.y = -start.angle;
     m.receiveShadow = true;
     return m;
@@ -456,9 +507,9 @@ function atlasPlanes(items, w, h, bg, fg = '#fff') {
 function gridBoxes(slots) {
     const bars = [], nums = [];
     slots.forEach((g, i) => {
-        const fx = Math.cos(g.angle), fy = Math.sin(g.angle);
-        bars.push({ x: g.x + fx * 3 * scale, y: 0.9, z: g.y + fy * 3 * scale, angle: -g.angle });
-        nums.push({ text: String(i + 1), x: g.x + fx * 4.6 * scale, y: 0.95, z: g.y + fy * 4.6 * scale, rotY: facing(g.angle), flat: true });
+        const fx = Math.cos(g.angle), fy = Math.sin(g.angle), h = roadY(g.x, g.y);
+        bars.push({ x: g.x + fx * 3 * scale, y: 0.9 + h, z: g.y + fy * 3 * scale, angle: -g.angle });
+        nums.push({ text: String(i + 1), x: g.x + fx * 4.6 * scale, y: 0.95 + h, z: g.y + fy * 4.6 * scale, rotY: facing(g.angle), flat: true });
     });
     const barGeo = new THREE.PlaneGeometry(0.4 * scale, 2.6 * scale);
     barGeo.rotateX(-Math.PI / 2);
@@ -491,7 +542,7 @@ function buildPit(pit, t) {
     const board = (s0, text, bg) => {
         const p = at(s0), b = side(p, p.angle, -s * (ph + 1 * scale));
         const m = textPlane(text, 3 * scale, 1.5 * scale, bg);
-        m.position.set(b.x, 2 * scale, b.y);
+        m.position.set(b.x, 2 * scale + roadY(b.x, b.y), b.y);
         m.rotation.y = facing(p.angle);
         world.add(m);
     };
@@ -502,7 +553,7 @@ function buildPit(pit, t) {
     world.add(wall(pit.closeWall, 0, 1.2 * scale, (i) => i === 0, solid('#d62828')));
     for (const s0 of [Math.max(pit.limStart, pit.closeS), pit.limEnd]) {
         const p = at(s0), m = flat(0.5 * scale, pit.width, 0xf2f2f2);
-        m.position.set(p.x, 0.9, p.y);
+        m.position.set(p.x, 0.9 + roadY(p.x, p.y), p.y);
         m.rotation.y = -p.angle;
         world.add(m);
     }
@@ -510,11 +561,11 @@ function buildPit(pit, t) {
     const buildings = [], signs = [], marks = [];
     for (const g of pit.garages) {
         const info = teamInfo[g.teamId] || { name: g.teamId, chatColor: '#888888' };
-        const c = side(g, g.angle, -s * (back + 2.5 * scale));
-        buildings.push({ x: c.x, y: 3 * scale, z: c.y, angle: -g.angle });
+        const c = side(g, g.angle, -s * (back + 2.5 * scale)), h = roadY(g.x, g.y);
+        buildings.push({ x: c.x, y: 3 * scale + h, z: c.y, angle: -g.angle });
         const f = side(g, g.angle, -s * (back - 0.1 * scale));
-        signs.push({ text: info.name.toUpperCase(), x: f.x, y: 5 * scale, z: f.y, rotY: s > 0 ? -g.angle : Math.PI - g.angle, bg: info.chatColor });
-        for (const b of g.boxes) marks.push({ x: b.x, y: 0.8, z: b.y, angle: -b.angle, color: info.chatColor });
+        signs.push({ text: info.name.toUpperCase(), x: f.x, y: 5 * scale + h, z: f.y, rotY: s > 0 ? -g.angle : Math.PI - g.angle, bg: info.chatColor });
+        for (const b of g.boxes) marks.push({ x: b.x, y: 0.8 + h, z: b.y, angle: -b.angle, color: info.chatColor });
     }
     const bGeo = new THREE.BoxGeometry(18 * scale, 6 * scale, 5 * scale);
     const garagesMesh = instanced(bGeo, new THREE.MeshStandardMaterial({ color: 0x2b2f36 }), buildings);
@@ -527,6 +578,65 @@ function buildPit(pit, t) {
 }
 
 const solid = (hex) => { const c = new THREE.Color(hex); return () => c; };
+
+// Suzuka's overpass, as in the photos, all from the server's bridge geometry (Track.js buildBridges): a skew concrete deck
+// whose ends rest on the cutting walls, parapets with a blue band and a light catch fence along its sides, the lower
+// road's cutting lined with concrete walls that follow its curve, and grass along the top of each wall joining it to the
+// ground. The physics stops cars at the same parapets and walls.
+const DECK_M = 1.2, BERM_M = 16;
+function buildBridge(b, t) {
+    const S = scale * ELEVATION_SCALE, up = b.upper.h * S, deck = DECK_M * scale, top = up + 0.5; // deck top: just under the asphalt
+    const solidMesh = (pos, color, opts = {}) => {
+        const g = new THREE.BufferGeometry();
+        g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+        g.computeVertexNormals();
+        const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color, roughness: 0.9, side: THREE.DoubleSide, ...opts }));
+        m.castShadow = !opts.transparent; m.receiveShadow = true;
+        world.add(m);
+    };
+    const quad = (pos, a, b2, c, d) => pos.push(a.x, a.h, a.y, b2.x, b2.h, b2.y, c.x, c.h, c.y, a.x, a.h, a.y, c.x, c.h, c.y, d.x, d.h, d.y);
+    const at = (p, h) => ({ x: p.x, y: p.y, h });
+
+    // Deck: the parallelogram between the upper road's edges and the walls, 1.2 m deep
+    const C = b.corners, slab = [];
+    quad(slab, at(C[0], top), at(C[1], top), at(C[2], top), at(C[3], top));
+    quad(slab, at(C[0], top - deck), at(C[1], top - deck), at(C[2], top - deck), at(C[3], top - deck));
+    for (let k = 0; k < 4; k++) { const p = C[k], q = C[(k + 1) % 4]; quad(slab, at(p, top - deck), at(q, top - deck), at(q, top), at(p, top)); }
+    solidMesh(slab, 0xc9c4ba);
+
+    // Parapets along both sides of the deck: concrete, a blue band, a light catch fence above
+    const wallPos = [], band = [], fence = [];
+    for (const [p, q] of [[C[0], C[1]], [C[3], C[2]]]) {
+        quad(wallPos, at(p, top), at(q, top), at(q, top + 0.8 * scale), at(p, top + 0.8 * scale));
+        quad(band, at(p, top + 0.8 * scale), at(q, top + 0.8 * scale), at(q, top + 1.1 * scale), at(p, top + 1.1 * scale));
+        quad(fence, at(p, top + 1.1 * scale), at(q, top + 1.1 * scale), at(q, top + 3 * scale), at(p, top + 3 * scale));
+    }
+    solidMesh(wallPos, 0xd9d6cf);
+    solidMesh(band, 0x1e5bd8);
+    solidMesh(fence, 0x9aa3ad, { transparent: true, opacity: 0.15, depthWrite: false });
+
+    // Cutting walls along the lower road, from below it up to the ground just outside (into the deck under the bridge),
+    // and a grass strip from each wall's top out to the ground, so nothing shows between them
+    const walls = [], berm = [];
+    for (const [w, side] of [[b.walls[2], 1], [b.walls[3], -1]]) {
+        const outer = w.pts.map((p, k) => {
+            const a = b.cut[k].angle, o = side * BERM_M * scale;
+            return { x: p.x - Math.sin(a) * o, y: p.y + Math.cos(a) * o };
+        });
+        const tops = w.pts.map((p, k) => {
+            const a = b.cut[k].angle, o = side * 2 * scale, low = b.cut[k].h * S;
+            return Math.max(low + 0.5 * scale, groundY(p.x - Math.sin(a) * o, p.y + Math.cos(a) * o) + TERRAIN_SINK_M * scale);
+        });
+        for (let k = 0; k + 1 < w.pts.length; k++) {
+            const p = w.pts[k], q = w.pts[k + 1], lp = b.cut[k].h * S - scale, lq = b.cut[k + 1].h * S - scale;
+            quad(walls, at(p, lp), at(q, lq), at(q, tops[k + 1]), at(p, tops[k]));
+            quad(berm, at(p, tops[k] - 0.1 * scale), at(q, tops[k + 1] - 0.1 * scale),
+                at(outer[k + 1], groundY(outer[k + 1].x, outer[k + 1].y)), at(outer[k], groundY(outer[k].x, outer[k].y)));
+        }
+    }
+    solidMesh(walls, 0xc9c4ba);
+    solidMesh(berm, 0x5f9e35);
+}
 
 const LINE_RGB = { green: new THREE.Color('#22c55e'), yellow: new THREE.Color('#facc15'), red: new THREE.Color('#ef4444') };
 
@@ -543,15 +653,15 @@ function buildRacingLine(t) {
         return { x: p.x - ((b.y - a.y) / len) * rl.offset[i], y: p.y + ((b.x - a.x) / len) * rl.offset[i] };
     });
     // One chevron per segment, pointing along the lap: 4 triangles = 12 vertices
-    const pos = new Float32Array(n * 36);
+    const pos = new Float32Array(n * 36), H = heights(P);
     for (let i = 0; i < n; i++) {
         const a = L[i], b = L[(i + 1) % n], len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
-        const tx = (b.x - a.x) / len, ty = (b.y - a.y) / len;
-        const at = (f, s) => ({ x: a.x + tx * len * f - ty * w * s, y: a.y + ty * len * f + tx * w * s });
+        const tx = (b.x - a.x) / len, ty = (b.y - a.y) / len, h0 = H[i], h1 = H[(i + 1) % n];
+        const at = (f, s) => ({ x: a.x + tx * len * f - ty * w * s, y: a.y + ty * len * f + tx * w * s, h: h0 + (h1 - h0) * f });
         const BL = at(0, 1), BR = at(0, -1), NOTCH = at(0.35, 0), FL = at(0.6, 1), FR = at(0.6, -1), TIP = at(0.95, 0);
         [BL, FL, NOTCH, FL, TIP, NOTCH, TIP, FR, NOTCH, FR, BR, NOTCH].forEach((p, v) => {
             const k = i * 36 + v * 3;
-            pos[k] = p.x; pos[k + 1] = y; pos[k + 2] = p.y;
+            pos[k] = p.x; pos[k + 1] = y + p.h; pos[k + 2] = p.y;
         });
     }
     const g = new THREE.BufferGeometry();
@@ -602,6 +712,8 @@ function colourLine() {
 
 function buildWorld(t) {
     applyLevel(resolveLevel(store.get('lanrace.quality') || 'auto', store.get('lanrace.quality.auto')));
+    elev = t; // road heights for everything built below, the cars and the camera
+    scale = t.scale;
     // Quali → race on the same track: keep the world (rebuilding recompiles every shader and stalls the lights);
     // only the cars and the racing line are per session
     if (world && world.userData.trackId === t.id && world.userData.level === level) {
@@ -643,24 +755,62 @@ function buildWorld(t) {
     const all = () => true;
     const alternate = (h1, h2) => { const a = new THREE.Color(h1), b = new THREE.Color(h2); return (i) => (i % 2 ? a : b); };
 
+    // Grass verge at road height from the track edge towards the barrier, so the road never sits on a step; it stops
+    // short wherever another part of the track is nearer (hairpins, Suzuka's bridge) and leaves room for a grass bank down
+    // to a road at another height (scenery.js vergeReach)
+    const vr = { 1: vergeReach(t, 1), [-1]: vergeReach(t, -1) };
+    const reach = { 1: vr[1], [-1]: vr[-1].map((r) => -r) };
+    groundFn = t.z ? terrainGround(t, vr) : null;
+    // Ground: a height grid following each road out to its verge edge, banking between roads at different heights, pressed
+    // down wherever a road passes so no triangle covers the asphalt (scenery.js terrainGround / terrainHeights, tested)
+    // ponytail: heights from the roads only; a real terrain model if hills away from the track matter
+    // A coarse grid at once (a few ms), the fine one from a worker a moment later, so a session never freezes on it
     const gw = bounds.maxX - bounds.minX + 8000, gh = bounds.maxY - bounds.minY + 8000;
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(gw, gh), new THREE.MeshStandardMaterial({ map: grassTexture(gw, gh), roughness: 1 }));
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.set((bounds.minX + bounds.maxX) / 2, 0, (bounds.minY + bounds.maxY) / 2);
+    const x0 = (bounds.minX + bounds.maxX - gw) / 2, y0 = (bounds.minY + bounds.maxY - gh) / 2, carve = half + 1.5 * scale; // asphalt + kerbs
+    const groundGeo = (segs, H) => {
+        const g = new THREE.PlaneGeometry(gw, gh, segs, segs);
+        g.rotateX(-Math.PI / 2);
+        g.translate((bounds.minX + bounds.maxX) / 2, 0, (bounds.minY + bounds.maxY) / 2);
+        if (!H) return g;
+        const gp = g.attributes.position, cw = gw / segs, ch = gh / segs;
+        for (let k = 0; k < gp.count; k++) {
+            const ix = Math.round((gp.getX(k) - x0) / cw), iy = Math.round((gp.getZ(k) - y0) / ch);
+            gp.setY(k, H[iy * (segs + 1) + ix] * scale * ELEVATION_SCALE);
+        }
+        g.computeVertexNormals();
+        return g;
+    };
+    const coarse = t.z ? terrainHeights(t, x0, y0, gw, gh, GROUND_COARSE, groundFn, TERRAIN_SINK_M, carve) : null;
+    const ground = new THREE.Mesh(groundGeo(GROUND_COARSE, coarse), new THREE.MeshStandardMaterial({ map: grassTexture(gw, gh), roughness: 1 }));
     ground.receiveShadow = true;
     world.add(ground);
-
+    if (t.z) fineGround(t, vr, { x0, y0, w: gw, h: gh, segs: GROUND_FINE, sink: TERRAIN_SINK_M, carve }, (H) => {
+        if (ground.parent !== world) return; // the world was rebuilt meanwhile
+        const old = ground.geometry;
+        ground.geometry = groundGeo(GROUND_FINE, H);
+        old.dispose();
+    });
+    if (t.z) for (const dir of [1, -1]) {
+        world.add(strip(path, dir > 0 ? half : reach[-1], dir > 0 ? reach[1] : -half, 0.3, all, solid('#5f9e35')));
+        // A grass skirt hanging from the verge edge hides what the coarse ground grid smooths away on banks; none where
+        // another road passes beneath (the bridge stays open)
+        const edge = offsetPoints(path, reach[dir]), open = edge.map((q, k) => distToPath(q, path) >= vr[dir][k] * 0.9);
+        world.add(wall(path, reach[dir], -SKIRT_M * scale, (k) => open[k] && open[(k + 1) % n], solid('#5f9e35')));
+    }
     world.add(strip(path, -half, half, 0.6, all, solid('#4a505a'), { map: asphaltTexture(), repeatM: 8 }));
-    const inset = 0.5 * scale, lineW = 0.3 * scale;
-    world.add(strip(path, half - inset - lineW, half - inset, 0.9, all, solid('#f2f2f2'), { layer: 2 }));
-    world.add(strip(path, -half + inset, -half + inset + lineW, 0.9, all, solid('#f2f2f2'), { layer: 2 }));
+    // White lines on the REAL track edge (t.limit: track limits are judged there); beyond them the road carries on as
+    // asphalt run-off to the drawn edge (the game's road is 1.5x the real width)
+    const R = t.edgeR || path.map(() => half - 0.5 * scale), L = t.edgeL || R, lineW = 0.3 * scale; // per point (+ = driver's right)
+    const add = (e, d) => e.map((v) => v + d), neg = (e, d = 0) => e.map((v) => -(v + d));
+    world.add(strip(path, add(R, -lineW), R, 0.9, all, solid('#f2f2f2'), { layer: 2 }));
+    world.add(strip(path, neg(L), neg(L, -lineW), 0.9, all, solid('#f2f2f2'), { layer: 2 }));
 
     // Kerbs on corners (visual only), widened by 2 points so they don't flicker on and off
     const turny = path.map((_, i) => turnAngle(path, i) > KERB_TURN);
     const curvy = turny.map((_, i) => [-2, -1, 0, 1, 2].some((d) => turny[(i + d + n) % n]));
     const kerbW = 1.5 * scale;
-    world.add(strip(path, half, half + kerbW, 0.7, (i) => curvy[i], alternate('#d62828', '#f2f2f2'), { layer: 1 }));
-    world.add(strip(path, -half - kerbW, -half, 0.7, (i) => curvy[i], alternate('#d62828', '#f2f2f2'), { layer: 1 }));
+    world.add(strip(path, R, add(R, kerbW), 0.7, (i) => curvy[i], alternate('#d62828', '#f2f2f2'), { layer: 1 }));
+    world.add(strip(path, neg(L, kerbW), neg(L), 0.7, (i) => curvy[i], alternate('#d62828', '#f2f2f2'), { layer: 1 }));
 
     const scen = placeScenery(t, Q.scenery, seedOf(t.id));
     const onSlow = (side) => {
@@ -671,7 +821,8 @@ function buildWorld(t) {
     const slowOut = { 1: onSlow(1), [-1]: onSlow(-1) };
     // Gravel traps on the outside of slow corners, between the kerb and the barrier (visual only)
     for (const dir of [1, -1]) {
-        const from = dir > 0 ? half + kerbW : -(half + WALL_OFFSET - 1 * scale), to = dir > 0 ? half + WALL_OFFSET - 1 * scale : -(half + kerbW);
+        const edge = reach[dir].map((r) => r - dir * scale); // a metre inside the verge's reach
+        const from = dir > 0 ? half : edge, to = dir > 0 ? edge : -half; // from the end of the asphalt run-off
         world.add(strip(path, from, to, 0.4, (i) => slowOut[dir][i], solid('#cdb98f')));
     }
     // Rubbered-in racing line through slow corners: inside at the apex, drifting out on exit (Medium/High)
@@ -685,8 +836,8 @@ function buildWorld(t) {
         }
     }
     // Thin dark outer edge on the kerbs so they read at speed
-    world.add(strip(path, half + kerbW - 0.2 * scale, half + kerbW, 0.72, (i) => curvy[i], solid('#5a1414'), { layer: 2 }));
-    world.add(strip(path, -half - kerbW, -half - kerbW + 0.2 * scale, 0.72, (i) => curvy[i], solid('#5a1414'), { layer: 2 }));
+    world.add(strip(path, add(R, kerbW - 0.2 * scale), add(R, kerbW), 0.72, (i) => curvy[i], solid('#5a1414'), { layer: 2 }));
+    world.add(strip(path, neg(L, kerbW), neg(L, kerbW - 0.2 * scale), 0.72, (i) => curvy[i], solid('#5a1414'), { layer: 2 }));
     buildRacingLine(t);
 
     // Barriers exactly where the physics wall is; skipped where another part of the track is closer
@@ -702,9 +853,9 @@ function buildWorld(t) {
     // Trees: trunk + crown, two sizes, one draw each
     const trunks = [], crowns = [];
     for (const tr of scen.trees) {
-        const k = tr.size === 2 ? 1.6 : 1;
-        trunks.push({ x: tr.x, y: 2 * scale * k, z: tr.y, sx: k, sy: k, sz: k });
-        crowns.push({ x: tr.x, y: 7 * scale * k, z: tr.y, sx: k, sy: k, sz: k });
+        const k = tr.size === 2 ? 1.6 : 1, h = groundY(tr.x, tr.y);
+        trunks.push({ x: tr.x, y: 2 * scale * k + h, z: tr.y, sx: k, sy: k, sz: k });
+        crowns.push({ x: tr.x, y: 7 * scale * k + h, z: tr.y, sx: k, sy: k, sz: k });
     }
     world.add(instanced(new THREE.CylinderGeometry(0.4 * scale, 0.5 * scale, 4 * scale, 6), new THREE.MeshStandardMaterial({ color: 0x5b3a1e, roughness: 1 }), trunks));
     world.add(instanced(new THREE.ConeGeometry(3 * scale, 9 * scale, 7), new THREE.MeshStandardMaterial({ color: 0x2f6b2a, roughness: 1 }), crowns));
@@ -712,22 +863,31 @@ function buildWorld(t) {
     // Grandstands: stepped stand + coloured seats
     const stands = [], seats = [];
     for (const g of scen.grandstands) {
-        stands.push({ x: g.x, y: 4 * scale, z: g.y, angle: -g.angle });
-        seats.push({ x: g.x, y: 8.2 * scale, z: g.y, angle: -g.angle });
+        const h = groundY(g.x, g.y);
+        stands.push({ x: g.x, y: 4 * scale + h, z: g.y, angle: -g.angle });
+        seats.push({ x: g.x, y: 8.2 * scale + h, z: g.y, angle: -g.angle });
     }
     world.add(instanced(new THREE.BoxGeometry(60 * scale, 8 * scale, 12 * scale), new THREE.MeshStandardMaterial({ color: 0x9aa0a6 }), stands));
     world.add(instanced(new THREE.BoxGeometry(58 * scale, 0.6 * scale, 10 * scale), new THREE.MeshStandardMaterial({ color: 0x1e5bd8 }), seats));
 
     // Billboards: one atlas, facing the track
     const boards = scen.billboards.map((b) => ({
-        text: b.text, x: b.x, y: 2.5 * scale, z: b.y, rotY: b.side > 0 ? -b.angle : Math.PI - b.angle,
+        text: b.text, x: b.x, y: 2.5 * scale + groundY(b.x, b.y), z: b.y, rotY: b.side > 0 ? -b.angle : Math.PI - b.angle,
         bg: ['#d62828', '#1e5bd8', '#2a9d3f', '#111827'][b.text.length % 4],
     }));
     if (boards.length) world.add(atlasPlanes(boards, 12 * scale, 3 * scale, '#111827'));
 
-    world.add(startLine(t.start, t.width));
+    world.add(startLine(t.start, t.width)); // chequered: the timing / finish line
+    if (t.gridLine) { // the white start line across the real track, ahead of pole (the grid sits past the timing line)
+        const g = t.gridLine, i = trackIndex(path, g.x, g.y, null), r = R[i], l = L[i], m = flat(0.4 * scale, r + l, 0xf2f2f2);
+        const c = side(g, g.angle, (r - l) / 2); // white line to white line, centred between them
+        m.position.set(c.x, 0.95 + roadY(g.x, g.y, g.angle), c.y);
+        m.rotation.y = -g.angle;
+        world.add(m);
+    }
     gridBoxes(t.startPositions);
     if (t.pit) buildPit(t.pit, t);
+    for (const b of t.bridges || []) buildBridge(b, t);
     snapCamera = true;
 }
 
@@ -745,6 +905,8 @@ function dropCar(id) {
 new GLTFLoader().load('models/car.glb', (gltf) => {
     carTemplate = gltf.scene;
     for (const id in cars) dropCar(id); // replace placeholder boxes next frame
+    // The paint reflection takes ~1.5 s of GPU work to make: done now, in the lobby, not when the first car appears
+    if (Q.envMap) (window.requestIdleCallback || setTimeout)(() => envTexture());
 }, undefined, (err) => console.error('[LanRace] car.glb failed to load, using boxes', err));
 
 function liveryTexture(teamId) {
@@ -861,7 +1023,7 @@ function updateCars(dt) {
             car = makeCar(id);
             if (!car) continue;
             car.root.position.set(s.x, 0, s.y);
-            car.root.rotation.y = -s.angle;
+            car.root.rotation.order = 'YXZ'; // heading, then pitch about the car's own axis
             world.add(car.root);
             cars[id] = car;
         }
@@ -869,6 +1031,16 @@ function updateCars(dt) {
         r.position.x = s.x;
         r.position.z = s.y;
         r.rotation.y = -s.angle;
+        // All four tyres on the road: height under each wheel, the body takes their average, pitch and roll
+        if (elev && elev.z) {
+            const fx = Math.cos(s.angle), fy = Math.sin(s.angle), ax = WHEELBASE_M / 2 * scale, tw = TRACK_WIDTH_M / 2 * scale;
+            car.roadI = heightAt(elev, s.x, s.y, s.angle, car.roadI).i; // its own road, followed frame to frame (bridge levels)
+            const at = (a, l) => roadY(s.x + fx * a - fy * l, s.y + fy * a + fx * l, s.angle, car.roadI); // l > 0: driver's right
+            const fl = at(ax, -tw), fr = at(ax, tw), rl = at(-ax, -tw), rr = at(-ax, tw);
+            r.position.y = (fl + fr + rl + rr) / 4;
+            r.rotation.z = Math.atan((fl + fr - rl - rr) / 2 / (2 * ax)); // nose up on a climb (+z lifts the +x nose)
+            r.rotation.x = Math.atan((fl + rl - fr - rr) / 2 / (2 * tw)); // right side lower: lean right (+x tips +y to +z)
+        }
         const far = camera.position.distanceTo(r.position) > 300 * scale; // wheels unreadable that far: 4 fewer draws per car
         for (const w of car.wheels) w.userData.show = !far;
         for (const w of car.wheels) w.rotation.z -= (s.speed / (WHEEL_RADIUS_M * scale)) * dt;
@@ -995,11 +1167,13 @@ function updateCamera(dt) {
     const d = target - camHeading;
     camHeading += Math.atan2(Math.sin(d), Math.cos(d)) * (1 - Math.exp(-CAM_TURN_SMOOTH * dt));
     const h = camHeading;
-    camera.position.set(p.x - Math.cos(h) * CHASE_BACK_M * scale, CHASE_UP_M * scale, p.z - Math.sin(h) * CHASE_BACK_M * scale);
-    look.set(p.x + Math.cos(h) * LOOK_AHEAD_M * scale, 1 * scale, p.z + Math.sin(h) * LOOK_AHEAD_M * scale);
+    // Height: the road behind the car (so the camera rises before a crest, not into it), never below the car's own level
+    const bx = p.x - Math.cos(h) * CHASE_BACK_M * scale, bz = p.z - Math.sin(h) * CHASE_BACK_M * scale;
+    camera.position.set(bx, Math.max(p.y, roadY(bx, bz, h)) + CHASE_UP_M * scale, bz);
+    look.set(p.x + Math.cos(h) * LOOK_AHEAD_M * scale, p.y + 1 * scale, p.z + Math.sin(h) * LOOK_AHEAD_M * scale);
     camera.lookAt(look);
     // Moved in whole shadow-map texels so shadow edges don't shimmer as the car drives
-    const q = snapLight({ x: p.x, y: 0, z: p.z }, SUN_OFF, 720 / (Q.shadows || 1024));
+    const q = snapLight({ x: p.x, y: p.y, z: p.z }, SUN_OFF, 720 / (Q.shadows || 1024));
     sun.position.set(q.x + SUN_OFF.x, q.y + SUN_OFF.y, q.z + SUN_OFF.z);
     sun.target.position.set(q.x, q.y, q.z);
 }
@@ -1259,7 +1433,7 @@ function drawMinimap() {
 }
 
 // ---------- loop ----------
-let last = performance.now();
+let last = performance.now(), compiling = false;
 // F3 / ?stats=1: network and frame-time overlay, refreshed at 4 Hz
 const frameMs = [], netstatsEl = document.getElementById('netstats');
 let netstatsOn = new URLSearchParams(location.search).has('stats'), lastNetstats = 0;
@@ -1279,6 +1453,7 @@ const fpsHist = []; let capWarned = false; // steady 30 fps = browser frame cap,
 let autoMs = 0, autoFrames = 0; // auto-pick: frame time while driving
 const stats = new URLSearchParams(location.search).has('stats') ? Object.assign(document.createElement('div'), { id: 'stats' }) : null;
 if (stats) document.body.appendChild(stats);
+if (stats) window.lanraceDebug = { renderer, scene }; // ?stats=1: for profiling from the console
 
 // Sound + gear HUD: gearboxes for your car and every other car (cheap), audio frame in metres (track plane)
 const ownBox = new Gearbox(), remoteBoxes = new Map(), soundOthers = [];
@@ -1342,7 +1517,7 @@ function frame(now) {
     updateWheelBatch();
     updateCamera(dt);
     updateSound(dt);
-    renderer.render(scene, camera);
+    if (!compiling) renderer.render(scene, camera); // a draw before the shaders are ready compiles them there and then (a ~1.6 s freeze)
 
     if (now - lastHud > 66) { // HUD and minimap at 15 Hz, timing tower at 4 Hz
         updateHUD(now - lastTower > 250);
@@ -1394,6 +1569,12 @@ window.initGameVisuals = () => {
     $('fl-card').classList.add('hidden');
     $('race-results').classList.add('hidden'); // next session: last race's classification goes
     buildWorld(clientState.trackData);
+    // Shaders compile in the background; the world isn't drawn until they're done (the grid countdown covers it), at most 5 s
+    // with a car in the scene for that, so its paint shaders are ready too
+    compiling = !!renderer.compileAsync;
+    const warm = compiling && clientState.me != null ? makeCar(clientState.me)?.root : null;
+    if (warm) scene.add(warm);
+    if (compiling) Promise.race([renderer.compileAsync(scene, camera), new Promise((r) => setTimeout(r, 5000))]).catch(() => { /* compiled on first draw instead */ }).finally(() => { compiling = false; if (warm) scene.remove(warm); });
     simStep(false); // resend what's held when a new session starts
 };
 renderer.setAnimationLoop(frame);

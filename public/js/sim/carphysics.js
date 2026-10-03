@@ -40,7 +40,9 @@ function step(car, input, dt, scale, offTrack = false, assist = 'off') {
     const roll = C.ROLL_G * C.G + (offTrack ? C.GRASS_DRAG * v : 0);
     const k = assist === 'off' ? 0 : Math.max(0, Math.min(1, (C.ASSIST_OFF_KMH - v * 3.6) / (C.ASSIST_OFF_KMH - C.ASSIST_FULL_KMH)));
     const downforce = 0.5 * C.RHO * C.CLA * v * v;
-    const grip = mu * (C.MASS * C.G + downforce);
+    // Road shape (drive.js sets these from the track): a compression presses the car down, a crest makes it go light
+    const grade = car.grade || 0, load = Math.max(0, 1 + ((car.vcurv || 0) * v * v) / C.G);
+    const grip = mu * (C.MASS * C.G * load + downforce);
 
     // Longitudinal tyre force: traction/power-limited drive, grip-limited brakes, slow reverse
     let ft = 0;
@@ -78,7 +80,7 @@ function step(car, input, dt, scale, offTrack = false, assist = 'off') {
 
     const drag = 0.5 * C.RHO * C.CDA * (car.dragMul ?? 1) * v * v; // dragMul: DRS / slipstream
     const before = vf;
-    vf += (ft / C.MASS - (drag / C.MASS + roll) * Math.sign(vf)) * dt;
+    vf += (ft / C.MASS - (drag / C.MASS + roll) * Math.sign(vf) - C.G * grade) * dt; // gravity along the slope
     if (input.brake > 0 && before > 0 && vf < 0) vf = 0;                                         // brakes stop, don't reverse
     if (input.throttle === 0 && input.brake === 0 && Math.sign(vf) !== Math.sign(before)) vf = 0; // coasting stops at zero
     if (vf < -C.REVERSE_MAX) vf = -C.REVERSE_MAX;
