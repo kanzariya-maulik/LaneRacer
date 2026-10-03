@@ -184,5 +184,226 @@
       ]
     ],
     "gridLineM": 231
+  },
+  "interlagos": {
+    "startLineM": 12,
+    "gridLineM": 28,
+    "poleSide": "right",
+    "garagesFrom": "entry",
+    "limiterStartM": 60,
+    "limiterEndM": 808,
+    "sources": [
+      "start line = timing line: F1 official track outline (MultiViewer, lap start) fitted with the 2023 race car positions, 12 m from TUMFTM row 0",
+      "grid line: 2023 race telemetry, cars parked on the grid ~8 m apart, pole car 20 m past the timing line (gridLineM = pole + 8 m); P2 slot empty in the 2023 grid (Leclerc crashed on the formation lap)",
+      "pole side: FIA 2023 SÃ£o Paulo Grand Prix event notes (circuit map, pit lane drawing, race director's notes), pole box away from the pit wall",
+      "garages: FIA 2023 SÃ£o Paulo Grand Prix event notes (circuit map, pit lane drawing, race director's notes), Red Bull nearest the pit entry then 2022 constructors' order",
+      "limiter: the stretch of the OSM pit lane alongside the track past the timing line, 20 m in (at least 60 m from each end)",
+      "sectors: 2023 race, every clean lap's official S1 / S1+S2 times on that car's positions from its timing-line crossing (median of ~1000 laps, IQR within Â±10 m)",
+      "DRS: FIA 2023 SÃ£o Paulo Grand Prix event notes (circuit map, pit lane drawing, race director's notes): detect T2 apex / activate 30 m after T3, to T4 braking; detect 30 m after T13 / activate 160 m before T15, to T1 braking; zone ends at the next braking point (estimated) â€” [detectM, startM, endM] from the start line"
+    ],
+    "unconfirmed": [
+      "limiterStartM",
+      "limiterEndM"
+    ],
+    "sector2M": 1241,
+    "sector3M": 3172,
+    "drs": [
+      [
+        452,
+        675,
+        1300
+      ],
+      [
+        3407,
+        3882,
+        247
+      ]
+    ]
+  },
+  "cota": {
+    "startLineM": 17,
+    "gridLineM": 297,
+    "poleSide": "right",
+    "garagesFrom": "entry",
+    "limiterStartM": 60,
+    "limiterEndM": 885,
+    "sources": [
+      "start line = timing line: F1 official track outline (MultiViewer, lap start) fitted with the 2023 race car positions, 17 m from TUMFTM row 0",
+      "grid line: 2023 race telemetry, cars parked on the grid ~8 m apart, pole car 289 m past the timing line (gridLineM = pole + 8 m)",
+      "pole side: FIA 2023 United States Grand Prix event notes (circuit map, pit lane drawing, race director's notes), pole box away from the pit wall",
+      "garages: FIA 2023 United States Grand Prix event notes (circuit map, pit lane drawing, race director's notes), Red Bull nearest the pit entry then 2022 constructors' order",
+      "limiter: the stretch of the OSM pit lane alongside the track past the timing line, 20 m in (at least 60 m from each end)",
+      "sectors: 2023 race, every clean lap's official S1 / S1+S2 times on that car's positions from its timing-line crossing (median of ~1000 laps, IQR within Â±10 m)",
+      "DRS: FIA 2023 United States Grand Prix event notes (circuit map, pit lane drawing, race director's notes): detect 150 m after T10 / activate 250 m after T11, to T12 braking; detect 65 m after T18 / activate 80 m after T20, to T1 braking; zone ends at the next braking point (estimated) â€” [detectM, startM, endM] from the start line"
+    ],
+    "unconfirmed": [
+      "limiterStartM",
+      "limiterEndM"
+    ],
+    "sector2M": 1656,
+    "sector3M": 3910,
+    "drs": [
+      [
+        2330,
+        2814,
+        3643
+      ],
+      [
+        4816,
+        5434,
+        538
+      ]
+    ]
+  },
+  "zandvoort": {
+    "startLineM": 43,
+    "gridLineM": 50,
+    "poleSide": "left",
+    "garagesFrom": "entry",
+    "limiterStartM": 60,
+    "limiterEndM": 687,
+    "pitLimitKmh": 60,
+    "sources": [
+      "start line = timing line: F1 official track outline (MultiViewer, lap start) fitted with the 2023 race car positions, 43 m from TUMFTM row 0",
+      "grid line: 2023 race telemetry, cars parked on the grid ~8 m apart, pole car 42 m past the timing line (gridLineM = pole + 8 m); Magnussen started from the pit lane",
+      "pole side: FIA 2023 Dutch Grand Prix event notes (circuit map, pit lane drawing, race director's notes), pole box away from the pit wall",
+      "garages: FIA 2023 Dutch Grand Prix event notes (circuit map, pit lane drawing, race director's notes), Red Bull nearest the pit entry then 2022 constructors' order",
+      "limiter: the stretch of the OSM pit lane alongside the track past the timing line, 20 m in (at least 60 m from each end); 60 km/h for the event (FIA event notes)",
+      "sectors: 2023 race, every clean lap's official S1 / S1+S2 times on that car's positions from its timing-line crossing (median of ~1000 laps, IQR within Â±10 m)",
+      "DRS: FIA 2023 Dutch Grand Prix event notes (circuit map, pit lane drawing, race director's notes): detect at T10 entry / activate 50 m after T10, to T11 braking; detect 20 m after T12 / activate 40 m after T13, through banked T14 to T1 braking; zone ends at the next braking point (estimated) â€” [detectM, startM, endM] from the start line"
+    ],
+    "unconfirmed": [
+      "limiterStartM",
+      "limiterEndM"
+    ],
+    "sector2M": 1528,
+    "sector3M": 2986,
+    "drs": [
+      [
+        2523,
+        2603,
+        3045
+      ],
+      [
+        3269,
+        3598,
+        260
+      ]
+    ]
+  },
+  "spielberg": {
+    "startLineM": 21,
+    "gridLineM": 107,
+    "poleSide": "left",
+    "garagesFrom": "entry",
+    "limiterStartM": 158,
+    "limiterEndM": 932,
+    "sources": [
+      "start line = timing line: F1 official track outline (MultiViewer, lap start) fitted with the 2023 race car positions, 21 m from TUMFTM row 0",
+      "grid line: 2023 race telemetry, cars parked on the grid ~8 m apart, pole car 99 m past the timing line (gridLineM = pole + 8 m)",
+      "pole side: FIA 2023 Austrian Grand Prix event notes (circuit map, pit lane drawing, race director's notes), pole box away from the pit wall",
+      "garages: FIA 2023 Austrian Grand Prix event notes (circuit map, pit lane drawing, race director's notes), Red Bull nearest the pit entry then 2022 constructors' order",
+      "limiter: the stretch of the OSM pit lane alongside the track past the timing line, 20 m in (at least 60 m from each end)",
+      "sectors: 2023 race, every clean lap's official S1 / S1+S2 times on that car's positions from its timing-line crossing (median of ~1000 laps, IQR within Â±10 m)",
+      "DRS: FIA 2023 Austrian Grand Prix event notes (circuit map, pit lane drawing, race director's notes): detect 160 m before T1 / activate 102 m after T1, to T3; detect 40 m before T3 / activate 100 m after T3, to T4; detect 120 m before T10 / activate 106 m after T10, to T1; zone ends at the next braking point (estimated) â€” [detectM, startM, endM] from the start line"
+    ],
+    "unconfirmed": [
+      "limiterStartM",
+      "limiterEndM"
+    ],
+    "sector2M": 1215,
+    "sector3M": 2906,
+    "drs": [
+      [
+        273,
+        535,
+        1254
+      ],
+      [
+        1324,
+        1464,
+        2081
+      ],
+      [
+        3840,
+        4066,
+        323
+      ]
+    ]
+  },
+  "montreal": {
+    "startLineM": 18,
+    "gridLineM": -21,
+    "poleSide": "left",
+    "garagesFrom": "exit",
+    "limiterStartM": 60,
+    "limiterEndM": 635,
+    "sources": [
+      "start line = timing line: F1 official track outline (MultiViewer, lap start) fitted with the 2023 race car positions, 18 m from TUMFTM row 0",
+      "grid line: 2023 race telemetry, cars parked on the grid ~8 m apart, pole car -29 m past the timing line (gridLineM = pole + 8 m); the grid sits before the Control Line here (start line upstream of it)",
+      "pole side: FIA 2023 Canadian Grand Prix event notes (circuit map, pit lane drawing, race director's notes), pole box away from the pit wall",
+      "garages: FIA 2023 Canadian Grand Prix event notes (circuit map, pit lane drawing, race director's notes), Red Bull nearest the pit exit then 2022 constructors' order",
+      "limiter: the stretch of the OSM pit lane alongside the track past the timing line, 20 m in (at least 60 m from each end)",
+      "sectors: 2023 race, every clean lap's official S1 / S1+S2 times on that car's positions from its timing-line crossing (median of ~1000 laps, IQR within Â±10 m)",
+      "DRS: FIA 2023 Canadian Grand Prix event notes (circuit map, pit lane drawing, race director's notes): detect 15 m after T5 / activate 95 m after T7, to T8 chicane; one detection 110 m after T9 for activate 155 m before T12 (to T13 chicane) and 70 m after T14 (to T1); zone ends at the next braking point (estimated) â€” [detectM, startM, endM] from the start line"
+    ],
+    "unconfirmed": [
+      "limiterStartM",
+      "limiterEndM"
+    ],
+    "sector2M": 1092,
+    "sector3M": 2493,
+    "drs": [
+      [
+        1017,
+        1416,
+        1906
+      ],
+      [
+        2200,
+        3007,
+        3771
+      ],
+      [
+        2200,
+        3986,
+        115
+      ]
+    ]
+  },
+  "hungaroring": {
+    "startLineM": 0,
+    "gridLineM": 38,
+    "poleSide": "left",
+    "garagesFrom": "entry",
+    "limiterStartM": 60,
+    "limiterEndM": 997,
+    "sources": [
+      "start line = timing line: F1 official track outline (MultiViewer, lap start) fitted with the 2023 race car positions, 0 m from TUMFTM row 0",
+      "grid line: 2023 race telemetry, cars parked on the grid ~8 m apart, pole car 30 m past the timing line (gridLineM = pole + 8 m)",
+      "pole side: FIA 2023 Hungarian Grand Prix event notes (circuit map, pit lane drawing, race director's notes), pole box away from the pit wall",
+      "garages: FIA 2023 Hungarian Grand Prix event notes (circuit map, pit lane drawing, race director's notes), Red Bull nearest the pit entry then 2022 constructors' order",
+      "limiter: the stretch of the OSM pit lane alongside the track past the timing line, 20 m in (at least 60 m from each end)",
+      "sectors: 2023 race, every clean lap's official S1 / S1+S2 times on that car's positions from its timing-line crossing (median of ~1000 laps, IQR within Â±10 m)",
+      "DRS: FIA 2023 Hungarian Grand Prix event notes (circuit map, pit lane drawing, race director's notes): one detection 5 m before T14 for activate 40 m after T14 (to T1) and 6 m after T1 (to T2); zone ends at the next braking point (estimated) â€” [detectM, startM, endM] from the start line"
+    ],
+    "unconfirmed": [
+      "limiterStartM",
+      "limiterEndM"
+    ],
+    "sector2M": 1737,
+    "sector3M": 3279,
+    "drs": [
+      [
+        4095,
+        4140,
+        544
+      ],
+      [
+        4095,
+        660,
+        1044
+      ]
+    ]
   }
 }

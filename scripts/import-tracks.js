@@ -14,8 +14,16 @@ const SOURCES = [
     { id: 'silverstone', name: 'Silverstone', file: 'Silverstone' },
     { id: 'suzuka', name: 'Suzuka', file: 'Suzuka' },
     { id: 'sakhir', name: 'Bahrain (Sakhir)', file: 'Sakhir' },
+    { id: 'interlagos', name: 'Interlagos', file: 'SaoPaulo' },
+    { id: 'cota', name: 'Circuit of the Americas', file: 'Austin' },
+    { id: 'zandvoort', name: 'Zandvoort', file: 'Zandvoort' },
+    { id: 'spielberg', name: 'Red Bull Ring', file: 'Spielberg' },
+    { id: 'montreal', name: 'Montreal', file: 'Montreal' },
+    { id: 'hungaroring', name: 'Hungaroring', file: 'Budapest' },
 ];
 const OUT_DIR = path.join(__dirname, '..', 'data', 'tracks');
+// node scripts/<importer>.js [id,id,...]: only those tracks
+const only = (list) => (process.argv[2] ? list.filter((s) => process.argv[2].split(',').includes(s.id)) : list);
 
 function convert(csvText, meta) {
     const rows = csvText.split('\n')
@@ -35,7 +43,7 @@ function convert(csvText, meta) {
 
 async function main() {
     fs.mkdirSync(OUT_DIR, { recursive: true });
-    for (const src of SOURCES) {
+    for (const src of only(SOURCES)) {
         const res = await fetch(BASE + src.file + '.csv');
         if (!res.ok) throw new Error(`${src.file}: HTTP ${res.status}`);
         const track = convert(await res.text(), src);
@@ -49,4 +57,4 @@ async function main() {
 
 if (require.main === module) main().catch((e) => { console.error(e); process.exit(1); });
 
-module.exports = { convert, SCALE, BASE, SOURCES };
+module.exports = { convert, SCALE, BASE, SOURCES, only };

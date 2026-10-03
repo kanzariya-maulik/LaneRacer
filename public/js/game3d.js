@@ -547,7 +547,8 @@ function buildPit(pit, t) {
         world.add(m);
     };
     board(pit.closeS - 15 * scale, 'PIT CLOSED', '#d62828'); // ahead of the limiter board, seen first
-    board(Math.max(pit.limStart, pit.closeS), 'PIT LIMIT 80', '#1e5bd8');
+    board(Math.max(pit.limStart, pit.closeS), `PIT LIMIT ${pit.limitKmh || 80}`, '#1e5bd8');
+    $('pit-limiter').textContent = `PIT LIMITER ${pit.limitKmh || 80}`;
     board(pit.limEnd, 'END LIMIT', '#1e5bd8');
     board(pit.cum[n - 3], 'PIT OUT', '#2a9d3f');
     world.add(wall(pit.closeWall, 0, 1.2 * scale, (i) => i === 0, solid('#d62828')));

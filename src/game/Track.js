@@ -5,7 +5,7 @@ const Assist = require('./Assist');
 const RacingLine = require('./RacingLine');
 const Elevation = require('../../public/js/sim/elevation.js'); // shared with the browser
 
-const TRACK_IDS = ['monza', 'spa', 'silverstone', 'suzuka', 'sakhir'];
+const TRACK_IDS = ['monza', 'spa', 'silverstone', 'suzuka', 'sakhir', 'interlagos', 'cota', 'zandvoort', 'spielberg', 'montreal', 'hungaroring'];
 const DATA_DIR = path.join(__dirname, '..', '..', 'data', 'tracks');
 const CHECKPOINT_COUNT = 16;
 const GRID_SLOTS = 22; // 11 teams x 2 drivers
@@ -106,7 +106,7 @@ function buildPit(raw, circuit, track) {
     if (short > 0) outerOff += short + scale;
     const closeWall = [lateral(up, -trackSide * outerOff), inner].map(({ x, y }) => ({ x, y }));
 
-    return { path: pts, width: raw.pit.width, cum, len, entryS, exitS, span, startOnPit, trackSide, limStart: limLo, limEnd: limHi, wall, garages, garageSpan, closeS, closeWall, fitM: raw.pit.fitM };
+    return { path: pts, width: raw.pit.width, cum, len, entryS, exitS, span, startOnPit, trackSide, limStart: limLo, limEnd: limHi, wall, garages, garageSpan, closeS, closeWall, fitM: raw.pit.fitM, limitKmh: circuit.pitLimitKmh || null };
 }
 
 // Where the track crosses itself at two heights (Suzuka's figure-8): a bridge. The upper road runs over a deck between

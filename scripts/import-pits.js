@@ -2,9 +2,10 @@
 // Pit lanes © OpenStreetMap contributors (ODbL), aligned onto the TUMFTM centrelines by robust ICP.
 const fs = require('fs');
 const path = require('path');
-const { SCALE, BASE, SOURCES } = require('./import-tracks');
+const { SCALE, BASE, SOURCES, only } = require('./import-tracks');
 
-const OSM_API = 'https://api.openstreetmap.org/api/0.6/map?bbox=';
+// Raceway ways (and their nodes) in a bbox 'west,south,east,north', via Overpass: the plain OSM API refuses busy city areas
+const osmUrl = (bbox) => { const [w, s, e, n] = bbox.split(','); return 'https://maps.mail.ru/osm/tools/overpass/api/interpreter?data=' + encodeURIComponent(`[out:xml];way[highway=raceway](${s},${w},${n},${e});(._;>;);out;`); };
 const CACHE = path.join(__dirname, 'build', 'osm');
 const OUT_DIR = path.join(__dirname, '..', 'data', 'tracks');
 const PIT_WIDTH_M = 10; // 12 m would overlap the 1.5×-widened track at Sakhir/Suzuka
@@ -18,6 +19,12 @@ const PITS = {
     silverstone: { bbox: '-1.040,52.060,-1.000,52.085', way: '227902927', seed: [-0.027002, -70032.16, 5755636.62] },
     suzuka: { bbox: '136.522,34.830,136.552,34.852', way: '120917578', seed: [-0.015115, 12474110.04, 3851764.41] },
     sakhir: { bbox: '50.502,26.024,50.522,26.041', way: '187123422', seed: [0.003081, 5052448.48, 2877385.24] },
+    interlagos: { bbox: '-46.708,-23.712,-46.690,-23.696', way: '33779109', seed: [-0.009960, -4760138.16, -2620185.07] },
+    cota: { bbox: '-97.650,30.124,-97.628,30.142', way: '514836373', seed: [-0.013242, -9400523.02, 3330960.76] },
+    zandvoort: { bbox: '4.533,52.382,4.550,52.394', way: '38144527', seed: [-0.021118, 308498.36, 5791054.50] },
+    spielberg: { bbox: '14.755,47.214,14.775,47.228', way: '289111668', seed: [0.004265, 1116430.59, 5219731.35] },
+    montreal: { bbox: '-73.535,45.493,-73.515,45.516', way: '413000959', seed: [-0.017425, -5736215.10, 5029581.54] },
+    hungaroring: { bbox: '19.240,47.575,19.256,47.588', way: '231417580', seed: [0.022517, 1445386.07, 5259347.85] },
 };
 
 function parseOsm(xml) {
@@ -113,10 +120,29 @@ function align(P, Q, [theta, tx, ty]) {
     return { theta, tx, ty, median };
 }
 
+// No seed yet: try a rotation every 5° (centroids matched) and keep the best fit
+function search(P, Q) {
+    const mean = (A) => A.reduce((m, p) => [m[0] + p[0] / A.length, m[1] + p[1] / A.length], [0, 0]);
+    const mp = mean(P), mq = mean(Q);
+    let best = null;
+    for (let d = 0; d < 360; d += 5) {
+        const th = (d * Math.PI) / 180, c = Math.cos(th), s = Math.sin(th);
+        const f = align(P, Q, [th, mq[0] - (c * mp[0] - s * mp[1]), mq[1] - (s * mp[0] + c * mp[1])]);
+        if (!best || f.median < best.median) best = f;
+    }
+    console.log(`  seed: [${best.theta.toFixed(6)}, ${best.tx.toFixed(2)}, ${best.ty.toFixed(2)}]`);
+    return best;
+}
+
 async function cached(file, url) {
     const f = path.join(CACHE, file);
     if (fs.existsSync(f)) return fs.readFileSync(f, 'utf8');
-    const res = await fetch(url, { headers: { 'User-Agent': 'LanRace pit lane importer (one-off)' } });
+    let res;
+    for (let tries = 1; ; tries++) { // public Overpass servers answer 429/504 when busy
+        res = await fetch(url, { headers: { 'User-Agent': 'LanRace pit lane importer (one-off)' } });
+        if (res.ok || tries === 5 || ![429, 502, 503, 504].includes(res.status)) break;
+        await new Promise((r) => setTimeout(r, 15000 * tries));
+    }
     if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
     const text = await res.text();
     fs.writeFileSync(f, text);
@@ -125,17 +151,17 @@ async function cached(file, url) {
 
 async function importPit(src) {
     const cfg = PITS[src.id];
-    const ways = parseOsm(await cached(`${src.id}.osm`, OSM_API + cfg.bbox));
+    const ways = parseOsm(await cached(`${src.id}.osm`, osmUrl(cfg.bbox)));
     const all = ways.flatMap(w => w.nds);
     const lat0 = all.reduce((s, p) => s + p[0], 0) / all.length;
     const toXY = ([la, lo]) => [lo * 111320 * Math.cos(lat0 * Math.PI / 180), la * 110540];
-    const isPit = (w) => /pit/i.test((w.tags.name || '') + (w.tags.service || '') + (w.tags.raceway || ''));
+    const isPit = (w) => /pit/i.test((w.tags.name || '') + (w.tags['name:en'] || '') + (w.tags.service || '') + (w.tags.raceway || ''));
     const Q = ways.filter(w => !isPit(w)).flatMap(w => densify(w.nds.map(toXY), 4));
 
     const csv = await cached(`${src.file}.csv`, BASE + src.file + '.csv');
     const P = csv.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#')).map(l => l.split(',').map(Number)).map(r => [r[0], r[1]]);
 
-    const fit = align(P, Q, cfg.seed);
+    const fit = cfg.seed ? align(P, Q, cfg.seed) : search(P, Q);
     if (!(fit.median <= MAX_FIT_M)) throw new Error(`${src.id}: OSM fit ${fit.median.toFixed(2)} m > ${MAX_FIT_M} m`);
 
     const way = ways.find(w => w.id === cfg.way);
@@ -154,6 +180,7 @@ async function importPit(src) {
     pit = resample(pit, STEP_M);
     const file = path.join(OUT_DIR, `${src.id}.json`);
     const track = JSON.parse(fs.readFileSync(file, 'utf8'));
+    pit = clearOfRoad(pit, P, track.width / SCALE / 2);
     track.pit = {
         path: pit.map(([x, y]) => ({ x: +(x * SCALE).toFixed(1), y: +(-y * SCALE).toFixed(1) })),
         width: PIT_WIDTH_M * SCALE,
@@ -165,9 +192,36 @@ async function importPit(src) {
     console.log(`${src.id}: fit ${fit.median.toFixed(2)} m, pit ${pit.length} points`);
 }
 
+// The road is drawn 1.5x the real width, so beside a tight pit straight (COTA, Zandvoort) it would cover the pit lane's
+// inner edge and leave no room for the pit wall. Where the lane runs beside the track (not where it merges), move it out
+// to drawn edge + wall clearance + half its width, tapering at ≤ 2.5 % so the lane stays smooth. P: TUMFTM centreline (m)
+const PIT_CLEAR_M = 1;    // drawn track edge → pit lane edge
+const PUSH_TAPER = 0.025; // m of push per m along the lane
+function clearOfRoad(pit, P, drawnHalf) {
+    const need = drawnHalf + PIT_CLEAR_M + PIT_WIDTH_M / 2;
+    const near = pit.map(([x, y]) => {
+        let best = null;
+        for (let i = 0; i < P.length; i++) {
+            const a = P[i], b = P[(i + 1) % P.length], ex = b[0] - a[0], ey = b[1] - a[1];
+            const t = Math.max(0, Math.min(1, ((x - a[0]) * ex + (y - a[1]) * ey) / (ex * ex + ey * ey || 1)));
+            const px = a[0] + t * ex, py = a[1] + t * ey, d = Math.hypot(x - px, y - py);
+            if (!best || d < best.d) best = { d, nx: (x - px) / (d || 1), ny: (y - py) / (d || 1) };
+        }
+        return best;
+    });
+    // Beside the track = more than half a pit lane off the centreline (merging lanes overlap the road, and stay put)
+    const want = near.map((n) => (n.d > PIT_WIDTH_M / 2 + 4 ? Math.max(0, need - n.d) : 0));
+    const push = want.map((_, i) => Math.max(...want.map((w, j) => w - Math.abs(i - j) * STEP_M * PUSH_TAPER)));
+    const max = Math.max(...push);
+    if (max > 0) console.log(`  pit lane moved out up to ${max.toFixed(1)} m to clear the drawn track`);
+    return pit.map(([x, y], i) => [x + near[i].nx * push[i], y + near[i].ny * push[i]]);
+}
+
 async function main() {
     fs.mkdirSync(CACHE, { recursive: true });
-    for (const src of SOURCES) await importPit(src);
+    for (const src of only(SOURCES)) await importPit(src);
 }
 
 if (require.main === module) main().catch((e) => { console.error(e); process.exit(1); });
+
+module.exports = { parseOsm, cached, osmUrl, CACHE, PITS };

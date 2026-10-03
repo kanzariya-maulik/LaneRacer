@@ -6,7 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
-const { SCALE, SOURCES } = require('./import-tracks');
+const { SCALE, SOURCES, only } = require('./import-tracks');
 
 const OUT_DIR = path.join(__dirname, '..', 'data', 'tracks');
 const CACHE = path.join(__dirname, 'build', 'f1');
@@ -16,6 +16,12 @@ const F1 = { // MultiViewer circuit key, 2023 race session in the F1 live timing
     silverstone: [2, '2023-07-09_British_Grand_Prix/2023-07-09_Race'],
     suzuka: [46, '2023-09-24_Japanese_Grand_Prix/2023-09-24_Race'],
     sakhir: [63, '2023-03-05_Bahrain_Grand_Prix/2023-03-05_Race'],
+    interlagos: [14, '2023-11-05_São_Paulo_Grand_Prix/2023-11-05_Race'],
+    cota: [9, '2023-10-22_United_States_Grand_Prix/2023-10-22_Race'],
+    zandvoort: [55, '2023-08-27_Dutch_Grand_Prix/2023-08-27_Race'],
+    spielberg: [19, '2023-07-02_Austrian_Grand_Prix/2023-07-02_Race'],
+    montreal: [23, '2023-06-18_Canadian_Grand_Prix/2023-06-18_Race'],
+    hungaroring: [4, '2023-07-23_Hungarian_Grand_Prix/2023-07-23_Race'],
 };
 const MAX_FIT_M = 5;       // outline fit (RMS)
 const OFF_MARGIN_M = 5;    // a car sample further than the real half-width plus this from the centreline is in the pits or off track
@@ -87,7 +93,7 @@ async function fitF1(src) {
         if (!fit || f.e < fit.e) fit = f;
     }
     // Car samples (metres, F1 frame). At some circuits (Suzuka) the feed sits ~15 m off the outline, so refine on these
-    const raw = await cached(`${src.id}-position.txt`, `https://livetiming.formula1.com/static/2023/${session}/Position.z.jsonStream`);
+    const raw = await cached(`${src.id}-position.txt`, `https://livetiming.formula1.com/static/2023/${encodeURI(session)}/Position.z.jsonStream`);
     const S = [];
     for (const line of raw.split('\n')) {
         const q = line.indexOf('"');
@@ -162,7 +168,7 @@ async function importElevation(src) {
     const sm = filled.map((_, i) => { let s = 0; for (let d = -SMOOTH; d <= SMOOTH; d++) s += filled[(i + d + n) % n]; return s / (2 * SMOOTH + 1); });
     const lo = Math.min(...sm);
     track.z = sm.map((v) => +(v - lo).toFixed(2)); // cm: crests and compressions come from second differences
-    track.attribution = track.attribution.replace(/; Elevation:.*$/, '') + `; ${ATTRIBUTION}`;
+    track.attribution = (track.attribution || '').replace(/; Elevation:.*$/, '') + `; ${ATTRIBUTION}`;
     fs.writeFileSync(file, JSON.stringify(track));
     const counts = buckets.map((b) => b.length).sort((a, c) => a - c);
     console.log(`${src.id}: fit ${fit.e.toFixed(1)} m, ${used} samples (${skipped} off track), median ${counts[n >> 1]} per point, ${n - known.length} gaps, range ${Math.max(...track.z).toFixed(1)} m`);
@@ -170,7 +176,7 @@ async function importElevation(src) {
 
 async function main() {
     fs.mkdirSync(CACHE, { recursive: true });
-    for (const src of SOURCES) await importElevation(src);
+    for (const src of only(SOURCES)) await importElevation(src);
 }
 
 if (require.main === module) main().catch((e) => { console.error(e); process.exit(1); });

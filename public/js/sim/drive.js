@@ -8,7 +8,7 @@ import { slopeAt, roadAt } from './elevation.js';
 export const WALL_OFFSET = 80;     // world units past the track edge; Track.js checkpoints use the same
 export const PIT_RUNOFF_M = 2;     // barrier this far outside the pit lane edge
 export const KERB_M = 1.5;         // kerbs past the track edge drive like asphalt
-export const PIT_LIMIT_KMH = 80;
+export const PIT_LIMIT_KMH = 80;    // unless the circuit sets its own (circuits.json pitLimitKmh: Zandvoort 60)
 export const DRS_DRAG = 0.78;      // drag with the flap open (~+29 km/h top speed)
 const BRIDGE_ROAD = 6;             // points either side of a bridge wall's own road that it applies to
 
@@ -48,7 +48,7 @@ export function updatePitState(p, t, near, nearPit) {
     p.inPit = nearPit.dist <= pit.width / 2 && near.dist > t.width / 2 && p.pitS >= pit.closeS; // closed entry isn't pit lane
     p.limiter = p.inPit && p.pitS >= pit.limStart && p.pitS <= pit.limEnd;
     if (p.limiter) {
-        const max = (PIT_LIMIT_KMH / 3.6) * t.scale, v = Math.hypot(p.vx, p.vy);
+        const max = ((pit.limitKmh || PIT_LIMIT_KMH) / 3.6) * t.scale, v = Math.hypot(p.vx, p.vy);
         if (v > max) {
             p.vx *= max / v;
             p.vy *= max / v;
