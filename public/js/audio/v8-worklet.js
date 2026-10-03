@@ -1,4 +1,4 @@
-// AudioWorklet wrapper around the V8 synth (v8.js). One processor per engine voice; parameters are k-rate.
+// AudioWorklet wrapper around the engine synth (v8.js). One processor per engine voice; parameters are k-rate.
 import { V8Synth } from './v8.js';
 
 class V8Processor extends AudioWorkletProcessor {
@@ -12,12 +12,16 @@ class V8Processor extends AudioWorkletProcessor {
         ];
     }
 
-    constructor() {
+    constructor(options) {
         super();
-        this.synth = new V8Synth(sampleRate, (Math.random() * 4294967295) >>> 0);
+        const profile = options?.processorOptions?.profile || 'v10';
+        this.synth = new V8Synth(sampleRate, (Math.random() * 4294967295) >>> 0, profile);
         this.p = { rpm: 4500, load: 0, cut: 0, stutter: 0, crackle: 0 };
         this.alive = true;
-        this.port.onmessage = (e) => { if (e.data === 'stop') this.alive = false; };
+        this.port.onmessage = (e) => {
+            if (e.data === 'stop') this.alive = false;
+            else if (typeof e.data === 'object' && e.data.profile) this.synth.setProfile(e.data.profile);
+        };
     }
 
     process(_inputs, outputs, params) {

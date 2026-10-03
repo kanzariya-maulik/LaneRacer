@@ -1,7 +1,7 @@
 # ╔══════════════════════════════════════════════════════════════╗
 # ║              🏎  LAN RACE — Makefile                         ║
 # ║  Usage: make <target>                                        ║
-# ╚══════════════════════════════════════════════════════════════╝
+# ╚══════════════════════════════════════════════════════════════╝`~z
 
 # ── Config ────────────────────────────────────────────────────
 APP       := server.js
@@ -19,12 +19,15 @@ RED    := \033[1;31m
 RESET  := \033[0m
 
 .DEFAULT_GOAL := all
-.PHONY: all help start stop kill-all restart status logs info urls install test clean
+.PHONY: all dev watch help start stop kill-all restart status logs info urls install test clean
 
-# ── Run Project (Default Target) ──────────────────────────────
+# ── Run Project (Default Target with Watch Mode) ──────────────
 all: kill-all urls
-	@printf "$(GREEN)▶  Starting LAN Race server on port $(PORT)...$(RESET)\n"
-	@PORT=$(PORT) $(NODE) $(APP)
+	@printf "$(GREEN)▶  Starting LAN Race server (watch mode) on port $(PORT)...$(RESET)\n"
+	@PORT=$(PORT) $(NODE) --watch $(APP)
+
+dev: all
+watch: all
 
 # ── Start Server in Background ────────────────────────────────
 start: kill-all
@@ -40,26 +43,12 @@ start: kill-all
 	fi
 
 # ── Stop Server ───────────────────────────────────────────────
-stop:
-	@if [ -f $(PID_FILE) ] && kill -0 $$(cat $(PID_FILE)) 2>/dev/null; then \
-		printf "$(RED)⏹  Stopping server (PID $$(cat $(PID_FILE)))...$(RESET)\n"; \
-		kill $$(cat $(PID_FILE)) 2>/dev/null || true; \
-		rm -f $(PID_FILE); \
-		printf "$(GREEN)✅  Server stopped.$(RESET)\n"; \
-	else \
-		printf "$(YELLOW)⚠  No running server found from PID file.$(RESET)\n"; \
-		rm -f $(PID_FILE); \
-	fi
+stop: kill-all
 
 # ── Kill All Server Instances ─────────────────────────────────
 kill-all:
-	@printf "$(RED)⏹  Killing all existing server instances...$(RESET)\n"
-	@if [ -f $(PID_FILE) ]; then \
-		PID=$$(cat $(PID_FILE)); \
-		kill -9 $$PID 2>/dev/null || true; \
-		rm -f $(PID_FILE); \
-	fi
-	@pkill -f "node.*server.js" 2>/dev/null || true
+	@printf "$(RED)⏹  Killing all existing server instances on port $(PORT)...$(RESET)\n"
+	@$(NODE) scripts/kill-server.js $(PORT) 2>/dev/null || true
 	@printf "$(GREEN)✅  All server instances killed.$(RESET)\n"
 
 # ── Restart Server ────────────────────────────────────────────

@@ -8,13 +8,16 @@ export function approach(cur, target, rate, dt) {
 }
 
 // keys: { up, down, left, right, drs } booleans
-export function keyboardStep(prev, keys, dt) {
+export function keyboardStep(prev, keys, dt, autoBrake = false) {
     const steerTarget = (keys.right ? 1 : 0) - (keys.left ? 1 : 0);
+    const isAutoBrake = autoBrake && !keys.up && !keys.down;
+    const downPressed = keys.down || isAutoBrake;
     return {
         steer: approach(prev.steer, steerTarget, steerTarget === 0 ? RATES.steerOut : RATES.steerIn, dt),
         throttle: approach(prev.throttle, keys.up ? 1 : 0, RATES.throttle, dt),
-        brake: approach(prev.brake, keys.down ? 1 : 0, RATES.brake, dt),
+        brake: approach(prev.brake, downPressed ? 1 : 0, RATES.brake, dt),
         drs: !!keys.drs,
+        explicitReverse: !!keys.down
     };
 }
 

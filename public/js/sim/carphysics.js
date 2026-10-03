@@ -30,6 +30,22 @@ const C = {
     WALL_KEEP: 0.4,        // share of speed kept after hitting the barrier
 };
 
+function parseSteerAssist(assist) {
+    if (typeof assist === 'object' && assist !== null) {
+        return Number.isFinite(assist.steer) ? Math.min(100, Math.max(0, assist.steer)) / 100 : 1.0;
+    }
+    if (typeof assist === 'string') {
+        const m = assist.match(/^(\d+),(\d+)$/);
+        if (m) return Math.min(100, Math.max(0, parseInt(m[1], 10))) / 100;
+        const lower = assist.trim().toLowerCase();
+        if (lower === 'off' || lower === 'brake') return 0;
+        if (lower === 'low') return 0.33;
+        if (lower === 'medium') return 0.66;
+        if (lower === 'full' || lower === 'high' || lower === 'steer' || lower === 'steering') return 1.0;
+    }
+    return 1.0;
+}
+
 function step(car, input, dt, scale, offTrack = false, assist = 'off') {
     const mu = offTrack ? C.GRASS_MU : C.MU;
 
@@ -38,19 +54,21 @@ function step(car, input, dt, scale, offTrack = false, assist = 'off') {
     let vf = vx * fx + vy * fy;
     const v = Math.hypot(vx, vy);
     const roll = C.ROLL_G * C.G + (offTrack ? C.GRASS_DRAG * v : 0);
-    const k = assist === 'off' ? 0 : Math.max(0, Math.min(1, (C.ASSIST_OFF_KMH - v * 3.6) / (C.ASSIST_OFF_KMH - C.ASSIST_FULL_KMH)));
+    const assistLevel = parseSteerAssist(assist);
+    const k = assistLevel <= 0 ? 0 : Math.max(0, Math.min(1, (C.ASSIST_OFF_KMH - v * 3.6) / (C.ASSIST_OFF_KMH - C.ASSIST_FULL_KMH))) * assistLevel;
     const downforce = 0.5 * C.RHO * C.CLA * v * v;
     const grip = mu * (C.MASS * C.G + downforce);
 
     // Longitudinal tyre force: traction/power-limited drive, grip-limited brakes, slow reverse
     let ft = 0;
+    const allowReverse = input.explicitReverse !== false;
     if (vf >= -0.5) {
         ft += input.throttle * Math.min(C.POWER / Math.max(vf, 1), C.TRACTION * grip, offTrack ? C.GRASS_DRIVE_G * C.G * C.MASS : Infinity);
         if (vf > 0.5) ft -= input.brake * (1 - C.BRAKE_STEER_GIVE * Math.abs(input.steer)) * grip;
-        else if (input.brake > 0 && input.throttle === 0) ft -= input.brake * C.REVERSE_FORCE;
+        else if (input.brake > 0 && input.throttle === 0 && allowReverse) ft -= input.brake * C.REVERSE_FORCE;
     } else if (input.throttle > 0) {
         ft += input.throttle * grip; // throttle while rolling backwards acts as a brake
-    } else if (input.brake > 0) {
+    } else if (input.brake > 0 && allowReverse) {
         ft -= input.brake * C.REVERSE_FORCE;
     }
     ft = Math.max(-grip, Math.min(grip, ft));
@@ -79,6 +97,7 @@ function step(car, input, dt, scale, offTrack = false, assist = 'off') {
     const drag = 0.5 * C.RHO * C.CDA * (car.dragMul ?? 1) * v * v; // dragMul: DRS / slipstream
     const before = vf;
     vf += (ft / C.MASS - (drag / C.MASS + roll) * Math.sign(vf)) * dt;
+    if (input.brake > 0 && (vf <= 0 || (before > 0 && vf < 0)) && !allowReverse) vf = 0;          // auto-brakes stop, don't reverse
     if (input.brake > 0 && before > 0 && vf < 0) vf = 0;                                         // brakes stop, don't reverse
     if (input.throttle === 0 && input.brake === 0 && Math.sign(vf) !== Math.sign(before)) vf = 0; // coasting stops at zero
     if (vf < -C.REVERSE_MAX) vf = -C.REVERSE_MAX;

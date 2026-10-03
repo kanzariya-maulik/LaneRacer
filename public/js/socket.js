@@ -237,6 +237,13 @@ socket.on('chat_msg', (data) => {
     window.appendChat(data.username, data.color, data.msg);
 });
 
+socket.on('server_restarting', () => {
+    if (window.appendChat) window.appendChat('SYSTEM', '#f43f5e', 'Host initiated server & app restart. Reloading page...');
+    setTimeout(() => {
+        window.location.reload();
+    }, 1500);
+});
+
 // GAME SYNCS
 socket.on('status_change', (status) => {
     clientState.status = status;

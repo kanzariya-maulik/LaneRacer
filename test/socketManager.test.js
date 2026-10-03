@@ -179,6 +179,7 @@ test('empty grid at lights out does not leave the server stuck in RACE', (t) => 
     c.fire('start_game');
     assert.strictEqual(io.events('status_change').at(-1), 'COUNTDOWN', 'new host could not start');
     c.fire('disconnect');
+    t.mock.timers.reset();
 });
 
 test('assist is each player\'s own choice: picked at join, changed any time, applied to their car in a running session', () => {

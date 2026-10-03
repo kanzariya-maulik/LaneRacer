@@ -48,7 +48,10 @@ export function driveCar(p, input, t, dt) {
     const nearPit = (x, y) => (pit ? Physics.nearestOnPath(x, y, pit.path, false) : null);
     const before = Physics.nearestOnTrack(p.x, p.y, t), beforePit = nearPit(p.x, p.y);
     const grass = before.dist > t.width / 2 + KERB_M * scale && !(beforePit && beforePit.dist <= pit.width / 2 && pitAlong(pit, beforePit) >= pit.closeS);
-    const used = p.assist === 'full' && !p.inPit ? brakeAssist(p, input, t, before) : input;
+    const aMode = p.assist ? String(p.assist).toLowerCase() : 'full';
+    const isNumAssist = aMode.includes(',') && parseInt(aMode.split(',')[1] || '0', 10) > 0;
+    const hasBrakeAssist = (aMode === 'full' || aMode === 'high' || aMode === 'medium' || aMode === 'brake' || isNumAssist) && !p.inPit;
+    const used = hasBrakeAssist ? brakeAssist(p, input, t, before, p.assist) : input;
     p.dragMul = (p.drs ? DRS_DRAG : 1) * (1 - (p.tow || 0));
     step(p, used, dt, scale, grass, p.assist);
 

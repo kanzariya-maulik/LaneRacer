@@ -17,23 +17,43 @@ app.use('/vendor/three', express.static(path.join(__dirname, 'node_modules', 'th
 // Set up socket logic
 setupSocketManager(io);
 
-function getLocalIp() {
+function getLocalIps() {
+  const ips = [];
   const interfaces = os.networkInterfaces();
   for (const name of Object.keys(interfaces)) {
     for (const iface of interfaces[name]) {
       if (iface.family === 'IPv4' && !iface.internal) {
-        return iface.address;
+        ips.push(iface.address);
       }
     }
   }
-  return 'localhost';
+  return ips.length > 0 ? ips : ['localhost'];
 }
 
 const PORT = process.env.PORT || 3232;
+
+let retried = false;
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE' && !retried) {
+    retried = true;
+    console.warn(`\n[Port ${PORT}] Port busy, cleaning previous instances...`);
+    try {
+      require('child_process').execSync(`node "${path.join(__dirname, 'scripts', 'kill-server.js')}" ${PORT}`, { stdio: 'ignore' });
+    } catch (e) {}
+    setTimeout(() => {
+      server.listen(PORT, '0.0.0.0');
+    }, 300);
+  } else {
+    console.error('Server error:', err);
+    process.exit(1);
+  }
+});
+
 server.listen(PORT, '0.0.0.0', () => {
-  const ip = getLocalIp();
+  const ips = getLocalIps();
   console.log('\n--- LAN RACE SERVER ACTIVE ---');
   console.log(`> Host Locally:  http://localhost:${PORT}`);
-  console.log(`> Host on LAN:   http://${ip}:${PORT}`);
+  console.log(`> Host on LAN / Hotspot:`);
+  ips.forEach((ip) => console.log(`  ▶ http://${ip}:${PORT}`));
   console.log('------------------------------\n');
 });

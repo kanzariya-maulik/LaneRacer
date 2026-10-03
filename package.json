@@ -4,7 +4,9 @@
   "main": "index.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js",
+    "dev": "node --watch server.js",
+    "watch": "node --watch server.js",
+    "kill": "node scripts/kill-server.js",
     "test": "node --test test/*.test.js",
     "tracks": "node scripts/import-tracks.js && node scripts/import-pits.js",
     "build:car": "${BLENDER:-/Applications/Blender.app/Contents/MacOS/Blender} -b --python scripts/build-car.py",
@@ -16,8 +18,11 @@
   "description": "",
   "dependencies": {
     "express": "^5.2.1",
+    "node-datachannel": "^0.33.4",
     "socket.io": "^4.8.3",
-    "three": "^0.186.1",
-    "node-datachannel": "^0.33.4"
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
   }
 }

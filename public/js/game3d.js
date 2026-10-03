@@ -135,6 +135,9 @@ function onKey(e, down) {
     if (down && key === 't' && !e.repeat && clientState.status !== 'LOBBY') toggleTower();
     if (down && key === 'r' && !e.repeat && clientState.status !== 'LOBBY') toggleLine();
     if (down && key === 'q' && !e.repeat && clientState.status !== 'LOBBY') toggleAssist();
+    if (down && key === 'p' && !e.repeat && clientState.status !== 'LOBBY' && clientState.hostId === clientState.me) {
+        socket.emit('toggle_pause');
+    }
     if (down && key === 'm' && !e.repeat) window.showBanner?.(Sound.toggleMute() ? 'SOUND: MUTED' : 'SOUND: ON', true);
     if (down && e.key === 'F3') { e.preventDefault(); netstatsOn = !netstatsOn; netstatsEl.classList.toggle('hidden', !netstatsOn); }
     if (down && clientState.status !== 'LOBBY' && isSpectator()) {
@@ -162,9 +165,10 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) relea
 function simStep(sample = true) {
     if (sample) {
         const pad = gamepadInput((navigator.getGamepads ? [...navigator.getGamepads()] : []).find(Boolean));
-        input = pad || touchInput || keyboardStep(input, keys, STEP_S);
+        const autoBrake = (window.lanraceMem?.['lanrace.autobrake'] === 'on');
+        input = pad || touchInput || keyboardStep(input, keys, STEP_S, autoBrake);
     }
-    const stamped = { seq: ++inputSeq, steer: input.steer, throttle: input.throttle, brake: input.brake, drs: !!input.drs };
+    const stamped = { seq: ++inputSeq, steer: input.steer, throttle: input.throttle, brake: input.brake, drs: !!input.drs, explicitReverse: !!input.explicitReverse };
     if (predictor && predictor.car) predictor.step(stamped);
     sentInputs.push(stamped);
     if (sentInputs.length > 6) sentInputs.shift();
@@ -1164,7 +1168,19 @@ function updateHUD(withTower = true) {
         const t = clientState.trackData, total = t.cum[t.path.length];
         drsIdx = trackIndex(t.path, me.x, me.y, drsIdx, t.width);
         const lapS = (((t.cum[drsIdx] - (t.startS || 0)) % total) + total) % total;
-        hint = drsHint({ mode: clientState.status === 'QUALIFYING' ? 'quali' : 'race', inPit: me.inPit, drs: me.drs, drsAvailable: me.drsAvailable, lap: me.lap, inZone: inDrsZone(t.drsZones || [], lapS) });
+        const condZone = inDrsZone(t.drsZones || [], lapS);
+        const condGap = me.drsAvailable || (clientState.status === 'QUALIFYING' && !me.inPit);
+
+        let fill = 0;
+        if (me.drs) fill = 100;
+        else if (condZone && condGap) fill = 100;
+        else if (condZone || condGap) fill = 50;
+        else fill = 0;
+
+        const drsFillEl = $('drs-progress-fill');
+        if (drsFillEl) drsFillEl.style.width = `${fill}%`;
+
+        hint = drsHint({ mode: clientState.status === 'QUALIFYING' ? 'quali' : 'race', inPit: me.inPit, drs: me.drs, drsAvailable: me.drsAvailable, lap: me.lap, inZone: condZone });
     }
     $('drs-hint').textContent = hint;
 

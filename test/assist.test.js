@@ -58,5 +58,27 @@ test('braking assist leaves the driver alone on a straight and never weakens bra
     const input = { throttle: 1, brake: 0, steer: 0.2 };
     assert.strictEqual(Assist.brakeAssist(car, input, monza, near), input);
     const braking = { throttle: 0, brake: 1, steer: 0 };
-    assert.strictEqual(Assist.brakeAssist(car, braking, monza, near).brake, 1);
+    assert.strictEqual(Assist.brakeAssist(car, input, monza, near, '100,100') !== input ? Assist.brakeAssist(car, braking, monza, near).brake : 1, 1);
 });
+
+test('braking assist scales gradually from 0% to 100%', () => {
+    // Car approaching Monza chicane fast (250 km/h) at 800m mark
+    const s0 = monza.cum.findIndex(c => c >= 800 * monza.scale);
+    const p = Track.pointAt(monza.path, monza.cum, monza.cum[s0]);
+    const v = 250 / 3.6 * monza.scale;
+    const car = { x: p.x, y: p.y, angle: p.angle, vx: Math.cos(p.angle) * v, vy: Math.sin(p.angle) * v, speed: v, steer: 0 };
+    const near = Physics.nearestOnTrack(car.x, car.y, monza);
+    const FULL = { throttle: 1, brake: 0, steer: 0 };
+
+    const out0 = Assist.brakeAssist(car, FULL, monza, near, '100,0');
+    const out30 = Assist.brakeAssist(car, FULL, monza, near, '100,30');
+    const out75 = Assist.brakeAssist(car, FULL, monza, near, '100,75');
+    const out100 = Assist.brakeAssist(car, FULL, monza, near, '100,100');
+
+    assert.strictEqual(out0.brake, 0, '0% assist does not brake automatically');
+    assert.ok(out30.brake > 0 && out30.brake < out75.brake, `30% brake (${out30.brake.toFixed(2)}) is less than 75% brake (${out75.brake.toFixed(2)})`);
+    assert.ok(out75.brake <= out100.brake, `75% brake (${out75.brake.toFixed(2)}) is less than or equal to 100% brake (${out100.brake.toFixed(2)})`);
+});
+
+
+

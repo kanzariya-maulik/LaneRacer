@@ -15,66 +15,135 @@
             <h1 class="glow-title">LAN RACE</h1>
             
             <div class="lobby-panels">
-                <!-- Left Panel: Profile & Settings -->
+                <!-- Left Panel: Settings & Profile (3 Columns + Host Settings) -->
                 <div class="panel profile-panel">
-                    <h2>Your Profile</h2>
-                    <input type="text" id="username" placeholder="Username" maxlength="15">
-                    <div class="team-picker">
-                        <label style="margin-bottom:10px; display:block;">Team</label>
-                        <div id="team-grid"></div>
+                    <h2>Driving & Lobby Configuration</h2>
+
+                    <div class="settings-grid-3col">
+                        <!-- Column 1: Profile & Join Actions -->
+                        <div class="settings-column-card">
+                            <h3 class="column-title">👤 Driver Profile</h3>
+                            
+                            <label class="setting-field">
+                                <span class="setting-label">Driver Name</span>
+                                <input type="text" id="username" placeholder="Username" maxlength="15">
+                            </label>
+                            
+                            <div class="team-preview-container">
+                                <span class="setting-label">Team & Livery</span>
+                                <div id="team-preview-card" class="team-preview-card" onclick="window.openTeamModal?.()" title="Click to change team">
+                                    <img id="team-preview-img" src="liveries/redbull-thumb.png" alt="Car Livery">
+                                    <div class="team-preview-info">
+                                        <span id="team-preview-name" class="team-preview-name">Red Bull Racing</span>
+                                        <span id="team-preview-car" class="team-preview-car">RB19</span>
+                                    </div>
+                                    <button type="button" id="btn-open-team-modal" onclick="event.stopPropagation(); window.openTeamModal?.()" class="btn small primary">Change</button>
+                                </div>
+                            </div>
+
+                            <div class="action-buttons-box">
+                                <button id="btn-join" class="btn primary">Join Lobby</button>
+                                <div id="player-controls" class="hidden flex-row gap-2">
+                                    <button id="btn-ready" class="btn success">Ready Up</button>
+                                    <button id="btn-start" class="btn success hidden">Start Race</button>
+                                </div>
+                            </div>
+
+                            <div class="assist-sliders-box mt-1">
+                                <label class="graphics-picker">Steering Assist: <span id="assist-steer-val">100%</span>
+                                    <input type="range" id="assist-steer-slider" min="0" max="100" value="100" step="1">
+                                </label>
+                                <label class="graphics-picker">Braking Assist: <span id="assist-brake-val">100%</span>
+                                    <input type="range" id="assist-brake-slider" min="0" max="100" value="100" step="1">
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Column 2: Visuals & Handling -->
+                        <div class="settings-column-card">
+                            <h3 class="column-title">🎮 Visuals & Handling</h3>
+                            
+                            <label class="graphics-picker">Graphics Quality:
+                                <select id="graphics-select">
+                                    <option value="auto" selected>Auto</option>
+                                    <option value="low">Low</option>
+                                    <option value="medium">Medium</option>
+                                    <option value="high">High</option>
+                                </select>
+                            </label>
+                            
+                            <label class="graphics-picker">Racing Line:
+                                <select id="line-select">
+                                    <option value="off">Off</option>
+                                    <option value="corners" selected>Corners only</option>
+                                    <option value="full">Full Track</option>
+                                </select>
+                            </label>
+                            
+                            <label class="graphics-picker">Other Cars Netplay:
+                                <select id="others-select">
+                                    <option value="present" selected>Real Position</option>
+                                    <option value="smooth">Smoothest</option>
+                                </select>
+                            </label>
+                            
+                            <label class="graphics-picker">Release W to Brake:
+                                <select id="autobrake-select">
+                                    <option value="off" selected>Off</option>
+                                    <option value="on">On (Lift W = Brake)</option>
+                                </select>
+                            </label>
+                        </div>
+
+                        <!-- Column 3: Audio & Music Settings -->
+                        <div class="settings-column-card">
+                            <h3 class="column-title">🎵 Sound & Music</h3>
+                            
+                            <label class="graphics-picker">Engine Sound Style:
+                                <select id="engine-type-select">
+                                    <option value="v6" selected>F1 1.6L V6 Turbo (Modern Growl & Turbo)</option>
+                                    <option value="muscle">7.0L V8 Muscle (Deep Bass Rumble & Thump)</option>
+                                    <option value="screamer">F1 Classic Screamer (High-RPM Howl)</option>
+                                    <option value="rotary">2.6L 4-Rotor Wankel (787B Shriek)</option>
+                                    <option value="boxer">4.0L Flat-6 GT3 (Throaty Boxer Rasp)</option>
+                                </select>
+                            </label>
+                            
+                            <label class="graphics-picker">Engine Audio Mode:
+                                <select id="engine-select">
+                                    <option value="all" selected>All cars</option>
+                                    <option value="mine">Mine only</option>
+                                    <option value="off">Off</option>
+                                </select>
+                            </label>
+                            
+                            <label class="graphics-picker">Sound Volume:
+                                <input type="range" id="volume-range" min="0" max="100" value="70">
+                            </label>
+                            
+                            <label class="graphics-picker">Race Music Track:
+                                <select id="music-select">
+                                    <option value="off" selected>Off (Engine Only)</option>
+                                    <option value="synthwave">Synthwave Velocity</option>
+                                    <option value="eurobeat">Eurobeat Rush</option>
+                                    <option value="cyberpunk">Cyberpunk Overdrive</option>
+                                    <option value="arcade">8-Bit Arcade Sprint</option>
+                                    <option value="lofi">Sunset Cruise (Chill)</option>
+                                </select>
+                            </label>
+                            
+                            <label class="graphics-picker">Music Volume:
+                                <input type="range" id="music-volume-range" min="0" max="100" value="50">
+                            </label>
+                        </div>
                     </div>
                     
-
-                    <label class="graphics-picker">Graphics:
-                        <select id="graphics-select">
-                            <option value="auto" selected>Auto</option>
-                            <option value="low">Low</option>
-                            <option value="medium">Medium</option>
-                            <option value="high">High</option>
-                        </select>
-                        <small id="graphics-note"></small>
-                    </label>
-                    <label class="graphics-picker">Racing line:
-                        <select id="line-select">
-                            <option value="off">Off</option>
-                            <option value="corners" selected>Corners only</option>
-                            <option value="full">Full</option>
-                        </select>
-                        <small>R / gamepad X during a race</small>
-                    </label>
-                    <label class="graphics-picker">Assist:
-                        <select id="assist-select">
-                            <option value="full" selected>Full (steering + braking)</option>
-                            <option value="off">Off</option>
-                        </select>
-                        <small>Q / gamepad View during a race</small>
-                    </label>
-                    <label class="graphics-picker">Other cars:
-                        <select id="others-select">
-                            <option value="present" selected>Where they really are</option>
-                            <option value="smooth">Smoothest (slightly behind)</option>
-                        </select>
-                        <small>"Where they really are" matches the hitbox</small>
-                    </label>
-                    <label class="graphics-picker">Sound volume:
-                        <input type="range" id="volume-range" min="0" max="100" value="70">
-                    </label>
-                    <label class="graphics-picker">Engine sound:
-                        <select id="engine-select">
-                            <option value="all" selected>All cars</option>
-                            <option value="mine">Mine only</option>
-                            <option value="off">Off</option>
-                        </select>
-                        <small>M mutes during a race</small>
-                    </label>
-
-                    <button id="btn-join" class="btn primary">Join Lobby</button>
-                    
-                    <div id="player-controls" class="hidden">
-                        <button id="btn-ready" class="btn">Ready Up</button>
-                        
-                        <div id="host-settings" class="hidden">
-                            <h3>Host Settings</h3>
+                    <!-- Host Settings Section (Displayed below the 3 columns) -->
+                    <div id="host-settings" class="hidden host-settings-card mt-1">
+                        <div class="host-header-bar">
+                            <h3>👑 Host Race Settings</h3>
+                        </div>
+                        <div class="settings-grid-host">
                             <label>Track:
                                 <select id="setting-track">
                                     <option value="monza">Monza</option>
@@ -84,14 +153,15 @@
                                     <option value="sakhir">Bahrain (Sakhir)</option>
                                 </select>
                             </label>
-                            <label>Laps:
-                                <input type="number" id="setting-laps" min="1" max="50" value="3">
-                            </label>
                             <label>Qualifying:
                                 <select id="setting-quali">
-                                    <option value="1" selected>On (out-lap + 2 laps)</option>
+                                    <option value="2" selected>On (out-lap + 2 laps)</option>
+                                    <option value="1">On (out-lap + 1 lap)</option>
                                     <option value="0">Off</option>
                                 </select>
+                            </label>
+                            <label>Laps:
+                                <input type="number" id="setting-laps" min="1" max="50" value="3">
                             </label>
                             <label>Collisions:
                                 <select id="setting-collisions">
@@ -99,27 +169,22 @@
                                     <option value="0">Off (ghost cars)</option>
                                 </select>
                             </label>
-                            <button id="btn-start" class="btn success mt-1">Start Race</button>
+                            <label>AI Computer Car:
+                                <select id="setting-bot">
+                                    <option value="0" selected>Off</option>
+                                    <option value="1">On (1 AI Bot)</option>
+                                </select>
+                            </label>
                         </div>
                     </div>
                 </div>
 
-                <!-- Middle Panel: Players -->
+                <!-- Right Panel: Players -->
                 <div class="panel players-panel">
                     <h2>Players</h2>
                     <ul id="players-list">
                         <!-- Filled by JS -->
                     </ul>
-                </div>
-
-                <!-- Right Panel: Chat -->
-                <div class="panel chat-panel">
-                    <h2>Lobby Chat</h2>
-                    <div id="chat-messages"></div>
-                    <form id="chat-form">
-                        <input type="text" id="chat-input" placeholder="Type a message..." autocomplete="off">
-                        <button type="submit" class="btn small">Send</button>
-                    </form>
                 </div>
             </div>
         </div>
@@ -147,7 +212,12 @@
                         <div class="sec" id="sec-3"><i></i><span>S3</span><em class="sec-best"></em></div>
                     </div>
                 </div>
-                <div id="drs-badge" class="drs-off" title="DRS — press E (gamepad Y) when green">DRS</div>
+                <div id="drs-widget">
+                    <div id="drs-badge" class="drs-off" title="DRS — press E (gamepad Y) when green">
+                        <span>DRS</span>
+                        <div id="drs-progress-bar"><div id="drs-progress-fill" style="width:0%;"></div></div>
+                    </div>
+                </div>
                 <div id="drs-hint"></div>
                 <div id="gear-hud">
                     <div id="rev-lights"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
@@ -156,6 +226,7 @@
                 <div class="hud-speedometer"><span id="hud-speed">0</span> KM/H</div>
             </div>
             
+            <button id="btn-pause-game" class="hud-pause-btn hidden" title="Pause Game (Host) [P]">⏸</button>
             <canvas id="minimap" width="220" height="220"></canvas>
             <div id="session-bar"></div>
             <pre id="netstats" class="hidden"></pre>
@@ -184,6 +255,21 @@
             </div>
         </div>
 
+        <div id="pause-modal" class="hidden">
+            <div class="pause-box">
+                <h1 id="pause-title">GAME PAUSED BY HOST</h1>
+                <p id="pause-subtitle">Physics and session timer frozen</p>
+                <button id="btn-unpause-game" class="btn success hidden mt-1">Resume Race (Unpause)</button>
+            </div>
+        </div>
+
+        <div id="unpause-countdown-modal" class="hidden">
+            <div class="countdown-circle">
+                <span id="unpause-countdown-number">3</span>
+            </div>
+            <p style="margin-top:16px; font-weight:bold; letter-spacing:2px; text-transform:uppercase;">Resuming Race...</p>
+        </div>
+
         <div id="countdown-overlay" class="hidden">
             <h1 id="countdown-text">3</h1>
         </div>
@@ -197,7 +283,6 @@
             <h2>QUALIFYING RESULTS</h2>
             <ol id="quali-results-list"></ol>
         </div>
-        </div>
     </div>
 
     <div id="race-results" class="hidden">
@@ -207,6 +292,47 @@
             <ol id="rr-list"></ol>
             <div class="rr-foot">Times include penalties · <span id="rr-count">back to lobby in 15 s</span></div>
         </div>
+    </div>
+
+    <!-- TEAM SELECTION MODAL -->
+    <div id="team-select-modal" class="modal-overlay hidden">
+        <div class="modal-box team-modal-box">
+            <div class="modal-header">
+                <h2>SELECT YOUR TEAM & CAR</h2>
+                <button id="btn-close-team-modal" onclick="window.closeTeamModal?.()" class="modal-close-btn" type="button">✕</button>
+            </div>
+            <div class="modal-body">
+                <div id="team-grid" class="team-grid-modal"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- FLOATING CHAT WIDGET -->
+    <div id="floating-chat-container">
+        <!-- Chat Popup Window -->
+        <div id="chat-popup" class="chat-popup hidden">
+            <div class="chat-popup-header">
+                <div class="chat-popup-title">
+                    <span class="chat-icon-indicator">💬</span>
+                    <span>Chat</span>
+                </div>
+                <button id="btn-close-chat" class="chat-popup-close-btn" type="button" title="Close Chat">✕</button>
+            </div>
+            <div id="chat-messages" class="chat-messages-container"></div>
+            <form id="chat-form" class="chat-form-container">
+                <input type="text" id="chat-input" placeholder="Type a message..." autocomplete="off">
+                <button type="submit" class="btn small chat-send-btn">Send</button>
+            </form>
+        </div>
+
+        <!-- Chat Bubble Button (Bottom Right) -->
+        <button id="chat-bubble-btn" class="chat-bubble-btn" type="button" title="Open Chat">
+            <svg class="chat-bubble-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+            </svg>
+            <span id="chat-badge" class="chat-badge hidden">0</span>
+        </button>
+    </div>
 
     <script type="importmap">
         { "imports": { "three": "/vendor/three/build/three.module.js", "three/addons/": "/vendor/three/examples/jsm/" } }

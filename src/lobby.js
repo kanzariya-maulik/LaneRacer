@@ -21,7 +21,10 @@ function sanitizeSettings(current, incoming, trackIds) {
     if (trackIds.includes(incoming.trackId)) next.trackId = incoming.trackId;
     if (Number.isFinite(incoming.maxLaps)) next.maxLaps = clamp(Math.round(incoming.maxLaps), 1, 50);
     if (typeof incoming.qualifying === 'boolean') next.qualifying = incoming.qualifying;
+    else if (Number.isFinite(incoming.qualifying)) next.qualifying = incoming.qualifying > 0;
+    if (incoming.qualiLaps !== undefined && Number.isFinite(incoming.qualiLaps)) next.qualiLaps = clamp(Math.round(incoming.qualiLaps), 1, 5);
     if (typeof incoming.collisions === 'boolean') next.collisions = incoming.collisions;
+    if (typeof incoming.botCar === 'boolean') next.botCar = incoming.botCar;
     return next;
 }
 
@@ -30,10 +33,10 @@ const num = (v, min, max) => (Number.isFinite(v) ? clamp(v, min, max) : 0);
 function sanitizeInput(input) {
     const i = input && typeof input === 'object' ? input : {};
     if ('throttle' in i || 'brake' in i || 'steer' in i) {
-        return { throttle: num(i.throttle, 0, 1), brake: num(i.brake, 0, 1), steer: num(i.steer, -1, 1), drs: i.drs === true };
+        return { throttle: num(i.throttle, 0, 1), brake: num(i.brake, 0, 1), steer: num(i.steer, -1, 1), drs: i.drs === true, explicitReverse: i.explicitReverse === true };
     }
     // Legacy on/off keys from older clients
-    return { throttle: i.up ? 1 : 0, brake: i.down ? 1 : 0, steer: (i.right ? 1 : 0) - (i.left ? 1 : 0), drs: false };
+    return { throttle: i.up ? 1 : 0, brake: i.down ? 1 : 0, steer: (i.right ? 1 : 0) - (i.left ? 1 : 0), drs: false, explicitReverse: i.down === true };
 }
 
 function canJoinTeam(players, teamId) {
@@ -58,7 +61,26 @@ function sanitizeInputs(payload) {
         .map((i) => ({ seq: i.seq, ...sanitizeInput(i) }));
 }
 
-// Each player's own driving assist: 'full' (steering + braking help) or 'off'
-const sanitizeAssist = (a) => (a === 'off' ? 'off' : 'full');
+const VALID_ASSISTS = ['off', 'low', 'medium', 'high', 'full', 'brake', 'steer', 'custom'];
+
+function sanitizeAssist(a) {
+    if (typeof a === 'string') {
+        const lower = a.trim().toLowerCase();
+        if (VALID_ASSISTS.includes(lower)) return lower;
+        const m = lower.match(/^(\d+),(\d+)$/);
+        if (m) {
+            const s = clamp(parseInt(m[1], 10), 0, 100);
+            const b = clamp(parseInt(m[2], 10), 0, 100);
+            return `${s},${b}`;
+        }
+    }
+    if (typeof a === 'object' && a !== null) {
+        const s = Number.isFinite(a.steer) ? clamp(Math.round(a.steer), 0, 100) : 100;
+        const b = Number.isFinite(a.brake) ? clamp(Math.round(a.brake), 0, 100) : 100;
+        return `${s},${b}`;
+    }
+    return 'full';
+}
 
 module.exports = { TEAMS, MAX_RACERS, sanitizeUsername, sanitizeChat, sanitizeSettings, sanitizeInput, sanitizeInputs, sanitizeAssist, canJoinTeam, pickRacers };
+

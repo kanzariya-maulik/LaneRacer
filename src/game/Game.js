@@ -2,6 +2,8 @@ const Physics = require('./Physics');
 const Drive = require('../../public/js/sim/drive.js');
 const Ticker = require('../ticker');
 const { pointAt } = require('./Track');
+const RacingLine = require('./RacingLine');
+const Logger = require('../logger');
 
 const TICK_RATE = 60;
 const QUALI_LAPS = 2;       // flying laps after the out-lap
@@ -35,6 +37,7 @@ class Game {
         this.time = 0;                     // race clock (s), starts at lights out
         this.clock = 0;                    // session clock (s) for client interpolation, never frozen
         this.frozen = mode === 'race';     // race: lights still on — cars can move, but that's a jump start
+        this.paused = false;               // host pause state
         this.ticker = null;
         this.winnerCount = 0;
         this.bestSectors = [null, null, null]; // session bests, valid laps only
@@ -54,6 +57,7 @@ class Game {
                 username: p.username,
                 teamId: p.teamId,
                 assist: p.assist || 'off',
+                isBot: !!p.isBot,
                 x: slot.x, y: slot.y, angle: slot.angle,
                 vx: 0, vy: 0, speed: 0, steer: 0,
                 inPit: false, limiter: false, pitS: 0,
@@ -203,6 +207,7 @@ class Game {
 
     // update() plus a tick-cost average and a once-a-second net_stats for the overlay
     timedUpdate() {
+        if (this.paused) return;
         const t0 = process.hrtime.bigint();
         this.update();
         const ms = Number(process.hrtime.bigint() - t0) / 1e6;
@@ -294,6 +299,59 @@ class Game {
         if (this.mode === 'quali' && p.limiter && !wasLimited) p.lapStart = p.sectorStart = null;
     }
 
+    updateBotInput(p) {
+        const t = this.track;
+        if (!t._racingLinePoints && t.racingLine?.offset) {
+            t._racingLinePoints = RacingLine.linePoints(t.path, t.racingLine.offset);
+        }
+        const rlPoints = t._racingLinePoints || t.path;
+        const near = Physics.nearestOnTrack(p.x, p.y, t);
+        const curS = t.cum[near.i] + near.t * (t.cum[near.i + 1] - t.cum[near.i]);
+        const speedMs = Math.abs(p.speed) / t.scale;
+
+        // Speed-sensitive lookahead: 14m at low speed, up to 26m at high speed
+        const lookAheadM = Math.max(14, Math.min(26, 12 + speedMs * 0.15));
+        const lookAheadDist = lookAheadM * t.scale;
+        const totalS = t.cum[t.path.length];
+        const targetS = (((curS + lookAheadDist) % totalS) + totalS) % totalS;
+
+        // Interpolate target point along the optimal racing line
+        const n = t.path.length;
+        let idx = 0;
+        for (let i = 0; i < n; i++) {
+            if (t.cum[i + 1] >= targetS) { idx = i; break; }
+        }
+        const span = Math.max(1, t.cum[idx + 1] - t.cum[idx]);
+        const tRatio = Math.max(0, Math.min(1, (targetS - t.cum[idx]) / span));
+        const p1 = rlPoints[idx], p2 = rlPoints[(idx + 1) % n];
+        const targetX = p1.x + tRatio * (p2.x - p1.x);
+        const targetY = p1.y + tRatio * (p2.y - p1.y);
+
+        const targetAngle = Math.atan2(targetY - p.y, targetX - p.x);
+        let angleDiff = targetAngle - p.angle;
+        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+        while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+
+        const steerTarget = Math.max(-1, Math.min(1, angleDiff * 3.0));
+
+        // Speed target from racing line speed profile
+        const targetSpeedMs = t.racingLine?.speed ? t.racingLine.speed[near.i] : Infinity;
+        const needBrake = !this.frozen && speedMs > targetSpeedMs * 1.02;
+
+        p.assist = '100,100';
+        p.input = {
+            throttle: this.frozen ? 0 : (needBrake ? 0 : 1.0),
+            brake: this.frozen ? 0 : (needBrake ? Math.min(1, (speedMs - targetSpeedMs) / 5) : 0),
+            steer: steerTarget,
+            drs: true,
+            isBot: true
+        };
+
+        if (this.seq % 30 === 0) {
+            Logger.bot(`status: ${this.frozen ? 'FROZEN' : 'RACING'} | pos: (${p.x.toFixed(1)}, ${p.y.toFixed(1)}) | speed: ${(speedMs * 3.6).toFixed(1)} km/h (target: ${(targetSpeedMs * 3.6).toFixed(1)} km/h) | steer: ${steerTarget.toFixed(2)} | throttle: ${p.input.throttle} | brake: ${p.input.brake.toFixed(2)} | lap: ${p.lap} | cp: ${p.checkpoint} | limits: ${p.limits}`);
+        }
+    }
+
     update() {
         const ids = Object.keys(this.players);
         {
@@ -302,6 +360,10 @@ class Game {
             // The client resends every 100 ms; silence (hidden tab, dropped link) means let go, not full throttle forever
             for (const id of ids) {
                 const p = this.players[id];
+                if (p.isBot) {
+                    this.updateBotInput(p);
+                    continue;
+                }
                 if (p.inputAt !== undefined && this.clock - p.inputAt > INPUT_TIMEOUT_S) p.input = { throttle: 0, brake: 0, steer: 0, drs: false };
                 // One input slot per tick. A missing input is guessed (last one repeated) in its own slot and its late copy
                 // dropped, so the server never runs an extra tick the client didn't: corrections stay input-sized, not a tick of travel
@@ -512,7 +574,8 @@ class Game {
         if (p.lapStart !== null) {
             p.lap++;
             this.recordLap(p);
-            if (p.lap >= QUALI_LAPS) { // run complete: park the car
+            const maxQualiLaps = Number.isFinite(this.settings.qualiLaps) && this.settings.qualiLaps > 0 ? this.settings.qualiLaps : QUALI_LAPS;
+            if (p.lap >= maxQualiLaps) { // run complete: park the car
                 p.finished = true;
                 p.lapStart = null;
                 p.sectorStart = null;

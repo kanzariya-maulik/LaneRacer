@@ -42,14 +42,14 @@ test('sanitizeSettings clamps and ignores garbage', () => {
 });
 
 test('sanitizeInput clamps analog values', () => {
-    assert.deepStrictEqual(lobby.sanitizeInput({ throttle: 2, brake: -1, steer: -3 }), { throttle: 1, brake: 0, steer: -1, drs: false });
-    assert.deepStrictEqual(lobby.sanitizeInput({ throttle: 0.5, brake: NaN, steer: '1' }), { throttle: 0.5, brake: 0, steer: 0, drs: false });
-    assert.deepStrictEqual(lobby.sanitizeInput(null), { throttle: 0, brake: 0, steer: 0, drs: false });
+    assert.deepStrictEqual(lobby.sanitizeInput({ throttle: 2, brake: -1, steer: -3 }), { throttle: 1, brake: 0, steer: -1, drs: false, explicitReverse: false });
+    assert.deepStrictEqual(lobby.sanitizeInput({ throttle: 0.5, brake: NaN, steer: '1' }), { throttle: 0.5, brake: 0, steer: 0, drs: false, explicitReverse: false });
+    assert.deepStrictEqual(lobby.sanitizeInput(null), { throttle: 0, brake: 0, steer: 0, drs: false, explicitReverse: false });
 });
 
 test('sanitizeInput legacy booleans', () => {
-    assert.deepStrictEqual(lobby.sanitizeInput({ up: true, left: 1 }), { throttle: 1, brake: 0, steer: -1, drs: false });
-    assert.deepStrictEqual(lobby.sanitizeInput({ down: true, right: true }), { throttle: 0, brake: 1, steer: 1, drs: false });
+    assert.deepStrictEqual(lobby.sanitizeInput({ up: true, left: 1 }), { throttle: 1, brake: 0, steer: -1, drs: false, explicitReverse: false });
+    assert.deepStrictEqual(lobby.sanitizeInput({ down: true, right: true }), { throttle: 0, brake: 1, steer: 1, drs: false, explicitReverse: true });
 });
 
 test('canJoinTeam rejects unknown team', () => {
@@ -87,7 +87,7 @@ test('sanitizeInput carries the DRS button as a strict boolean', () => {
 
 test('sanitizeInputs: batches of sequenced inputs, clamped; legacy single inputs return null', () => {
     assert.deepStrictEqual(lobby.sanitizeInputs({ inputs: [{ seq: 5, steer: 3, throttle: 1, brake: 0, drs: true }, { seq: 'x', steer: 0 }] }),
-        [{ seq: 5, steer: 1, throttle: 1, brake: 0, drs: true }]);
+        [{ seq: 5, steer: 1, throttle: 1, brake: 0, drs: true, explicitReverse: false }]);
     assert.strictEqual(lobby.sanitizeInputs({ throttle: 1, brake: 0, steer: 0 }), null);
     assert.strictEqual(lobby.sanitizeInputs({ inputs: new Array(50).fill({ seq: 1, steer: 0, throttle: 0, brake: 0 }) }).length, 8, 'at most 8 per packet');
 });
