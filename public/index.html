@@ -10,117 +10,134 @@
 <body>
 
     <!-- LOBBY SCREEN -->
+    <!-- LOBBY SCREEN -->
     <div id="lobby-screen" class="screen">
         <div class="lobby-container">
-            <h1 class="glow-title">LAN RACE</h1>
-            
+            <header class="lobby-header">
+                <h1 class="glow-title">LAN RACE</h1>
+                <div id="session-summary" class="session-summary"></div>
+            </header>
+
             <div class="lobby-panels">
-                <!-- Left Panel: Profile & Settings -->
-                <div class="panel profile-panel">
-                    <h2>Your Profile</h2>
-                    <input type="text" id="username" placeholder="Username" maxlength="15">
-                    <div class="team-picker">
-                        <label style="margin-bottom:10px; display:block;">Team</label>
-                        <div id="team-grid"></div>
-                    </div>
-                    
-
-                    <label class="graphics-picker">Graphics:
-                        <select id="graphics-select">
-                            <option value="auto" selected>Auto</option>
-                            <option value="low">Low</option>
-                            <option value="medium">Medium</option>
-                            <option value="high">High</option>
-                        </select>
-                        <small id="graphics-note"></small>
-                    </label>
-                    <label class="graphics-picker">Racing line:
-                        <select id="line-select">
-                            <option value="off">Off</option>
-                            <option value="corners" selected>Corners only</option>
-                            <option value="full">Full</option>
-                        </select>
-                        <small>R / gamepad X during a race</small>
-                    </label>
-                    <label class="graphics-picker">Assist:
-                        <select id="assist-select">
-                            <option value="full" selected>Full (steering + braking)</option>
-                            <option value="off">Off</option>
-                        </select>
-                        <small>Q / gamepad View during a race</small>
-                    </label>
-                    <label class="graphics-picker">Other cars:
-                        <select id="others-select">
-                            <option value="present" selected>Where they really are</option>
-                            <option value="smooth">Smoothest (slightly behind)</option>
-                        </select>
-                        <small>"Where they really are" matches the hitbox</small>
-                    </label>
-                    <label class="graphics-picker">Sound volume:
-                        <input type="range" id="volume-range" min="0" max="100" value="70">
-                    </label>
-                    <label class="graphics-picker">Engine sound:
-                        <select id="engine-select">
-                            <option value="all" selected>All cars</option>
-                            <option value="mine">Mine only</option>
-                            <option value="off">Off</option>
-                        </select>
-                        <small>M mutes during a race</small>
-                    </label>
-
-                    <button id="btn-join" class="btn primary">Join Lobby</button>
-                    
-                    <div id="player-controls" class="hidden">
-                        <button id="btn-ready" class="btn">Ready Up</button>
-                        
-                        <div id="host-settings" class="hidden">
-                            <h3>Host Settings</h3>
-                            <label>Track:
-                                <select id="setting-track">
-                                    <option value="monza">Monza</option>
-                                    <option value="spa">Spa-Francorchamps</option>
-                                    <option value="silverstone">Silverstone</option>
-                                    <option value="suzuka">Suzuka</option>
-                                    <option value="sakhir">Bahrain (Sakhir)</option>
-                                </select>
-                            </label>
-                            <label>Laps:
-                                <input type="number" id="setting-laps" min="1" max="50" value="3">
-                            </label>
-                            <label>Qualifying:
-                                <select id="setting-quali">
-                                    <option value="1" selected>On (out-lap + 2 laps)</option>
-                                    <option value="0">Off</option>
-                                </select>
-                            </label>
-                            <label>Collisions:
-                                <select id="setting-collisions">
-                                    <option value="1" selected>On</option>
-                                    <option value="0">Off (ghost cars)</option>
-                                </select>
-                            </label>
-                            <button id="btn-start" class="btn success mt-1">Start Race</button>
+                <!-- Left: your car -->
+                <section class="panel profile-panel">
+                    <div id="hero" class="hero">
+                        <img id="hero-car" alt="" hidden>
+                        <div class="hero-info">
+                            <span id="hero-team" class="hero-team">Pick your team</span>
+                            <span id="hero-sub" class="hero-sub">11 teams · 2 seats each</span>
+                        </div>
+                        <div class="hero-join">
+                            <input type="text" id="username" placeholder="Driver name" maxlength="15" aria-label="Driver name">
+                            <button id="btn-join" class="btn primary">Join ▶</button>
                         </div>
                     </div>
-                </div>
 
-                <!-- Middle Panel: Players -->
-                <div class="panel players-panel">
-                    <h2>Players</h2>
-                    <ul id="players-list">
-                        <!-- Filled by JS -->
-                    </ul>
-                </div>
+                    <h2>Teams</h2>
+                    <div id="team-grid"></div>
 
-                <!-- Right Panel: Chat -->
-                <div class="panel chat-panel">
-                    <h2>Lobby Chat</h2>
-                    <div id="chat-messages"></div>
-                    <form id="chat-form">
-                        <input type="text" id="chat-input" placeholder="Type a message..." autocomplete="off">
-                        <button type="submit" class="btn small">Send</button>
-                    </form>
-                </div>
+                    <details class="my-settings">
+                        <summary>My settings</summary>
+                        <div class="settings-grid">
+                            <label class="graphics-picker">Graphics
+                                <select id="graphics-select">
+                                    <option value="auto" selected>Auto</option>
+                                    <option value="low">Low</option>
+                                    <option value="medium">Medium</option>
+                                    <option value="high">High</option>
+                                </select>
+                                <small id="graphics-note"></small>
+                            </label>
+                            <label class="graphics-picker">Racing line
+                                <select id="line-select">
+                                    <option value="off">Off</option>
+                                    <option value="corners" selected>Corners only</option>
+                                    <option value="full">Full</option>
+                                </select>
+                                <small>R / gamepad X during a race</small>
+                            </label>
+                            <label class="graphics-picker">Assist
+                                <select id="assist-select">
+                                    <option value="full" selected>Full (steering + braking)</option>
+                                    <option value="off">Off</option>
+                                </select>
+                                <small>Q / gamepad View during a race</small>
+                            </label>
+                            <label class="graphics-picker">Other cars
+                                <select id="others-select">
+                                    <option value="present" selected>Where they really are</option>
+                                    <option value="smooth">Smoothest (slightly behind)</option>
+                                </select>
+                                <small>"Where they really are" matches the hitbox</small>
+                            </label>
+                            <label class="graphics-picker">Sound volume
+                                <input type="range" id="volume-range" min="0" max="100" value="70">
+                            </label>
+                            <label class="graphics-picker">Engine sound
+                                <select id="engine-select">
+                                    <option value="all" selected>All cars</option>
+                                    <option value="mine">Mine only</option>
+                                    <option value="off">Off</option>
+                                </select>
+                                <small>M mutes during a race</small>
+                            </label>
+                        </div>
+                    </details>
+                </section>
+
+                <!-- Right: the session -->
+                <section class="side">
+                    <div class="panel players-panel">
+                        <h2>Drivers <span id="driver-count" class="h2-meta"></span></h2>
+                        <ul id="players-list"></ul>
+                    </div>
+
+                    <div class="panel race-panel">
+                        <h2>Race settings</h2>
+                        <dl id="settings-view" class="settings-view"></dl>
+                        <div id="player-controls" class="hidden">
+                            <div id="host-settings" class="hidden">
+                                <div class="host-grid">
+                                    <label>Track
+                                        <select id="setting-track">
+                                            <option value="monza">Monza</option>
+                                            <option value="spa">Spa-Francorchamps</option>
+                                            <option value="silverstone">Silverstone</option>
+                                            <option value="suzuka">Suzuka</option>
+                                            <option value="sakhir">Bahrain (Sakhir)</option>
+                                        </select>
+                                    </label>
+                                    <label>Laps
+                                        <input type="number" id="setting-laps" min="1" max="50" value="3">
+                                    </label>
+                                    <label>Qualifying
+                                        <select id="setting-quali">
+                                            <option value="1" selected>On (out-lap + 2 laps)</option>
+                                            <option value="0">Off</option>
+                                        </select>
+                                    </label>
+                                    <label>Collisions
+                                        <select id="setting-collisions">
+                                            <option value="1" selected>On</option>
+                                            <option value="0">Off (ghost cars)</option>
+                                        </select>
+                                    </label>
+                                </div>
+                                <button id="btn-start" class="btn success">Start Race</button>
+                            </div>
+                            <button id="btn-ready" class="btn primary">Ready Up</button>
+                        </div>
+                    </div>
+
+                    <div class="panel chat-panel">
+                        <h2>Chat</h2>
+                        <div id="chat-messages"></div>
+                        <form id="chat-form">
+                            <input type="text" id="chat-input" placeholder="Type a message..." autocomplete="off" aria-label="Chat message">
+                            <button type="submit" class="btn small">Send</button>
+                        </form>
+                    </div>
+                </section>
             </div>
         </div>
     </div>
@@ -197,7 +214,6 @@
             <h2>QUALIFYING RESULTS</h2>
             <ol id="quali-results-list"></ol>
         </div>
-        </div>
     </div>
 
     <div id="race-results" class="hidden">
@@ -207,6 +223,7 @@
             <ol id="rr-list"></ol>
             <div class="rr-foot">Times include penalties · <span id="rr-count">back to lobby in 15 s</span></div>
         </div>
+    </div>
 
     <script type="importmap">
         { "imports": { "three": "/vendor/three/build/three.module.js", "three/addons/": "/vendor/three/examples/jsm/" } }

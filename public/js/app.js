@@ -19,6 +19,8 @@ const setTrack = document.getElementById('setting-track');
 const setLaps = document.getElementById('setting-laps');
 const setQuali = document.getElementById('setting-quali');
 const setCollisions = document.getElementById('setting-collisions');
+const settingsView = document.getElementById('settings-view');
+const MAX_RACERS = 20; // src/lobby.js: grid slots per track
 const graphicsSelect = document.getElementById('graphics-select');
 try { graphicsSelect.value = localStorage.getItem('lanrace.quality') || 'auto'; } catch (e) { /* storage blocked: Auto */ }
 if (!graphicsSelect.value) graphicsSelect.value = 'auto';
@@ -69,7 +71,7 @@ let amReady = false;
 let teams = [];
 let selectedTeam = null;
 
-fetch('teams.json').then(r => r.json()).then((list) => { teams = list; renderTeamGrid(); });
+fetch('teams.json').then(r => r.json()).then((list) => { teams = list; window.updateLobbyUI(); }); // team names in the driver list too
 
 function teamCounts() {
     const counts = {};
@@ -79,6 +81,10 @@ function teamCounts() {
 
 function renderTeamGrid() {
     const counts = teamCounts();
+    // Start on the first team with a free seat so the hero shows a car; any card click changes it before joining
+    if (!isJoined && !teams.some((t) => t.id === selectedTeam && (counts[t.id] || 0) < t.maxPlayers)) {
+        selectedTeam = teams.find((t) => (counts[t.id] || 0) < t.maxPlayers)?.id ?? null;
+    }
     teamGrid.innerHTML = '';
     for (const t of teams) {
         const n = counts[t.id] || 0;
@@ -88,6 +94,8 @@ function renderTeamGrid() {
         card.className = 'team-card' + (t.id === selectedTeam ? ' selected' : '') + (full ? ' full' : '');
         card.disabled = isJoined || (full && t.id !== selectedTeam);
         card.setAttribute('aria-pressed', t.id === selectedTeam);
+        card.title = t.name;
+        card.style.setProperty('--team', t.chatColor);
 
         const img = document.createElement('img');
         img.src = `liveries/${t.id}-thumb.png`;
@@ -103,6 +111,18 @@ function renderTeamGrid() {
         card.addEventListener('click', () => { selectedTeam = t.id; renderTeamGrid(); });
         teamGrid.appendChild(card);
     }
+    renderHero();
+}
+
+// Big car + team colours for the selected team
+const heroCar = document.getElementById('hero-car');
+function renderHero() {
+    const t = teams.find((x) => x.id === selectedTeam);
+    heroCar.hidden = !t;
+    if (t && heroCar.getAttribute('src') !== `liveries/${t.id}-thumb.png`) heroCar.src = `liveries/${t.id}-thumb.png`;
+    screenLobby.style.setProperty('--team', t ? t.chatColor : '#64748b');
+    document.getElementById('hero-team').textContent = t ? t.name : 'Pick your team';
+    document.getElementById('hero-sub').textContent = t ? `${t.car} · ${teamCounts()[t.id] || 0}/${t.maxPlayers} seats taken` : `${teams.length || 11} teams · 2 seats each`;
 }
 
 function setJoinedUI(joined) {
@@ -176,17 +196,26 @@ window.updateLobbyUI = () => {
     const myId = clientState.me;
     const amHost = clientState.hostId === myId;
 
-    for (const [id, player] of Object.entries(clientState.players)) {
+    const entries = Object.entries(clientState.players);
+    entries.forEach(([id, player], i) => {
         const li = document.createElement('li');
-        li.className = 'player-item';
+        li.className = 'player-item' + (id === myId ? ' me' : '');
 
-        const colorIndicator = document.createElement('div');
+        const num = document.createElement('span');
+        num.className = 'player-num';
+        num.textContent = String(i + 1).padStart(2, '0');
+
+        const colorIndicator = document.createElement('span');
         colorIndicator.className = 'player-color';
         colorIndicator.style.backgroundColor = player.color;
 
         const nameNode = document.createElement('span');
         nameNode.className = 'player-name';
         nameNode.textContent = player.username + (id === myId ? ' (You)' : '');
+        const teamNode = document.createElement('span');
+        teamNode.className = 'player-team';
+        teamNode.textContent = teams.find((t) => t.id === player.teamId)?.name || '';
+        nameNode.append(teamNode);
 
         const statusNode = document.createElement('span');
         statusNode.className = 'player-status';
@@ -203,9 +232,19 @@ window.updateLobbyUI = () => {
             statusNode.textContent = 'Waiting';
         }
 
-        li.append(colorIndicator, nameNode, statusNode);
+        li.append(num, colorIndicator, nameNode, statusNode);
+        playersList.appendChild(li);
+    });
+    // A few open grid slots so a quiet lobby still reads as a grid waiting to fill
+    for (let i = entries.length; i < Math.min(MAX_RACERS, Math.max(4, entries.length + 1)); i++) {
+        const li = document.createElement('li');
+        li.className = 'player-item open';
+        const num = Object.assign(document.createElement('span'), { className: 'player-num', textContent: String(i + 1).padStart(2, '0') });
+        li.append(num, Object.assign(document.createElement('span'), { className: 'player-color' }),
+            Object.assign(document.createElement('span'), { className: 'player-name', textContent: 'Open slot' }));
         playersList.appendChild(li);
     }
+    document.getElementById('driver-count').textContent = `${entries.length} / ${MAX_RACERS}`;
 
     if (amHost) {
         hostSettings.classList.remove('hidden');
@@ -214,6 +253,7 @@ window.updateLobbyUI = () => {
         hostSettings.classList.add('hidden');
         if (isJoined) btnReady.classList.remove('hidden');
     }
+    settingsView.classList.toggle('hidden', amHost); // the host edits; everyone else reads
 
     const me = clientState.players[myId];
     const spOverlay = document.getElementById('spectator-overlay');
@@ -240,7 +280,21 @@ window.updateSettingsUI = () => {
     setLaps.value = clientState.settings.maxLaps;
     setQuali.value = clientState.settings.qualifying ? '1' : '0';
     setCollisions.value = clientState.settings.collisions === false ? '0' : '1';
+
+    // Header chips and the read-only view non-hosts see
+    const s = clientState.settings;
+    const track = setTrack.selectedOptions[0]?.textContent || s.trackId;
+    const rows = [['Track', track], ['Laps', s.maxLaps], ['Qualifying', s.qualifying ? 'On' : 'Off'], ['Collisions', s.collisions === false ? 'Off' : 'On']];
+    settingsView.replaceChildren(...rows.map(([k, v]) => {
+        const d = document.createElement('div');
+        d.append(Object.assign(document.createElement('dt'), { textContent: k }), Object.assign(document.createElement('dd'), { textContent: v }));
+        return d;
+    }));
+    document.getElementById('session-summary').replaceChildren(...[track, `${s.maxLaps} ${s.maxLaps === 1 ? 'lap' : 'laps'}`,
+        `Quali ${s.qualifying ? 'on' : 'off'}`, `Collisions ${s.collisions === false ? 'off' : 'on'}`]
+        .map((text) => Object.assign(document.createElement('span'), { textContent: text })));
 };
+window.updateSettingsUI();
 
 window.appendChat = (username, color, msg) => {
     const div = document.createElement('div');
