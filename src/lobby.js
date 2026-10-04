@@ -15,6 +15,9 @@ function sanitizeChat(msg) {
 
 const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
 
+const VALID_MODES = ['f1', 'formula-d'];
+const VALID_CLASSES = ['tuner', 'nascar', 'gt3', 'all'];
+
 function sanitizeSettings(current, incoming, trackIds) {
     if (!incoming || typeof incoming !== 'object') return current;
     const next = { ...current };
@@ -25,6 +28,15 @@ function sanitizeSettings(current, incoming, trackIds) {
     if (incoming.qualiLaps !== undefined && Number.isFinite(incoming.qualiLaps)) next.qualiLaps = clamp(Math.round(incoming.qualiLaps), 1, 5);
     if (typeof incoming.collisions === 'boolean') next.collisions = incoming.collisions;
     if (typeof incoming.botCar === 'boolean') next.botCar = incoming.botCar;
+    if (typeof incoming.mode === 'string' && VALID_MODES.includes(incoming.mode.toLowerCase())) {
+        next.mode = incoming.mode.toLowerCase();
+    }
+    if (typeof incoming.vehicleClass === 'string' && VALID_CLASSES.includes(incoming.vehicleClass.toLowerCase())) {
+        next.vehicleClass = incoming.vehicleClass.toLowerCase();
+    }
+    if (typeof incoming.driftSubMode === 'string') {
+        next.driftSubMode = incoming.driftSubMode;
+    }
     return next;
 }
 
@@ -32,11 +44,25 @@ const num = (v, min, max) => (Number.isFinite(v) ? clamp(v, min, max) : 0);
 
 function sanitizeInput(input) {
     const i = input && typeof input === 'object' ? input : {};
-    if ('throttle' in i || 'brake' in i || 'steer' in i) {
-        return { throttle: num(i.throttle, 0, 1), brake: num(i.brake, 0, 1), steer: num(i.steer, -1, 1), drs: i.drs === true, explicitReverse: i.explicitReverse === true };
+    if ('throttle' in i || 'brake' in i || 'steer' in i || 'handbrake' in i) {
+        return {
+            throttle: num(i.throttle, 0, 1),
+            brake: num(i.brake, 0, 1),
+            steer: num(i.steer, -1, 1),
+            drs: i.drs === true,
+            handbrake: i.handbrake === true,
+            explicitReverse: i.explicitReverse === true
+        };
     }
     // Legacy on/off keys from older clients
-    return { throttle: i.up ? 1 : 0, brake: i.down ? 1 : 0, steer: (i.right ? 1 : 0) - (i.left ? 1 : 0), drs: false, explicitReverse: i.down === true };
+    return {
+        throttle: i.up ? 1 : 0,
+        brake: i.down ? 1 : 0,
+        steer: (i.right ? 1 : 0) - (i.left ? 1 : 0),
+        drs: false,
+        handbrake: !!i.handbrake || !!i.space,
+        explicitReverse: i.down === true
+    };
 }
 
 function canJoinTeam(players, teamId) {

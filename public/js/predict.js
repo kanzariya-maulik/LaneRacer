@@ -1,6 +1,7 @@
 // Client-side prediction for your own car: run the shared simulation on your inputs straight away,
 // then reconcile with the server (rewind to its state, replay unacknowledged inputs, blend out the difference).
 import { driveCar } from './sim/drive.js';
+import { driveDriftCar } from './sim/driftdrive.js';
 
 export const STEP_S = 1 / 60;
 export const SNAP_M = 5;              // corrections this big snap (reset, teleport)
@@ -12,9 +13,11 @@ const FIN = 16;
 const lerpAngle = (a, b, k) => a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * k;
 
 export class Predictor {
-    constructor(track, assist = 'off') {
+    constructor(track, assist = 'off', isDriftMode = false, vehicleClass = 'tuner') {
         this.track = track;
         this.assist = assist;             // must match the server's setting for this player, or every tick corrects
+        this.isDriftMode = !!isDriftMode;
+        this.vehicleClass = vehicleClass;
         this.car = null;
         this.prev = { x: 0, y: 0, angle: 0 };
         this.pending = [];
@@ -22,6 +25,14 @@ export class Predictor {
         this.lastError = 0;
         this.finished = false;
         this.lastS = -1;                  // newest server packet applied
+    }
+
+    simStep(car, input) {
+        if (this.isDriftMode) {
+            driveDriftCar(car, input, this.track, STEP_S, this.vehicleClass);
+        } else {
+            driveCar(car, input, this.track, STEP_S);
+        }
     }
 
     // Server entry → simulation state
@@ -51,7 +62,7 @@ export class Predictor {
         if (this.finished) return;                        // the server parks finished cars
         this.pending.push(input);
         if (this.pending.length > MAX_PENDING) this.pending.splice(0, this.pending.length - MAX_PENDING);
-        if (this.pending.length <= MAX_UNACKED) driveCar(this.car, input, this.track, STEP_S);
+        if (this.pending.length <= MAX_UNACKED) this.simStep(this.car, input);
     }
 
     // s = the packet's server seq: an older packet arriving late (reordered UDP) is ignored — its replay inputs are gone.
@@ -64,7 +75,7 @@ export class Predictor {
         if (lastSeq !== undefined && lastSeq >= 0) while (this.pending.length && this.pending[0].seq <= lastSeq) this.pending.shift();
         const bx = this.car.x, by = this.car.y, ba = this.car.angle;
         this.load(e);
-        if (!this.finished) for (const input of this.pending) driveCar(this.car, input, this.track, STEP_S);
+        if (!this.finished) for (const input of this.pending) this.simStep(this.car, input);
         const dx = bx - this.car.x, dy = by - this.car.y, err = Math.hypot(dx, dy);
         this.lastError = err;
         if (err < SNAP_M * this.track.scale) {

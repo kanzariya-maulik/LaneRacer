@@ -63,6 +63,9 @@ const setLaps = document.getElementById('setting-laps');
 const setQuali = document.getElementById('setting-quali');
 const setCollisions = document.getElementById('setting-collisions');
 const setBot = document.getElementById('setting-bot');
+const setMode = document.getElementById('setting-mode');
+const setVehicleClass = document.getElementById('setting-vehicle-class');
+const setVehicleClassItem = document.getElementById('setting-vehicle-class-item');
 
 try {
     const savedHostSettings = JSON.parse(localStorage.getItem('lanrace.hostSettings'));
@@ -74,6 +77,8 @@ try {
         }
         if (savedHostSettings.collisions !== undefined && setCollisions) setCollisions.value = savedHostSettings.collisions ? '1' : '0';
         if (savedHostSettings.botCar !== undefined && setBot) setBot.value = savedHostSettings.botCar ? '1' : '0';
+        if (savedHostSettings.mode && setMode) setMode.value = savedHostSettings.mode;
+        if (savedHostSettings.vehicleClass && setVehicleClass) setVehicleClass.value = savedHostSettings.vehicleClass;
     }
 } catch (e) {}
 
@@ -114,6 +119,27 @@ function remembered(id, key, fallback, onChange) {
 remembered('others-select', 'lanrace.others', 'present');
 remembered('autobrake-select', 'lanrace.autobrake', 'off');
 
+const debounce = (fn, ms = 100) => {
+    let t;
+    return (...args) => {
+        clearTimeout(t);
+        t = setTimeout(() => fn(...args), ms);
+    };
+};
+
+const debouncedSaveVolume = debounce((val) => {
+    try { localStorage.setItem('lanrace.volume', val); } catch (e) {}
+}, 120);
+
+const debouncedSaveMusicVolume = debounce((val) => {
+    try { localStorage.setItem('lanrace.musicVolume', val); } catch (e) {}
+}, 120);
+
+const debouncedSaveAssist = debounce((str) => {
+    try { localStorage.setItem('lanrace.assist', str); } catch (e) {}
+    if (clientState.players[clientState.me]) socket.emit('set_assist', str);
+}, 80);
+
 function updateSliderTrack(slider) {
     if (!slider) return;
     const min = parseFloat(slider.min) || 0;
@@ -136,10 +162,11 @@ try {
 if (volumeRange) {
     updateSliderTrack(volumeRange);
     volumeRange.addEventListener('input', () => {
-        if (volumeVal) volumeVal.textContent = `${volumeRange.value}%`;
+        const val = volumeRange.value;
+        if (volumeVal) volumeVal.textContent = `${val}%`;
         updateSliderTrack(volumeRange);
-        window.lanraceAudio?.setVolume(volumeRange.value / 100);
-        try { localStorage.setItem('lanrace.volume', volumeRange.value); } catch (e) {}
+        window.lanraceAudio?.setVolume(val / 100);
+        debouncedSaveVolume(val);
     });
 }
 
@@ -157,10 +184,11 @@ if (musicVolumeRange) {
         if (musicVolumeVal) musicVolumeVal.textContent = `${mv}%`;
     } catch (e) {}
     musicVolumeRange.addEventListener('input', () => {
-        if (musicVolumeVal) musicVolumeVal.textContent = `${musicVolumeRange.value}%`;
+        const val = musicVolumeRange.value;
+        if (musicVolumeVal) musicVolumeVal.textContent = `${val}%`;
         updateSliderTrack(musicVolumeRange);
-        window.lanraceAudio?.setMusicVolume(musicVolumeRange.value / 100);
-        try { localStorage.setItem('lanrace.musicVolume', musicVolumeRange.value); } catch (e) {}
+        window.lanraceAudio?.setMusicVolume(val / 100);
+        debouncedSaveMusicVolume(val);
     });
 }
 
@@ -189,7 +217,7 @@ function parseAssistVal(v) {
     return { steer: 100, brake: 100 };
 }
 
-window.setAssist = (v) => {
+window.setAssist = (v, instantSave = false) => {
     const { steer, brake } = parseAssistVal(v);
     if (assistSteerSlider) {
         assistSteerSlider.value = steer;
@@ -204,10 +232,15 @@ window.setAssist = (v) => {
 
     const str = `${steer},${brake}`;
     (window.lanraceMem ||= {})['lanrace.assist'] = str;
-    try { localStorage.setItem('lanrace.assist', str); } catch (e) {}
     if (lastJoin) lastJoin.assist = str;
-    if (clientState.players[clientState.me]) socket.emit('set_assist', str);
     window.onAssistChange?.(str);
+
+    if (instantSave) {
+        try { localStorage.setItem('lanrace.assist', str); } catch (e) {}
+        if (clientState.players[clientState.me]) socket.emit('set_assist', str);
+    } else {
+        debouncedSaveAssist(str);
+    }
 };
 
 function getAssistValStr() {
@@ -219,7 +252,7 @@ function getAssistValStr() {
 function updateAssistFromSliders() {
     if (assistSteerSlider) updateSliderTrack(assistSteerSlider);
     if (assistBrakeSlider) updateSliderTrack(assistBrakeSlider);
-    window.setAssist(getAssistValStr());
+    window.setAssist(getAssistValStr(), false);
 }
 
 assistSteerSlider?.addEventListener('input', updateAssistFromSliders);
@@ -227,8 +260,8 @@ assistBrakeSlider?.addEventListener('input', updateAssistFromSliders);
 
 try {
     const savedAssist = localStorage.getItem('lanrace.assist');
-    if (savedAssist) window.setAssist(savedAssist);
-    else window.setAssist('100,100');
+    if (savedAssist) window.setAssist(savedAssist, true);
+    else window.setAssist('100,100', true);
 } catch (e) {}
 
 let isJoined = false;
@@ -512,7 +545,9 @@ function emitSettings() {
         qualifying: qualiVal > 0,
         qualiLaps: qualiVal > 0 ? qualiVal : 0,
         collisions: setCollisions.value === '1',
-        botCar: setBot ? setBot.value === '1' : false
+        botCar: setBot ? setBot.value === '1' : false,
+        mode: setMode ? setMode.value : 'f1',
+        vehicleClass: setVehicleClass ? setVehicleClass.value : 'tuner'
     };
     try {
         localStorage.setItem('lanrace.hostSettings', JSON.stringify(settings));
@@ -524,6 +559,24 @@ setLaps.addEventListener('change', emitSettings);
 setQuali.addEventListener('change', emitSettings);
 setCollisions.addEventListener('change', emitSettings);
 setBot?.addEventListener('change', emitSettings);
+setMode?.addEventListener('change', () => {
+    if (setVehicleClassItem) {
+        setVehicleClassItem.style.display = setMode.value === 'formula-d' ? 'block' : 'none';
+    }
+    const driftTracks = ['ebisu', 'longbeach'];
+    const f1Tracks = ['monza', 'spa', 'silverstone', 'suzuka', 'sakhir'];
+    if (setMode.value === 'formula-d') {
+        if (f1Tracks.includes(setTrack.value)) {
+            setTrack.value = 'ebisu';
+        }
+    } else if (setMode.value === 'f1') {
+        if (driftTracks.includes(setTrack.value)) {
+            setTrack.value = 'monza';
+        }
+    }
+    emitSettings();
+});
+setVehicleClass?.addEventListener('change', emitSettings);
 
 chatForm.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -537,6 +590,16 @@ window.updateLobbyUI = () => {
     playersList.innerHTML = '';
     const myId = clientState.me;
     const amHost = clientState.hostId === myId;
+
+    if (setMode && clientState.settings?.mode) {
+        setMode.value = clientState.settings.mode;
+    }
+    if (setVehicleClass && clientState.settings?.vehicleClass) {
+        setVehicleClass.value = clientState.settings.vehicleClass;
+    }
+    if (setVehicleClassItem && setMode) {
+        setVehicleClassItem.style.display = setMode.value === 'formula-d' ? 'block' : 'none';
+    }
 
     for (const [id, player] of Object.entries(clientState.players)) {
         if (player.isBot) continue;
@@ -600,6 +663,8 @@ window.updateLobbyUI = () => {
         if (setQuali) setQuali.disabled = false;
         if (setCollisions) setCollisions.disabled = false;
         if (setBot) setBot.disabled = false;
+        if (setMode) setMode.disabled = false;
+        if (setVehicleClass) setVehicleClass.disabled = false;
 
         btnReady.classList.add('hidden');
         if (isJoined) btnStart.classList.remove('hidden');
@@ -626,6 +691,8 @@ window.updateLobbyUI = () => {
         if (setQuali) setQuali.disabled = true;
         if (setCollisions) setCollisions.disabled = true;
         if (setBot) setBot.disabled = true;
+        if (setMode) setMode.disabled = true;
+        if (setVehicleClass) setVehicleClass.disabled = true;
 
         btnStart.classList.add('hidden');
         if (isJoined) btnReady.classList.remove('hidden');
@@ -634,10 +701,12 @@ window.updateLobbyUI = () => {
 
     const me = clientState.players[myId];
     const spOverlay = document.getElementById('spectator-overlay');
+    const floatingChat = document.getElementById('floating-chat-container');
     if (clientState.status === 'LOBBY' || !me) {
         // Visitors who haven't joined stay in the lobby even mid-race
         screenLobby.classList.remove('hidden');
         screenGame.classList.add('hidden');
+        if (floatingChat) floatingChat.classList.remove('hidden');
         // Server state wins: syncs arrive whenever anyone joins, so don't reset a ready player
         amReady = !!me?.isReady;
         btnReady.innerText = amReady ? 'Unready' : 'Ready Up';
@@ -646,6 +715,10 @@ window.updateLobbyUI = () => {
     } else {
         screenLobby.classList.add('hidden');
         screenGame.classList.remove('hidden');
+        if (floatingChat) {
+            floatingChat.classList.add('hidden');
+            toggleChat(false);
+        }
         spOverlay.classList.toggle('hidden', !me.isSpectating);
     }
 
@@ -688,16 +761,23 @@ window.handleStatusChange = (status) => {
     const results = document.getElementById('quali-results');
     const raceResults = document.getElementById('race-results');
     const lights = document.getElementById('lights');
+    const floatingChat = document.getElementById('floating-chat-container');
 
     if (status === 'LOBBY') {
         screenLobby.classList.remove('hidden');
         screenGame.classList.add('hidden');
+        if (floatingChat) floatingChat.classList.remove('hidden');
         [cdOverlay, spOverlay, results, lights].forEach(el => el.classList.add('hidden')); // the race classification stays up over the lobby
         return;
     }
 
     const me = clientState.players[clientState.me];
     if (!me) return; // visitors who haven't joined stay in the lobby
+
+    if (floatingChat) {
+        floatingChat.classList.add('hidden');
+        toggleChat(false);
+    }
 
     screenLobby.classList.add('hidden');
     screenGame.classList.remove('hidden');

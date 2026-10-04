@@ -4,7 +4,9 @@ const Physics = require('./Physics');
 const Assist = require('./Assist');
 const RacingLine = require('./RacingLine');
 
-const TRACK_IDS = ['monza', 'spa', 'silverstone', 'suzuka', 'sakhir'];
+const F1_TRACK_IDS = ['monza', 'spa', 'silverstone', 'suzuka', 'sakhir'];
+const DRIFT_TRACK_IDS = ['ebisu', 'longbeach'];
+const TRACK_IDS = [...F1_TRACK_IDS, ...DRIFT_TRACK_IDS];
 const DATA_DIR = path.join(__dirname, '..', '..', 'data', 'tracks');
 const CHECKPOINT_COUNT = 16;
 const GRID_SLOTS = 20;
@@ -153,4 +155,4 @@ function loadAll() {
     return tracks;
 }
 
-module.exports = { TRACK_IDS, GARAGE_ORDER, load, loadAll, build, pointAt };
+module.exports = { F1_TRACK_IDS, DRIFT_TRACK_IDS, TRACK_IDS, GARAGE_ORDER, load, loadAll, build, pointAt };

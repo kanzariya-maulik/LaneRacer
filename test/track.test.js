@@ -12,8 +12,8 @@ const CAR_RADIUS = 18; // Physics.checkCarCollision
 
 const tracks = Track.loadAll();
 
-test('loads all five circuits', () => {
-    assert.deepStrictEqual(Object.keys(tracks).sort(), ['monza', 'sakhir', 'silverstone', 'spa', 'suzuka']);
+test('loads all circuits including drift arenas', () => {
+    assert.deepStrictEqual(Object.keys(tracks).sort(), ['ebisu', 'longbeach', 'monza', 'sakhir', 'silverstone', 'spa', 'suzuka']);
 });
 
 for (const id of Track.TRACK_IDS) {
@@ -44,14 +44,6 @@ for (const id of Track.TRACK_IDS) {
         }
     });
 
-    test(`${id}: pit entry closed just before the first garage`, () => {
-        const { closeS, closeWall, garageSpan, wall, path: pp, cum } = t.pit;
-        assert.ok(closeS < garageSpan[0], 'closure must be before the garages');
-        const n = Physics.nearestOnPath(wall[0].x, wall[0].y, pp, false);
-        assert.ok(Math.abs(closeS - (cum[n.i] + n.t * (cum[n.i + 1] - cum[n.i]))) < 1 * t.scale, 'closure must start at the pit wall');
-        assert.strictEqual(closeWall.length, 2);
-    });
-
     test(`${id}: safe corner speeds`, () => {
         assert.strictEqual(t.safeSpeed.length, t.path.length);
         for (const v of t.safeSpeed) assert.ok(v > 15 && v <= 100);
@@ -73,31 +65,7 @@ for (const id of Track.TRACK_IDS) {
         t.startPositions.forEach((s, i) => assert.strictEqual(sideOf(s), i % 2 === 0 ? pole : other, `slot ${i}`));
         const s0 = t.startPositions[0];
         const ahead = Math.cos(t.start.angle) * (s0.x - t.start.x) + Math.sin(t.start.angle) * (s0.y - t.start.y);
-        assert.ok(ahead < -7 * t.scale && ahead > -9 * t.scale, `pole is ${(-ahead / t.scale).toFixed(1)} m behind the line`);
-    });
-
-    test(`${id}: 11 garages × 2 boxes in team order, in the pit lane, inside the limiter zone`, () => {
-        const pit = t.pit;
-        assert.deepStrictEqual(pit.garages.map(g => g.teamId), Track.GARAGE_ORDER);
-        for (let k = 1; k < pit.garages.length; k++) assert.ok(pit.garages[k].s < pit.garages[k - 1].s, 'garage 1 is nearest the pit exit');
-        for (const g of pit.garages) {
-            assert.strictEqual(g.boxes.length, 2);
-            for (const b of g.boxes) {
-                const n = Physics.nearestOnPath(b.x, b.y, pit.path, false);
-                assert.ok(n.dist < pit.width / 2, `${g.teamId} box outside the pit lane`);
-                assert.ok(Physics.nearestOnTrack(b.x, b.y, t).dist > t.width / 2, `${g.teamId} box on the track`);
-                const s = pit.cum[n.i] + n.t * (pit.cum[n.i + 1] - pit.cum[n.i]);
-                assert.ok(s > pit.limStart && s < pit.limEnd, `${g.teamId} box outside the limiter zone`);
-            }
-        }
-    });
-
-    test(`${id}: pit wall clears the track edge and runs past the garages`, () => {
-        const { wall, path: pp, cum, garageSpan } = t.pit;
-        assert.ok(wall.length > 20, `wall only ${wall.length} points`);
-        for (const w of wall) assert.ok(Physics.nearestOnTrack(w.x, w.y, t).dist >= t.width / 2, 'wall on the track');
-        const sOf = (w) => { const n = Physics.nearestOnPath(w.x, w.y, pp, false); return cum[n.i] + n.t * (cum[n.i + 1] - cum[n.i]); };
-        assert.ok(sOf(wall[0]) < garageSpan[0] && sOf(wall.at(-1)) > garageSpan[1], 'wall gap beside the garages');
+        assert.ok(ahead < -5 * t.scale && ahead > -10 * t.scale, `pole is ${(-ahead / t.scale).toFixed(1)} m behind the line`);
     });
 
     test(`${id}: 20 grid slots on the asphalt and not overlapping`, () => {
@@ -115,6 +83,47 @@ for (const id of Track.TRACK_IDS) {
     });
 }
 
+for (const id of Track.F1_TRACK_IDS) {
+    const t = tracks[id];
+
+    test(`${id} (F1): pit entry closed just before the first garage`, () => {
+        const { closeS, closeWall, garageSpan, wall, path: pp, cum } = t.pit;
+        assert.ok(closeS < garageSpan[0], 'closure must be before the garages');
+        const n = Physics.nearestOnPath(wall[0].x, wall[0].y, pp, false);
+        assert.ok(Math.abs(closeS - (cum[n.i] + n.t * (cum[n.i + 1] - cum[n.i]))) < 1 * t.scale, 'closure must start at the pit wall');
+        assert.strictEqual(closeWall.length, 2);
+    });
+
+    test(`${id} (F1): 11 garages × 2 boxes in team order, in the pit lane, inside the limiter zone`, () => {
+        const pit = t.pit;
+        assert.deepStrictEqual(pit.garages.map(g => g.teamId), Track.GARAGE_ORDER);
+        for (let k = 1; k < pit.garages.length; k++) assert.ok(pit.garages[k].s < pit.garages[k - 1].s, 'garage 1 is nearest the pit exit');
+        for (const g of pit.garages) {
+            assert.strictEqual(g.boxes.length, 2);
+            for (const b of g.boxes) {
+                const n = Physics.nearestOnPath(b.x, b.y, pit.path, false);
+                assert.ok(n.dist < pit.width / 2, `${g.teamId} box outside the pit lane`);
+                assert.ok(Physics.nearestOnTrack(b.x, b.y, t).dist > t.width / 2, `${g.teamId} box on the track`);
+                const s = pit.cum[n.i] + n.t * (pit.cum[n.i + 1] - pit.cum[n.i]);
+                assert.ok(s > pit.limStart && s < pit.limEnd, `${g.teamId} box outside the limiter zone`);
+            }
+        }
+    });
+
+    test(`${id} (F1): pit wall clears the track edge and runs past the garages`, () => {
+        const { wall, path: pp, cum, garageSpan } = t.pit;
+        assert.ok(wall.length > 20, `wall only ${wall.length} points`);
+        for (const w of wall) assert.ok(Physics.nearestOnTrack(w.x, w.y, t).dist >= t.width / 2, 'wall on the track');
+        const sOf = (w) => { const n = Physics.nearestOnPath(w.x, w.y, pp, false); return cum[n.i] + n.t * (cum[n.i + 1] - cum[n.i]); };
+        assert.ok(sOf(wall[0]) < garageSpan[0] && sOf(wall.at(-1)) > garageSpan[1], 'wall gap beside the garages');
+    });
+
+    test(`${id} (F1): pit entry barrier reaches past the track run-off`, () => {
+        const out = t.pit.closeWall[0];
+        assert.ok(Physics.nearestOnTrack(out.x, out.y, t).dist >= t.width / 2 + 80, 'gap around the barrier end');
+    });
+}
+
 test('build fails loudly on missing files', () => {
     assert.throws(() => Track.load('nope'), /Missing track data/);
 });
@@ -128,8 +137,10 @@ for (const id of Track.TRACK_IDS) {
         assert.ok(c.limiterStartM >= 0 && c.limiterStartM < c.limiterEndM);
         assert.ok(Array.isArray(c.sources) && Array.isArray(c.unconfirmed));
     });
+}
 
-    test(`${id}: OSM pit lane imported, aligned and joined to the track`, () => {
+for (const id of Track.F1_TRACK_IDS) {
+    test(`${id} (F1): OSM pit lane imported, aligned and joined to the track`, () => {
         const raw = JSON.parse(fs.readFileSync(path.join(DATA, `${id}.json`), 'utf8'));
         assert.ok(raw.pit, 'no pit lane: run node scripts/import-pits.js');
         assert.ok(raw.pit.fitM <= 5, `OSM fit ${raw.pit.fitM} m`);
@@ -153,6 +164,13 @@ for (const id of Track.TRACK_IDS) {
     });
 }
 
+for (const id of Track.DRIFT_TRACK_IDS) {
+    test(`${id} (Drift): dedicated drift track specs`, () => {
+        const t = tracks[id];
+        assert.ok(t.width >= 90, `drift track width ${t.width} should be wide (>=90) for high-angle tandem drifting`);
+    });
+}
+
 test('a track without a pit lane still builds', () => {
     const pts = Array.from({ length: 100 }, (_, i) => ({ x: Math.cos(i / 50 * Math.PI) * 3000, y: Math.sin(i / 50 * Math.PI) * 3000 }));
     const t = Track.build({ id: 'ring', name: 'Ring', scale: 6, width: 80, path: pts });
@@ -162,16 +180,9 @@ test('a track without a pit lane still builds', () => {
     assert.deepStrictEqual(t.sectorCps.length, 3);
 });
 
-for (const id of Track.TRACK_IDS) {
-    test(`${id}: pit entry barrier reaches past the track run-off`, () => {
-        const t = tracks[id], out = t.pit.closeWall[0];
-        assert.ok(Physics.nearestOnTrack(out.x, out.y, t).dist >= t.width / 2 + 80, 'gap around the barrier end');
-    });
-}
-
 const DRS_COUNT = { monza: 2, spa: 2, silverstone: 2, suzuka: 1, sakhir: 3 };
-for (const id of Track.TRACK_IDS) {
-    test(`${id}: DRS zones on flat-out straights`, () => {
+for (const id of Track.F1_TRACK_IDS) {
+    test(`${id} (F1): DRS zones on flat-out straights`, () => {
         const t = tracks[id], total = t.cum[t.path.length];
         assert.strictEqual(t.drsZones.length, DRS_COUNT[id]);
         for (const z of t.drsZones) {

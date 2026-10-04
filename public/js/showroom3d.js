@@ -109,6 +109,38 @@ function initShowroom() {
         console.warn('[Showroom3D] car.glb load error:', err);
     });
 
+    // Pointer drag for interactive turntable rotation
+    let isDragging = false;
+    let prevPointerX = 0;
+    let rotVelocity = 0.008;
+
+    canvas.style.cursor = 'grab';
+    canvas.addEventListener('pointerdown', (e) => {
+        isDragging = true;
+        prevPointerX = e.clientX;
+        rotVelocity = 0;
+        canvas.style.cursor = 'grabbing';
+        try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
+    });
+
+    canvas.addEventListener('pointermove', (e) => {
+        if (!isDragging || !carGroup) return;
+        const dx = e.clientX - prevPointerX;
+        prevPointerX = e.clientX;
+        carGroup.rotation.y += dx * 0.018;
+        rotVelocity = dx * 0.018;
+    });
+
+    const onPointerEnd = (e) => {
+        if (isDragging) {
+            isDragging = false;
+            canvas.style.cursor = 'grab';
+            try { canvas.releasePointerCapture(e.pointerId); } catch (err) {}
+        }
+    };
+    canvas.addEventListener('pointerup', onPointerEnd);
+    canvas.addEventListener('pointercancel', onPointerEnd);
+
     // Handle Window Resize
     const resizeHandler = () => {
         if (!canvas || !renderer || !camera) return;
@@ -123,6 +155,25 @@ function initShowroom() {
     setTimeout(resizeHandler, 100);
 
     // Start Animation Loop
+    function animate() {
+        requestAnimationFrame(animate);
+
+        const lobby = document.getElementById('lobby-screen');
+        if (!lobby || lobby.classList.contains('hidden') || lobby.style.display === 'none') {
+            return; // Sleep rendering loop when playing in game
+        }
+
+        if (carGroup) {
+            if (!isDragging) {
+                rotVelocity = rotVelocity * 0.94 + 0.007 * 0.06;
+                carGroup.rotation.y += rotVelocity;
+            }
+        }
+
+        if (renderer && scene && camera) {
+            renderer.render(scene, camera);
+        }
+    }
     animate();
 }
 
@@ -155,23 +206,6 @@ export function applyTeam(teamId) {
     };
     if (rimLight && teamColors[currentTeamId]) {
         rimLight.color.setHex(teamColors[currentTeamId]);
-    }
-}
-
-function animate() {
-    requestAnimationFrame(animate);
-
-    const lobby = document.getElementById('lobby-screen');
-    if (!lobby || lobby.classList.contains('hidden') || lobby.style.display === 'none') {
-        return; // Sleep rendering loop when playing in game
-    }
-
-    if (carGroup) {
-        carGroup.rotation.y += 0.009; // Smooth 360-degree rotation
-    }
-
-    if (renderer && scene && camera) {
-        renderer.render(scene, camera);
     }
 }
 

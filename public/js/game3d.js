@@ -89,9 +89,19 @@ window.addEventListener('resize', resize);
 resize();
 
 // ---------- input ----------
-const keys = { up: false, down: false, left: false, right: false, drs: false };
-const KEYMAP = { w: 'up', arrowup: 'up', s: 'down', arrowdown: 'down', a: 'left', arrowleft: 'left', d: 'right', arrowright: 'right', e: 'drs' };
-let input = { throttle: 0, brake: 0, steer: 0, drs: false };
+const keys = { up: false, down: false, left: false, right: false, drs: false, handbrake: false };
+const KEYMAP = {
+    w: 'up', arrowup: 'up',
+    s: 'down', arrowdown: 'down',
+    a: 'left', arrowleft: 'left',
+    d: 'right', arrowright: 'right',
+    e: 'drs',
+    ' ': 'handbrake',
+    space: 'handbrake',
+    b: 'handbrake',
+    x: 'handbrake'
+};
+let input = { throttle: 0, brake: 0, steer: 0, drs: false, handbrake: false };
 let touchInput = null;
 let predictor = null, simAcc = 0, inputSeq = 0, sentInputs = []; // client-side prediction (own car)
 let spectateId = null; // spectators follow this driver
@@ -155,7 +165,7 @@ window.addEventListener('keyup', (e) => onKey(e, false));
 // A keyup missed while the window lost focus (alt-tab, tab switch) must not leave throttle or steering held
 function releaseKeys() {
     for (const k in keys) keys[k] = false;
-    input = { throttle: 0, brake: 0, steer: 0, drs: false };
+    input = { throttle: 0, brake: 0, steer: 0, drs: false, handbrake: false };
     simStep(false); // the release goes out now, not at the next frame (a hidden tab has none)
 }
 window.addEventListener('blur', releaseKeys);
@@ -168,7 +178,15 @@ function simStep(sample = true) {
         const autoBrake = (window.lanraceMem?.['lanrace.autobrake'] === 'on');
         input = pad || touchInput || keyboardStep(input, keys, STEP_S, autoBrake);
     }
-    const stamped = { seq: ++inputSeq, steer: input.steer, throttle: input.throttle, brake: input.brake, drs: !!input.drs, explicitReverse: !!input.explicitReverse };
+    const stamped = {
+        seq: ++inputSeq,
+        steer: input.steer,
+        throttle: input.throttle,
+        brake: input.brake,
+        drs: !!input.drs,
+        handbrake: !!input.handbrake,
+        explicitReverse: !!input.explicitReverse
+    };
     if (predictor && predictor.car) predictor.step(stamped);
     sentInputs.push(stamped);
     if (sentInputs.length > 6) sentInputs.shift();
@@ -735,11 +753,341 @@ function buildWorld(t) {
     snapCamera = true;
 }
 
-// ---------- cars ----------
+// ---------- cars & particle systems ----------
 let carTemplate = null;
+let sportsCarTemplate = null;
 const failedLiveries = new Set();
 const liveries = {};
 const texLoader = new THREE.TextureLoader();
+
+class SmokeParticleSystem {
+    constructor(parentScene, maxParticles = 240) {
+        this.maxParticles = maxParticles;
+        this.particles = [];
+        this.index = 0;
+        
+        const c = document.createElement('canvas');
+        c.width = c.height = 64;
+        const g = c.getContext('2d');
+        const grad = g.createRadialGradient(32, 32, 2, 32, 32, 30);
+        grad.addColorStop(0, 'rgba(240, 240, 248, 0.7)');
+        grad.addColorStop(0.4, 'rgba(215, 220, 230, 0.4)');
+        grad.addColorStop(1, 'rgba(200, 205, 215, 0)');
+        g.fillStyle = grad;
+        g.fillRect(0, 0, 64, 64);
+        const tex = new THREE.CanvasTexture(c);
+
+        const geo = new THREE.PlaneGeometry(1, 1);
+        const mat = new THREE.MeshBasicMaterial({
+            map: tex,
+            transparent: true,
+            opacity: 0.65,
+            depthWrite: false,
+            side: THREE.DoubleSide
+        });
+
+        this.mesh = new THREE.InstancedMesh(geo, mat, maxParticles);
+        this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        this.mesh.frustumCulled = false;
+        this.mesh.renderOrder = 4;
+        parentScene.add(this.mesh);
+
+        this.dummy = new THREE.Object3D();
+        for (let i = 0; i < maxParticles; i++) {
+            this.dummy.position.set(0, -9999, 0);
+            this.dummy.scale.set(0, 0, 0);
+            this.dummy.updateMatrix();
+            this.mesh.setMatrixAt(i, this.dummy.matrix);
+            this.particles.push({ active: false, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, age: 0, maxAge: 1, size: 1, rot: 0, vRot: 0 });
+        }
+        this.mesh.instanceMatrix.needsUpdate = true;
+    }
+
+    emit(x, y, z, vx, vy, speed, intensity = 1.0) {
+        const p = this.particles[this.index];
+        p.active = true;
+        p.x = x + (Math.random() - 0.5) * 0.4;
+        p.y = y + 0.2 + Math.random() * 0.2;
+        p.z = z + (Math.random() - 0.5) * 0.4;
+        p.vx = vx * 0.12 + (Math.random() - 0.5) * 1.5;
+        p.vy = 0.6 + Math.random() * 1.0;
+        p.vz = vy * 0.12 + (Math.random() - 0.5) * 1.5;
+        p.age = 0;
+        p.maxAge = 0.7 + Math.random() * 0.5;
+        p.size = (2.0 + Math.random() * 1.5) * Math.min(2.5, intensity);
+        p.rot = Math.random() * Math.PI * 2;
+        p.vRot = (Math.random() - 0.5) * 2;
+        this.index = (this.index + 1) % this.maxParticles;
+    }
+
+    update(dt, cam) {
+        let needsUpdate = false;
+        for (let i = 0; i < this.maxParticles; i++) {
+            const p = this.particles[i];
+            if (!p.active) continue;
+            p.age += dt;
+            if (p.age >= p.maxAge) {
+                p.active = false;
+                this.dummy.position.set(0, -9999, 0);
+                this.dummy.scale.set(0, 0, 0);
+                this.dummy.updateMatrix();
+                this.mesh.setMatrixAt(i, this.dummy.matrix);
+                needsUpdate = true;
+                continue;
+            }
+            p.x += p.vx * dt;
+            p.y += p.vy * dt;
+            p.z += p.vz * dt;
+            p.rot += p.vRot * dt;
+
+            const progress = p.age / p.maxAge;
+            const currentSize = p.size * (1 + progress * 2.2);
+            this.dummy.position.set(p.x, p.y, p.z);
+            if (cam) this.dummy.quaternion.copy(cam.quaternion);
+            this.dummy.scale.set(currentSize, currentSize, currentSize);
+            this.dummy.updateMatrix();
+            this.mesh.setMatrixAt(i, this.dummy.matrix);
+            needsUpdate = true;
+        }
+        if (needsUpdate) this.mesh.instanceMatrix.needsUpdate = true;
+    }
+}
+
+const smokeSystem = new SmokeParticleSystem(scene);
+
+function createProceduralSportsCar(colorHex, vClass = 'tuner') {
+    const group = new THREE.Group();
+    const isNascar = vClass === 'nascar';
+    const isGT3 = vClass === 'gt3';
+
+    const bodyMat = new THREE.MeshStandardMaterial({
+        color: colorHex,
+        metalness: isNascar ? 0.15 : 0.35,
+        roughness: isNascar ? 0.45 : 0.28,
+        envMap: Q.envMap ? envTexture() : null,
+        envMapIntensity: 0.45
+    });
+    const carbonMat = new THREE.MeshStandardMaterial({ color: 0x181c24, metalness: 0.2, roughness: 0.4 });
+    const darkMat = new THREE.MeshStandardMaterial({ color: 0x090d16, metalness: 0.1, roughness: 0.7 });
+    const glassMat = new THREE.MeshStandardMaterial({ color: 0x070b14, metalness: 0.85, roughness: 0.08, transparent: true, opacity: 0.88 });
+    const headlightMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0x38bdf8, emissiveIntensity: 1.4, roughness: 0.1 });
+    const taillightMat = new THREE.MeshStandardMaterial({ color: 0xef4444, emissive: 0xff1122, emissiveIntensity: 1.5, roughness: 0.2 });
+    const intercoolerMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, metalness: 0.85, roughness: 0.3 });
+    const caliperMat = new THREE.MeshStandardMaterial({ color: 0xdc2626, metalness: 0.3, roughness: 0.4 });
+    const discMat = new THREE.MeshStandardMaterial({ color: 0xcbd5e1, metalness: 0.85, roughness: 0.25 });
+    const rimMat = new THREE.MeshStandardMaterial({ color: isNascar ? 0xfacc15 : 0xe2e8f0, metalness: 0.85, roughness: 0.2 });
+    const tireMat = new THREE.MeshStandardMaterial({ color: 0x141416, roughness: 0.9, metalness: 0.05 });
+
+    // 1. Lower chassis tub & floor undertray
+    const floor = new THREE.Mesh(new THREE.BoxGeometry(4.4, 0.08, 1.96), darkMat);
+    floor.position.set(0, 0.14, 0);
+    group.add(floor);
+
+    // Side aero ground-effect skirts
+    const skirtL = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.06, 0.14), carbonMat);
+    skirtL.position.set(0, 0.12, 1.0);
+    const skirtR = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.06, 0.14), carbonMat);
+    skirtR.position.set(0, 0.12, -1.0);
+    group.add(skirtL, skirtR);
+
+    // 2. Main lower body / fuselage
+    const mainBody = new THREE.Mesh(new THREE.BoxGeometry(4.3, 0.44, 1.84), bodyMat);
+    mainBody.position.set(0, 0.36, 0);
+    mainBody.castShadow = true;
+    group.add(mainBody);
+
+    // 3. Widebody aerodynamic fender flares (FL, FR, RL, RR)
+    const flareFL = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.36, 0.22), bodyMat);
+    flareFL.position.set(1.35, 0.42, 0.98);
+    const flareFR = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.36, 0.22), bodyMat);
+    flareFR.position.set(1.35, 0.42, -0.98);
+    const flareRL = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.38, 0.24), bodyMat);
+    flareRL.position.set(-1.35, 0.44, 0.99);
+    const flareRR = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.38, 0.24), bodyMat);
+    flareRR.position.set(-1.35, 0.44, -0.99);
+    flareFL.castShadow = flareFR.castShadow = flareRL.castShadow = flareRR.castShadow = true;
+    group.add(flareFL, flareFR, flareRL, flareRR);
+
+    // 4. Sloped Hood with air extractor vents
+    const hood = new THREE.Mesh(new THREE.BoxGeometry(1.45, 0.2, 1.58), bodyMat);
+    hood.position.set(1.22, 0.52, 0);
+    hood.rotation.z = -0.06;
+    hood.castShadow = true;
+    group.add(hood);
+
+    const hoodVent = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.04, 0.75), carbonMat);
+    hoodVent.position.set(1.1, 0.62, 0);
+    hoodVent.rotation.z = -0.06;
+    group.add(hoodVent);
+
+    // 5. Cabin & Fastback greenhouse glass
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.85, 0.42, 1.34), glassMat);
+    cabin.position.set(-0.16, 0.78, 0);
+    cabin.castShadow = true;
+    group.add(cabin);
+
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(1.25, 0.06, 1.22), bodyMat);
+    roof.position.set(-0.2, 0.99, 0);
+    roof.castShadow = true;
+    group.add(roof);
+
+    const windshield = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.38, 1.26), glassMat);
+    windshield.position.set(0.62, 0.74, 0);
+    windshield.rotation.z = 0.48;
+    group.add(windshield);
+
+    const rearGlass = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.34, 1.22), glassMat);
+    rearGlass.position.set(-0.95, 0.74, 0);
+    rearGlass.rotation.z = -0.38;
+    group.add(rearGlass);
+
+    // 6. Front Splitter, Grille & Intercooler
+    const splitter = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.05, 2.08), carbonMat);
+    splitter.position.set(2.2, 0.12, 0);
+    group.add(splitter);
+
+    const wingletL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.14, 0.04), carbonMat);
+    wingletL.position.set(2.25, 0.19, 1.04);
+    const wingletR = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.14, 0.04), carbonMat);
+    wingletR.position.set(2.25, 0.19, -1.04);
+    group.add(wingletL, wingletR);
+
+    // Front Intercooler Radiator core
+    const intercooler = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.22, 0.92), intercoolerMat);
+    intercooler.position.set(2.18, 0.28, 0);
+    group.add(intercooler);
+
+    // Front Bumper Canards (dive planes)
+    const canardL = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.03, 0.28), carbonMat);
+    canardL.position.set(2.05, 0.32, 0.94);
+    canardL.rotation.y = 0.3; canardL.rotation.z = -0.15;
+    const canardR = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.03, 0.28), carbonMat);
+    canardR.position.set(2.05, 0.32, -0.94);
+    canardR.rotation.y = -0.3; canardR.rotation.z = -0.15;
+    group.add(canardL, canardR);
+
+    // Headlights (Projector LED with cyan glow)
+    const hlL = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.1, 0.36), headlightMat);
+    hlL.position.set(2.12, 0.46, 0.68);
+    const hlR = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.1, 0.36), headlightMat);
+    hlR.position.set(2.12, 0.46, -0.68);
+    group.add(hlL, hlR);
+
+    // 7. Rear Diffuser, Exhaust & Taillights
+    const diffuser = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.12, 1.76), darkMat);
+    diffuser.position.set(-2.08, 0.18, 0);
+    diffuser.rotation.z = -0.12;
+    group.add(diffuser);
+
+    // Quad / Dual Titanium Exhaust Tips
+    const exGeo = new THREE.CylinderGeometry(0.065, 0.065, 0.25, 12);
+    exGeo.rotateZ(Math.PI / 2);
+    const exMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, metalness: 0.95, roughness: 0.2 });
+    for (const zOff of [-0.62, -0.48, 0.48, 0.62]) {
+        const ex = new THREE.Mesh(exGeo, exMat);
+        ex.position.set(-2.22, 0.22, zOff);
+        group.add(ex);
+    }
+
+    // Rear LED Taillight Bar
+    const tlBar = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.08, 1.62), taillightMat);
+    tlBar.position.set(-2.14, 0.54, 0);
+    group.add(tlBar);
+
+    // 8. Rear Spoiler / Wing (GT3 / Swan-Neck or NASCAR Ducktail)
+    if (isNascar) {
+        // Muscular NASCAR Ducktail Blade Spoiler
+        const ducktail = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.26, 1.72), carbonMat);
+        ducktail.position.set(-2.05, 0.72, 0);
+        ducktail.rotation.z = -0.28;
+        ducktail.castShadow = true;
+        group.add(ducktail);
+    } else {
+        // High-Downforce Swan-Neck GT Drift Wing
+        const wing = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.05, 2.05), carbonMat);
+        wing.position.set(-2.05, 1.12, 0);
+        wing.rotation.z = 0.05;
+        wing.castShadow = true;
+        group.add(wing);
+
+        const endL = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.24, 0.04), carbonMat);
+        endL.position.set(-2.05, 1.12, 1.04);
+        const endR = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.24, 0.04), carbonMat);
+        endR.position.set(-2.05, 1.12, -1.04);
+        group.add(endL, endR);
+
+        const pylonL = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.45, 0.05), darkMat);
+        pylonL.position.set(-1.95, 0.9, 0.55);
+        pylonL.rotation.z = -0.15;
+        const pylonR = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.45, 0.05), darkMat);
+        pylonR.position.set(-1.95, 0.9, -0.55);
+        pylonR.rotation.z = -0.15;
+        group.add(pylonL, pylonR);
+    }
+
+    // 9. Wheel Assemblies (Tire + Multi-spoke Rim + Brake Disc & Stationary Caliper)
+    const wheels = [];
+    const tireGeo = new THREE.CylinderGeometry(0.36, 0.36, 0.32, 24);
+    tireGeo.rotateX(Math.PI / 2);
+    const rimLipGeo = new THREE.CylinderGeometry(0.27, 0.27, 0.33, 20);
+    rimLipGeo.rotateX(Math.PI / 2);
+    const hubGeo = new THREE.CylinderGeometry(0.09, 0.09, 0.34, 12);
+    hubGeo.rotateX(Math.PI / 2);
+    const spokeGeo = new THREE.BoxGeometry(0.045, 0.24, 0.33);
+    const discGeo = new THREE.CylinderGeometry(0.22, 0.22, 0.04, 18);
+    discGeo.rotateX(Math.PI / 2);
+
+    const coords = [
+        { name: 'wheel_FL', pos: [1.35, 0.36, 0.95], left: true },
+        { name: 'wheel_FR', pos: [1.35, 0.36, -0.95], left: false },
+        { name: 'wheel_RL', pos: [-1.35, 0.36, 0.95], left: true },
+        { name: 'wheel_RR', pos: [-1.35, 0.36, -0.95], left: false },
+    ];
+
+    for (const c of coords) {
+        const wGroup = new THREE.Group();
+        wGroup.name = c.name;
+        wGroup.position.set(c.pos[0], c.pos[1], c.pos[2]);
+
+        // Rotating hub assembly (rolls around Z axis when driving)
+        const rollGroup = new THREE.Group();
+        rollGroup.name = `${c.name}_roll`;
+
+        const tire = new THREE.Mesh(tireGeo, tireMat);
+        tire.castShadow = true;
+        rollGroup.add(tire);
+
+        const rimLip = new THREE.Mesh(rimLipGeo, rimMat);
+        rollGroup.add(rimLip);
+
+        const centerHub = new THREE.Mesh(hubGeo, darkMat);
+        rollGroup.add(centerHub);
+
+        // 5-spoke star concave drift wheel pattern
+        for (let s = 0; s < 5; s++) {
+            const spoke = new THREE.Mesh(spokeGeo, rimMat);
+            spoke.rotation.z = (s * Math.PI * 2) / 5;
+            rollGroup.add(spoke);
+        }
+
+        const disc = new THREE.Mesh(discGeo, discMat);
+        rollGroup.add(disc);
+
+        wGroup.add(rollGroup);
+        wGroup.userData.rollGroup = rollGroup;
+        wGroup.userData.isProcedural = true;
+
+        // Stationary Brake Caliper (mounted on hub, steers with Y but does not roll on Z)
+        const caliper = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.14, 0.08), caliperMat);
+        caliper.position.set(0.08, 0.12, c.left ? -0.06 : 0.06);
+        wGroup.add(caliper);
+
+        group.add(wGroup);
+        wheels.push(wGroup);
+    }
+
+    return { model: group, wheels };
+}
 
 function dropCar(id) {
     if (cars[id]) world?.remove(cars[id].root);
@@ -750,6 +1098,11 @@ new GLTFLoader().load('models/car.glb', (gltf) => {
     carTemplate = gltf.scene;
     for (const id in cars) dropCar(id); // replace placeholder boxes next frame
 }, undefined, (err) => console.error('[LanRace] car.glb failed to load, using boxes', err));
+
+new GLTFLoader().load('models/sports_car.glb', (gltf) => {
+    sportsCarTemplate = gltf.scene;
+    for (const id in cars) dropCar(id);
+}, undefined, () => {});
 
 function liveryTexture(teamId) {
     if (!liveries[teamId]) {
@@ -814,8 +1167,24 @@ function makeCar(id) {
     const lp = clientState.players[id];
     if (!lp) return null;
     const root = new THREE.Group();
-    const wheels = [];
-    if (carTemplate && !failedLiveries.has(lp.teamId)) {
+    let wheels = [];
+    const isDrift = (clientState.settings?.mode === 'formula-d' || clientState.isDriftMode);
+    const vClass = clientState.settings?.vehicleClass || 'tuner';
+
+    if (isDrift && sportsCarTemplate) {
+        const model = sportsCarTemplate.clone(true);
+        model.scale.setScalar(scale);
+        root.add(model);
+        for (const name of ['wheel_FL', 'wheel_FR', 'wheel_RL', 'wheel_RR']) {
+            const w = model.getObjectByName(name);
+            if (w) wheels.push(w);
+        }
+    } else if (isDrift) {
+        const proc = createProceduralSportsCar(lp.color, vClass);
+        proc.model.scale.setScalar(scale);
+        root.add(proc.model);
+        wheels = proc.wheels;
+    } else if (carTemplate && !failedLiveries.has(lp.teamId)) {
         const model = carTemplate.clone(true);
         const map = liveryTexture(lp.teamId);
         model.traverse((o) => {
@@ -852,7 +1221,7 @@ function makeCar(id) {
     const tag = id === clientState.me ? null : nameTag(lp.username, lp.color);
     if (tag) root.add(tag);
     if (!Q.shadows) root.add(blobShadow());
-    return { root, wheels, teamId: lp.teamId, ghost: false, tag };
+    return { root, wheels, teamId: lp.teamId, ghost: false, tag, isDrift: !!isDrift };
 }
 
 function updateCars(dt) {
@@ -875,10 +1244,30 @@ function updateCars(dt) {
         r.rotation.y = -s.angle;
         const far = camera.position.distanceTo(r.position) > 300 * scale; // wheels unreadable that far: 4 fewer draws per car
         for (const w of car.wheels) w.userData.show = !far;
-        for (const w of car.wheels) w.rotation.z -= (s.speed / (WHEEL_RADIUS_M * scale)) * dt;
+        for (const w of car.wheels) {
+            const roll = w.userData.rollGroup || w;
+            roll.rotation.z -= (s.speed / (WHEEL_RADIUS_M * scale)) * dt;
+        }
         // +steer turns toward +z (right); a +y rotation points the wheel toward -z, so negate
         car.wheels[0] && (car.wheels[0].rotation.y = -(s.steer || 0)); // wheel_FL
         car.wheels[1] && (car.wheels[1].rotation.y = -(s.steer || 0)); // wheel_FR
+
+        // Smoke emission during drift or handbrake
+        const slip = s.driftAngle || (Math.abs(s.steer || 0) * 35);
+        const isSlipping = (slip >= 15 && Math.abs(s.speed) > 20) || (id === clientState.me && input.handbrake && Math.abs(s.speed) > 10);
+        if (isSlipping) {
+            const cos = Math.cos(s.angle), sin = Math.sin(s.angle);
+            const rlX = s.x - cos * 1.35 * scale - sin * 0.95 * scale;
+            const rlZ = s.y - sin * 1.35 * scale + cos * 0.95 * scale;
+            const rrX = s.x - cos * 1.35 * scale + sin * 0.95 * scale;
+            const rrZ = s.y - sin * 1.35 * scale - cos * 0.95 * scale;
+            const vx = s.vx || Math.cos(s.angle) * s.speed;
+            const vy = s.vy || Math.sin(s.angle) * s.speed;
+            const intensity = Math.min(2.0, slip / 30);
+            smokeSystem.emit(rlX, 0, rlZ, vx / scale, vy / scale, s.speed / scale, intensity);
+            smokeSystem.emit(rrX, 0, rrZ, vx / scale, vy / scale, s.speed / scale, intensity);
+        }
+
         if (car.tag) {
             const m = camera.position.distanceTo(r.position) / scale;
             const fade = Math.min(1, Math.max(0, (TAG_GONE_M - m) / (TAG_GONE_M - TAG_FULL_M)));
@@ -961,6 +1350,7 @@ function updateWheelBatch() {
     world.updateMatrixWorld();
     const counts = wheelBatch.map(() => 0);
     for (const id in cars) {
+        if (cars[id].isDrift) continue; // Formula-D cars have distinct high-detail procedural wheels
         for (const w of cars[id].wheels) {
             if (!w.parent || !w.userData.show) continue;
             let k = 0;
@@ -1184,8 +1574,47 @@ function updateHUD(withTower = true) {
     }
     $('drs-hint').textContent = hint;
 
+    const isDriftMode = clientState.settings?.mode === 'formula-d';
+    const driftHud = $('drift-hud');
+    if (driftHud) {
+        driftHud.classList.toggle('hidden', !isDriftMode || !racing);
+        if (isDriftMode && racing) {
+            $('drift-total-score').innerText = Math.floor(me.driftScore || 0).toLocaleString();
+            $('drift-combo-points').innerText = `+${Math.floor(me.driftCombo || 0)}`;
+            $('drift-multiplier-badge').innerText = `${(me.driftMultiplier || 1.0).toFixed(1)}x`;
+            const angleDeg = Math.round(me.driftAngle || 0);
+            $('drift-angle-val').innerText = `${angleDeg}°`;
+
+            const msgEl = $('drift-status-msg');
+            if (msgEl) {
+                if (me.driftSpinout) {
+                    msgEl.innerText = 'SPINOUT!';
+                    msgEl.className = 'spinout';
+                } else if (angleDeg >= 30) {
+                    msgEl.innerText = 'GREAT ANGLE!';
+                    msgEl.className = 'great';
+                } else if (angleDeg >= 15) {
+                    msgEl.innerText = 'DRIFTING';
+                    msgEl.className = 'drifting';
+                } else {
+                    msgEl.innerText = '';
+                    msgEl.className = '';
+                }
+            }
+
+            const clipEl = $('drift-clip-notify');
+            if (clipEl) {
+                clipEl.classList.toggle('hidden', !me.driftClipping);
+            }
+        }
+    }
+
     if (withTower) {
         // Timing tower
+        const ttHead = $('tt-head');
+        if (ttHead && ttHead.firstElementChild) {
+            ttHead.firstElementChild.textContent = isDriftMode ? 'DRIFT RANK' : 'TIMING';
+        }
         const quali = clientState.status === 'QUALIFYING' || clientState.status === 'QUALI_RESULTS'; // ghosts also mean collisions off
         const ol = $('leaderboard-list');
         ol.innerHTML = '';
@@ -1214,7 +1643,10 @@ function updateHUD(withTower = true) {
             }
             const gap = gapText(rows, i, towerMode);
             const time = el('span', 'tt-gap');
-            if (quali) {
+            if (isDriftMode) {
+                time.textContent = `${Math.floor(p.driftScore || 0).toLocaleString()} pts`;
+                time.classList.add('lead');
+            } else if (quali) {
                 time.textContent = gap ? gap : fmtTime(p.bestLap);
                 if (p.bestLap !== null && p.bestLap === fastest) time.classList.add('t-purple');
                 const bars = el('span', 'tt-sectors');
@@ -1356,6 +1788,7 @@ function frame(now) {
     applyNet(now / 1000, dt);
     updateCars(dt);
     updateWheelBatch();
+    smokeSystem.update(dt, camera);
     updateCamera(dt);
     updateSound(dt);
     renderer.render(scene, camera);
@@ -1401,8 +1834,10 @@ function frame(now) {
 
 window.initGameVisuals = () => {
     netBuf = new SnapshotBuffer();
+    const isDrift = clientState.settings?.mode === 'formula-d';
+    const vClass = clientState.settings?.vehicleClass || 'tuner';
     // New session: predict from the new grid (reset on our first entry); spectators never get one, so never predict
-    predictor = new Predictor(clientState.trackData, clientState.gameState?.[clientState.me]?.assist || 'off');
+    predictor = new Predictor(clientState.trackData, clientState.gameState?.[clientState.me]?.assist || 'off', isDrift, vClass);
     sentInputs = []; carPose.clear(); carState.clear(); renderClock.t = presentClock.t = null;
     othersMode = store.get('lanrace.others') === 'smooth' ? 'smooth' : 'present';
     ownBox.reset(); remoteBoxes.clear(); lastDrs = false;

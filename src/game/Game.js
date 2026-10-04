@@ -1,5 +1,7 @@
 const Physics = require('./Physics');
 const Drive = require('../../public/js/sim/drive.js');
+const DriftDrive = require('./DriftDrive');
+const { DriftScorer } = require('./DriftScorer');
 const Ticker = require('../ticker');
 const { pointAt } = require('./Track');
 const RacingLine = require('./RacingLine');
@@ -20,7 +22,7 @@ const SLIP_MAX = 0.2;         // drag cut right behind another car…
 const SLIP_MIN_M = 5, SLIP_RANGE_M = 40, SLIP_LAT_M = 3; // …fading out by 40 m behind, only roughly in line
 
 const FLAGS = { inPit: 1, limiter: 2, drs: 4, drsAvailable: 8, finished: 16, lapValid: 32, ghost: 64 };
-const META_FIELDS = ['lap', 'checkpoint', 'rank', 'gap', 'lapsDown', 'lastLap', 'bestLap', 'lapStart', 'bestLapSectors', 'lastValid', 'penalty'];
+const META_FIELDS = ['lap', 'checkpoint', 'rank', 'gap', 'lapsDown', 'lastLap', 'bestLap', 'lapStart', 'bestLapSectors', 'lastValid', 'penalty', 'driftScore', 'driftAngle', 'driftMultiplier', 'driftCombo'];
 const META_EVERY = 6; // ticks: info updates at 10 Hz
 const r1 = (v) => Math.round(v * 10) / 10;
 
@@ -30,9 +32,11 @@ class Game {
         this.io = io;
         this.net = net;
         this.track = track;
-        this.settings = settings;
+        this.settings = settings || {};
         this.onFinish = onFinish;
         this.mode = mode;
+        this.isDriftMode = (this.settings.mode === 'formula-d');
+        this.driftScorer = this.isDriftMode ? new DriftScorer() : null;
         this.dt = 1 / TICK_RATE;
         this.time = 0;                     // race clock (s), starts at lights out
         this.clock = 0;                    // session clock (s) for client interpolation, never frozen
@@ -58,12 +62,14 @@ class Game {
                 teamId: p.teamId,
                 assist: p.assist || 'off',
                 isBot: !!p.isBot,
+                vehicleClass: p.vehicleClass || this.settings.vehicleClass || 'tuner',
                 x: slot.x, y: slot.y, angle: slot.angle,
                 vx: 0, vy: 0, speed: 0, steer: 0,
                 inPit: false, limiter: false, pitS: 0,
                 limits: 0, penalty: 0, offLimits: false, finishTime: null,
                 lastSafeX: slot.x, lastSafeY: slot.y, gridX: slot.x, gridY: slot.y, jumpStart: false, reacted: false,
                 drs: false, drsAvailable: false, drsEligible: [], tow: 0, lapS: null,
+                driftScore: 0, driftAngle: 0, driftMultiplier: 1.0, driftCombo: 0,
                 lap: 0,
                 // Race cars sit behind the line having "passed" checkpoint 0; quali cars must cross it to start a lap
                 checkpoint: mode === 'quali' ? cpCount - 1 : 0,
@@ -164,7 +170,18 @@ class Game {
     initPayload() {
         // Late joiners also need the quali clock and the session-best sectors (tower colours)
         const session = this.mode === 'quali' ? { phase: 'QUALIFYING', endsInMs: Math.max(0, (QUALI_MAX_S - this.time) * 1000) } : null;
-        return { players: this.players, track: this.track, mode: this.mode, index: this.index, session, bestSectors: this.bestSectors, bestSectorIds: this.bestSectorIds, fastestLap: this.fastestLap };
+        return {
+            players: this.players,
+            track: this.track,
+            mode: this.mode,
+            isDriftMode: this.isDriftMode,
+            settings: this.settings,
+            index: this.index,
+            session,
+            bestSectors: this.bestSectors,
+            bestSectorIds: this.bestSectorIds,
+            fastestLap: this.fastestLap
+        };
     }
 
     handleInput(id, input) {
@@ -244,6 +261,7 @@ class Game {
     // Slipstream: drag cut for a car close behind another, roughly in line and pointing the same way
     updateTow() {
         const list = Object.values(this.players), sc = this.track.scale;
+        const slipMax = this.isDriftMode ? SLIP_MAX * 2.5 : SLIP_MAX;
         for (const p of list) {
             p.tow = 0;
             if (p.finished) continue;
@@ -253,7 +271,7 @@ class Game {
                 const dx = o.x - p.x, dy = o.y - p.y;
                 const ahead = (dx * fx + dy * fy) / sc, side = Math.abs(-dx * fy + dy * fx) / sc;
                 if (ahead < SLIP_MIN_M || ahead > SLIP_RANGE_M || side > SLIP_LAT_M || Math.cos(o.angle - p.angle) < 0.9) continue;
-                p.tow = Math.max(p.tow, SLIP_MAX * (1 - (ahead - SLIP_MIN_M) / (SLIP_RANGE_M - SLIP_MIN_M)));
+                p.tow = Math.max(p.tow, slipMax * (1 - (ahead - SLIP_MIN_M) / (SLIP_RANGE_M - SLIP_MIN_M)));
             }
         }
     }
@@ -282,7 +300,24 @@ class Game {
     // Motion is shared with the browser (driveCar); the rest is the referee's job
     drive(p) {
         const t = this.track, wasLimited = p.limiter;
-        const after = Drive.driveCar(p, p.input, t, this.dt);
+        const after = this.isDriftMode
+            ? DriftDrive.driveCar(p, p.input, t, this.dt, p.vehicleClass || this.settings.vehicleClass || 'tuner')
+            : Drive.driveCar(p, p.input, t, this.dt);
+
+        if (this.isDriftMode && this.driftScorer) {
+            const scoring = this.driftScorer.update(p, t, Object.values(this.players), this.dt);
+            const ds = this.driftScorer.getPlayer(p.id);
+            p.driftScore = ds.totalScore + ds.currentCombo;
+            p.driftAngle = ds.angleDeg;
+            p.driftMultiplier = ds.multiplier;
+            p.driftCombo = ds.currentCombo;
+            if (scoring && scoring.event === 'banked') {
+                this.io.emit('drift_banked', { id: p.id, banked: scoring.banked, totalScore: scoring.totalScore });
+            } else if (scoring && scoring.event === 'spinout') {
+                this.io.emit('drift_spinout', { id: p.id, angle: scoring.angle });
+            }
+        }
+
         if (this.mode === 'quali' && p.limiter && !wasLimited) p.lapStart = p.sectorStart = null; // crossing the pit entry line ends a timed lap
         this.checkLimits(p, after);
         const total = t.cum[t.path.length];
@@ -437,6 +472,15 @@ class Game {
     updateRanks() {
         const list = Object.values(this.players);
         if (!list.length) return;
+        if (this.isDriftMode) {
+            const ranked = [...list].sort((a, b) => (b.driftScore || 0) - (a.driftScore || 0));
+            const leader = ranked[0];
+            ranked.forEach((p, i) => {
+                p.rank = i + 1;
+                p.gap = i > 0 && leader.driftScore !== undefined && p.driftScore !== undefined ? (leader.driftScore - p.driftScore) : null;
+            });
+            return;
+        }
         const ranked = this.mode === 'quali' ? Game.qualiOrder(list) : Game.rankPlayers(list, this.track.checkpoints);
         const leader = ranked[0];
         const cpCount = this.track.checkpoints.length;

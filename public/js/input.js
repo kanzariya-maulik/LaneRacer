@@ -7,7 +7,7 @@ export function approach(cur, target, rate, dt) {
     return Math.abs(target - cur) <= stepSize ? target : cur + Math.sign(target - cur) * stepSize;
 }
 
-// keys: { up, down, left, right, drs } booleans
+// keys: { up, down, left, right, drs, handbrake } booleans
 export function keyboardStep(prev, keys, dt, autoBrake = false) {
     const steerTarget = (keys.right ? 1 : 0) - (keys.left ? 1 : 0);
     const isAutoBrake = autoBrake && !keys.up && !keys.down;
@@ -17,6 +17,7 @@ export function keyboardStep(prev, keys, dt, autoBrake = false) {
         throttle: approach(prev.throttle, keys.up ? 1 : 0, RATES.throttle, dt),
         brake: approach(prev.brake, downPressed ? 1 : 0, RATES.brake, dt),
         drs: !!keys.drs,
+        handbrake: !!keys.handbrake,
         explicitReverse: !!keys.down
     };
 }
@@ -26,15 +27,16 @@ export function deadZone(v, dz = DEAD_ZONE) {
     return a < dz ? 0 : (Math.sign(v) * (a - dz)) / (1 - dz);
 }
 
-// Standard mapping: left stick X steers, RT (button 7) throttle, LT (button 6) brake, Y (button 3) DRS
+// Standard mapping: left stick X steers, RT (button 7) throttle, LT (button 6) brake, Y (button 3) DRS, B (button 1) / X (button 2) Handbrake
 export function gamepadInput(pad) {
     if (!pad) return null;
     const steer = deadZone(pad.axes[0] || 0);
     const throttle = pad.buttons[7]?.value || 0;
     const brake = pad.buttons[6]?.value || 0;
     const drs = !!pad.buttons[3]?.pressed;
-    if (Math.abs(steer) < 0.01 && throttle < 0.05 && brake < 0.05 && !drs) return null; // idle pad doesn't override the keyboard
-    return { steer, throttle, brake, drs };
+    const handbrake = !!(pad.buttons[1]?.pressed || pad.buttons[2]?.pressed);
+    if (Math.abs(steer) < 0.01 && throttle < 0.05 && brake < 0.05 && !drs && !handbrake) return null; // idle pad doesn't override the keyboard
+    return { steer, throttle, brake, drs, handbrake };
 }
 
 export function changed(a, b) {
@@ -42,5 +44,7 @@ export function changed(a, b) {
         || Math.abs(a.steer - b.steer) > 0.01
         || Math.abs(a.throttle - b.throttle) > 0.01
         || Math.abs(a.brake - b.brake) > 0.01
-        || !!a.drs !== !!b.drs;
+        || !!a.drs !== !!b.drs
+        || !!a.handbrake !== !!b.handbrake;
 }
+

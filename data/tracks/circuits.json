@@ -53,5 +53,27 @@
     "sector2M": 1650,
     "sector3M": 4000,
     "drs": [[4850, 5150, 650], [4850, 1050, 1450], [2600, 2850, 3350]]
+  },
+  "ebisu": {
+    "startLineM": 0,
+    "poleSide": "left",
+    "limiterStartM": 20,
+    "limiterEndM": 180,
+    "sources": ["Formula-D / D1GP Ebisu Touge Drift Arena layout"],
+    "unconfirmed": [],
+    "sector2M": 500,
+    "sector3M": 1000,
+    "drs": []
+  },
+  "longbeach": {
+    "startLineM": 0,
+    "poleSide": "left",
+    "limiterStartM": 20,
+    "limiterEndM": 190,
+    "sources": ["Formula-D Long Beach GP Drift Arena layout"],
+    "unconfirmed": [],
+    "sector2M": 600,
+    "sector3M": 1100,
+    "drs": []
   }
 }
