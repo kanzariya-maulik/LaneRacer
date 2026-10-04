@@ -8,20 +8,47 @@ try {
 
 // Open and still hearing from the client: a channel that went quiet (WiFi roam, IP change) can take ICE tens of
 // seconds to report as failed, so judge it by traffic instead
+function packBinarySnapshot(stateSync) {
+    if (!stateSync || !Array.isArray(stateSync.c)) return null;
+    const cars = stateSync.c;
+    const buf = Buffer.allocUnsafe(cars.length * 32);
+    for (let i = 0; i < cars.length; i++) {
+        const e = cars[i];
+        const base = i * 32;
+        buf.writeUInt32LE((stateSync.s >>> 0), base + 0);
+        buf.writeFloatLE(stateSync.t || 0, base + 4);
+        buf.writeUInt8((e[0] || 0) & 0xFF, base + 8);
+        buf.writeUInt8((e[6] || 0) & 0xFF, base + 9);
+        buf.writeUInt16LE((e[10] >= 0 ? e[10] : 0xFFFF) & 0xFFFF, base + 10);
+        buf.writeFloatLE(e[1] || 0, base + 12);
+        buf.writeFloatLE(e[2] || 0, base + 16);
+        buf.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round((e[3] || 0) * 10000))), base + 20);
+        buf.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round((e[4] || 0) * 100))), base + 22);
+        buf.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round((e[5] || 0) * 10000))), base + 24);
+        buf.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round((e[7] || 0) * 100))), base + 26);
+        buf.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round((e[8] || 0) * 100))), base + 28);
+        buf.writeUInt16LE(Math.max(0, Math.min(65535, Math.round((e[9] || 0) * 10000))), base + 30);
+    }
+    return buf;
+}
+
+// Open and still hearing from the client: a channel that went quiet (WiFi roam, IP change) can take ICE tens of
+// seconds to report as failed, so judge it by traffic instead
 const QUIET_MS = 500;
 const live = (peer) => peer.isOpen && peer.dc && peer.dc.isOpen() && (peer.lastRx === undefined || Date.now() - peer.lastRx < QUIET_MS);
 
 class WebRTCManager {
     constructor() {
         this.sendLater = withNetSim((fn) => fn()); // NET_SIM: fake WiFi delay/jitter/loss on outgoing state
-        this.peers = {}; // [socketId]: { pc, dc, isOpen: false, pingTime: 0 }
+        this.peers = {}; // [socketId]: { pc, dc, isOpen: false, pingTime: 0, binary: false }
     }
 
     setupPeer(socket, onInput) {
         try {
             const pc = new nodeDataChannel.PeerConnection(socket.id, {
                 iceServers: [
-                    'stun:stun.l.google.com:19302' // STUN fallback for WAN, works directly on LAN
+                    'stun:stun.l.google.com:19302',
+                    'stun:stun1.l.google.com:19302'
                 ]
             });
 
@@ -68,6 +95,7 @@ class WebRTCManager {
                 pc,
                 dc,
                 isOpen: false,
+                binary: true, // prefer compact binary ArrayBuffer by default
                 socket
             };
 
@@ -78,8 +106,8 @@ class WebRTCManager {
                 peerRecord.isOpen = true;
                 peerRecord.lastRx = Date.now();
                 console.log(`[WebRTC] 🚀 UDP DataChannel OPEN for player: ${socket.id}`);
-                // Notify client that UDP is active
-                dc.sendMessage(JSON.stringify({ type: 'UDP_READY', timestamp: Date.now() }));
+                // Notify client that UDP is active with binary protocol support
+                dc.sendMessage(JSON.stringify({ type: 'UDP_READY', binary: true, timestamp: Date.now() }));
             });
 
             dc.onClosed(() => {
@@ -95,19 +123,24 @@ class WebRTCManager {
             dc.onMessage((msg) => {
                 peerRecord.lastRx = Date.now(); // liveness: clients send inputs at least 10 times a second
                 try {
-                    const data = JSON.parse(msg);
+                    const str = typeof msg === 'string' ? msg : msg.toString('utf8');
+                    const data = JSON.parse(str);
                     if (data.type === 'INPUT') {
                         if (onInput) onInput(socket.id, data.payload);
                     } else if (data.type === 'PING') {
+                        if (data.binary !== undefined) peerRecord.binary = !!data.binary;
                         // Echo ping back immediately for latency calculation
                         dc.sendMessage(JSON.stringify({ type: 'PONG', clientTime: data.clientTime }));
+                    } else if (data.type === 'PROTOCOL') {
+                        if (data.binary !== undefined) peerRecord.binary = !!data.binary;
                     }
                 } catch (e) {
                     // Fast path: if raw inputs object sent
-                    if (typeof msg === 'string' && msg.startsWith('{') && onInput) {
+                    const str = typeof msg === 'string' ? msg : msg.toString('utf8');
+                    if (str.startsWith('{') && onInput) {
                         try {
-                            const parsed = JSON.parse(msg);
-                            if (parsed.up !== undefined) {
+                            const parsed = JSON.parse(str);
+                            if (parsed.up !== undefined || parsed.inputs !== undefined) {
                                 onInput(socket.id, parsed);
                             }
                         } catch (err) {}
@@ -121,14 +154,29 @@ class WebRTCManager {
     }
 
     broadcastGameState(stateSync, io) {
-        const payload = JSON.stringify({ type: 'STATE', data: stateSync });
+        let payload = null;
+        let binPayload = null;
         const viaUDP = new Set();
 
         for (const [id, peer] of Object.entries(this.peers)) {
             if (live(peer)) {
                 // NET_SIM may deliver later (returns undefined); without it this runs now and reports failure
                 const ok = this.sendLater(() => {
-                    try { peer.dc.sendMessage(payload); return true; } catch (err) { peer.isOpen = false; return false; }
+                    try {
+                        if (peer.binary && typeof peer.dc.sendMessageBinary === 'function') {
+                            if (!binPayload) binPayload = packBinarySnapshot(stateSync);
+                            if (binPayload) {
+                                peer.dc.sendMessageBinary(binPayload);
+                                return true;
+                            }
+                        }
+                        if (!payload) payload = JSON.stringify({ type: 'STATE', data: stateSync });
+                        peer.dc.sendMessage(payload);
+                        return true;
+                    } catch (err) {
+                        peer.isOpen = false;
+                        return false;
+                    }
                 });
                 if (ok !== false) viaUDP.add(id);
             }

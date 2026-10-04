@@ -36,18 +36,26 @@ function setupWebRTC() {
         udpReady = false;
         window.isUDPReady = false;
         rtcPeerConnection = new RTCPeerConnection({
-            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' }
+            ],
+            iceCandidatePoolSize: 2
         });
 
         // When the server creates a DataChannel, this fires
         rtcPeerConnection.ondatachannel = (event) => {
             rtcDataChannel = event.channel;
+            rtcDataChannel.binaryType = 'arraybuffer';
 
             // ── CRITICAL: unordered + maxRetransmits:0 = pure UDP semantics ─
             rtcDataChannel.onopen = () => {
                 udpReady = true;
                 window.isUDPReady = true;
                 console.log('[WebRTC] 🚀 UDP DataChannel OPEN — game traffic now over UDP!');
+                try {
+                    rtcDataChannel.send(JSON.stringify({ type: 'PROTOCOL', binary: true }));
+                } catch (e) {}
             };
 
             rtcDataChannel.onclose = () => {
@@ -63,6 +71,11 @@ function setupWebRTC() {
             // ── Handle messages received over UDP ─────────────────────────
             rtcDataChannel.onmessage = (event) => {
                 lastUdpRx = performance.now();
+                if (event.data instanceof ArrayBuffer) {
+                    const pkt = decodeBinarySnapshot(event.data);
+                    if (pkt) onFastPacket(pkt);
+                    return;
+                }
                 try {
                     const msg = JSON.parse(event.data);
 
@@ -71,6 +84,7 @@ function setupWebRTC() {
                         onFastPacket(msg.data);
                     } else if (msg.type === 'PONG') {
                         clientState.net.rttMs = performance.now() - msg.clientTime;
+                        updatePingUI(clientState.net.rttMs, clientState.net.link);
                     }
                 } catch (e) {}
             };
@@ -160,17 +174,79 @@ window.sendUDPInput = function(batch) {
     socket.emit('input', batch);
 };
 
-// Ping once a second for the stats overlay: over UDP when it's live, else a Socket.IO ack
+// ── Compact Binary ArrayBuffer Deserialization (32 bytes per car) ────────────
+function decodeBinarySnapshot(buffer) {
+    if (!buffer) return null;
+    const dv = buffer instanceof DataView
+        ? buffer
+        : ArrayBuffer.isView(buffer)
+            ? new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength)
+            : new DataView(buffer);
+    if (dv.byteLength % 32 !== 0) return null;
+    const n = dv.byteLength / 32;
+    if (n === 0) return { s: 0, t: 0, g: 0, c: [] };
+    const cars = [];
+    let s = 0, t = 0;
+    for (let i = 0; i < n; i++) {
+        const base = i * 32;
+        s = dv.getUint32(base + 0, true);
+        t = dv.getFloat32(base + 4, true);
+        const idx = dv.getUint8(base + 8);
+        const flags = dv.getUint8(base + 9);
+        const lastSeq = dv.getUint16(base + 10, true);
+        const posX = dv.getFloat32(base + 12, true);
+        const posY = dv.getFloat32(base + 16, true);
+        const angle = dv.getInt16(base + 20, true) / 10000;
+        const speed = dv.getInt16(base + 22, true) / 100;
+        const steer = dv.getInt16(base + 24, true) / 10000;
+        const velX = dv.getInt16(base + 26, true) / 100;
+        const velY = dv.getInt16(base + 28, true) / 100;
+        const tow = dv.getUint16(base + 30, true) / 10000;
+        cars.push([idx, posX, posY, angle, speed, steer, flags, velX, velY, tow, lastSeq === 0xFFFF ? -1 : lastSeq]);
+    }
+    return { s, t, g: t, c: cars };
+}
+
+// ── Live On-Screen Ping Display Updater ─────────────────────────────────────
+function updatePingUI(rttMs, link = 'UDP') {
+    const pingVal = document.getElementById('hud-ping-val');
+    const pingDot = document.getElementById('hud-ping-dot');
+    const pingLink = document.getElementById('hud-ping-link');
+
+    const lobbyPingVal = document.getElementById('lobby-ping-val');
+    const lobbyPingDot = document.getElementById('lobby-ping-dot');
+
+    const formatted = (rttMs === null || rttMs === undefined) ? '--' : Math.round(rttMs);
+    const text = formatted === '--' ? '-- ms' : `${formatted} ms`;
+    const statusClass = (formatted === '--') ? 'ping-unknown'
+        : formatted < 35 ? 'ping-good'
+        : formatted < 80 ? 'ping-fair'
+        : formatted < 150 ? 'ping-warn'
+        : 'ping-bad';
+
+    if (pingVal) pingVal.textContent = text;
+    if (pingDot) pingDot.className = `ping-dot ${statusClass}`;
+    if (pingLink && link) pingLink.textContent = link;
+
+    if (lobbyPingVal) lobbyPingVal.textContent = text;
+    if (lobbyPingDot) lobbyPingDot.className = `ping-dot ${statusClass}`;
+}
+window.updatePingUI = updatePingUI;
+
+// Ping twice a second for responsive on-screen ping display and stats overlay: over UDP when it's live, else Socket.IO
 setInterval(() => {
     const t = performance.now();
     if (udpReady && rtcDataChannel && rtcDataChannel.readyState === 'open' && t - lastUdpRx < 500) {
         clientState.net.link = 'UDP';
-        try { rtcDataChannel.send(JSON.stringify({ type: 'PING', clientTime: t })); } catch (e) { /* next second */ }
+        try { rtcDataChannel.send(JSON.stringify({ type: 'PING', clientTime: t, binary: true })); } catch (e) { /* next loop */ }
     } else {
         clientState.net.link = 'TCP';
-        socket.emit('net_ping', t, (back) => { clientState.net.rttMs = performance.now() - back; });
+        socket.emit('net_ping', t, (back) => {
+            clientState.net.rttMs = performance.now() - back;
+            updatePingUI(clientState.net.rttMs, clientState.net.link);
+        });
     }
-}, 1000);
+}, 500);
 socket.on('net_stats', (s) => { clientState.net.tickMs = s.tickMs; clientState.net.starve = s.starve || {}; });
 
 

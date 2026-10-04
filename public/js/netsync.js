@@ -5,6 +5,7 @@ export const INTERP_S = 0.05;     // fixed delay (tests); the game uses the adap
 export const EXTRAP_MAX_S = 0.25; // past the newest snapshot, dead-reckon on the arc this long, then hold
 export const TICK_S = 1 / 60;
 export const MIN_DELAY_S = 0.035, MAX_DELAY_S = 0.15;  // adaptive interpolation delay range
+export const LAN_MIN_DELAY_S = 0.012; // sub-15ms LAN delay floor (~0.7 frames)
 export const DILATION = 0.05;     // render clock may run 5% fast or slow to reach the target delay
 export const RECOVER_S = 0.1;     // blend from a dead-reckoned pose back to real data over this long
 export const BUFFER_S = 1;
@@ -79,8 +80,11 @@ export class SnapshotBuffer {
     }
 
     // Interpolation delay: two ticks plus room for the arrival spread actually seen
-    targetDelayS() {
-        return Math.min(MAX_DELAY_S, Math.max(MIN_DELAY_S, 2 * TICK_S + 2 * this.jitterP95S));
+    // In LAN mode (sub-15ms RTT and low jitter), floors down to 12ms (0.7 frames delay)
+    targetDelayS(rttMs = null) {
+        const isLan = (rttMs !== null && rttMs < 15 && this.jitterP95S < 0.003);
+        const minFloor = isLan ? LAN_MIN_DELAY_S : MIN_DELAY_S;
+        return Math.min(MAX_DELAY_S, Math.max(minFloor, (isLan ? 1 : 2) * TICK_S + 2 * this.jitterP95S));
     }
 
     serverNow(nowS) {
@@ -219,4 +223,63 @@ export function samplePresent(buf, serverT, idx, out = {}, state = {}, scale = 6
     }
     state.src = a; state.srcT = ta;
     return fade(out, state, serverT);
+}
+
+// ── Compact Binary ArrayBuffer Serialization (32 bytes per car) ─────────────
+// Reduces payload size by ~80-90% and eliminates JSON string allocation / GC pauses
+export function packBinarySnapshot(stateSync) {
+    if (!stateSync || !Array.isArray(stateSync.c)) return null;
+    const cars = stateSync.c;
+    const buf = new ArrayBuffer(cars.length * 32);
+    const dv = new DataView(buf);
+    for (let i = 0; i < cars.length; i++) {
+        const e = cars[i];
+        const base = i * 32;
+        dv.setUint32(base + 0, (stateSync.s >>> 0), true);
+        dv.setFloat32(base + 4, stateSync.t || 0, true);
+        dv.setUint8(base + 8, (e[0] || 0) & 0xFF);
+        dv.setUint8(base + 9, (e[6] || 0) & 0xFF);
+        dv.setUint16(base + 10, (e[10] >= 0 ? e[10] : 0xFFFF) & 0xFFFF, true);
+        dv.setFloat32(base + 12, e[1] || 0, true);
+        dv.setFloat32(base + 16, e[2] || 0, true);
+        dv.setInt16(base + 20, Math.max(-32768, Math.min(32767, Math.round((e[3] || 0) * 10000))), true);
+        dv.setInt16(base + 22, Math.max(-32768, Math.min(32767, Math.round((e[4] || 0) * 100))), true);
+        dv.setInt16(base + 24, Math.max(-32768, Math.min(32767, Math.round((e[5] || 0) * 10000))), true);
+        dv.setInt16(base + 26, Math.max(-32768, Math.min(32767, Math.round((e[7] || 0) * 100))), true);
+        dv.setInt16(base + 28, Math.max(-32768, Math.min(32767, Math.round((e[8] || 0) * 100))), true);
+        dv.setUint16(base + 30, Math.max(0, Math.min(65535, Math.round((e[9] || 0) * 10000))), true);
+    }
+    return buf;
+}
+
+export function decodeBinarySnapshot(buffer) {
+    if (!buffer) return null;
+    const dv = buffer instanceof DataView
+        ? buffer
+        : ArrayBuffer.isView(buffer)
+            ? new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength)
+            : new DataView(buffer);
+    if (dv.byteLength % 32 !== 0) return null;
+    const n = dv.byteLength / 32;
+    if (n === 0) return { s: 0, t: 0, g: 0, c: [] };
+    const cars = [];
+    let s = 0, t = 0;
+    for (let i = 0; i < n; i++) {
+        const base = i * 32;
+        s = dv.getUint32(base + 0, true);
+        t = dv.getFloat32(base + 4, true);
+        const idx = dv.getUint8(base + 8);
+        const flags = dv.getUint8(base + 9);
+        const lastSeq = dv.getUint16(base + 10, true);
+        const posX = dv.getFloat32(base + 12, true);
+        const posY = dv.getFloat32(base + 16, true);
+        const angle = dv.getInt16(base + 20, true) / 10000;
+        const speed = dv.getInt16(base + 22, true) / 100;
+        const steer = dv.getInt16(base + 24, true) / 10000;
+        const velX = dv.getInt16(base + 26, true) / 100;
+        const velY = dv.getInt16(base + 28, true) / 100;
+        const tow = dv.getUint16(base + 30, true) / 10000;
+        cars.push([idx, posX, posY, angle, speed, steer, flags, velX, velY, tow, lastSeq === 0xFFFF ? -1 : lastSeq]);
+    }
+    return { s, t, g: t, c: cars };
 }

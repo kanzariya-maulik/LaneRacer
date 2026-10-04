@@ -36,6 +36,11 @@
 
                         <button type="button" id="btn-open-team-modal" onclick="event.stopPropagation(); window.openTeamModal?.()" class="btn-top-select">Select Team</button>
 
+                        <div id="lobby-ping-badge" class="lobby-ping-badge" title="Network Ping to Server">
+                            <span class="ping-dot" id="lobby-ping-dot"></span>
+                            <span id="lobby-ping-val">-- ms</span>
+                        </div>
+
                         <div class="top-action-controls">
                             <button id="btn-join" class="btn-top-action btn-join">Join Lobby</button>
                             <button id="btn-ready" class="btn-top-action btn-ready hidden">Ready Up</button>
@@ -247,6 +252,11 @@
             <div id="hud-top">
                 <div class="hud-box">Pos: <span id="hud-rank">1</span>/<span id="hud-total">1</span></div>
                 <div class="hud-box">Lap: <span id="hud-lap">1</span></div>
+                <div class="hud-box hud-ping" id="hud-ping-box" title="Network Ping (Round-Trip Time)">
+                    <span class="ping-dot" id="hud-ping-dot"></span>
+                    <span id="hud-ping-val">-- ms</span>
+                    <span class="ping-link-badge" id="hud-ping-link">UDP</span>
+                </div>
             </div>
             <div id="hud-bottom">
                 <div id="lap-times">

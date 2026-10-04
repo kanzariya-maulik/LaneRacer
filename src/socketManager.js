@@ -55,6 +55,21 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
     io.on('connection', (socket) => {
         const clientIp = socket.handshake?.address || socket.request?.socket?.remoteAddress;
         console.log(`Player connected: ${socket.id} (${clientIp})`);
+
+        // Disable TCP Nagle algorithm on Socket.IO fallback connection to eliminate 10-40ms buffering latency
+        try {
+            if (socket.conn?.transport?.socket?.setNoDelay) {
+                socket.conn.transport.socket.setNoDelay(true);
+            }
+            socket.conn?.on('upgrade', (transport) => {
+                try {
+                    if (transport.socket?.setNoDelay) {
+                        transport.socket.setNoDelay(true);
+                    }
+                } catch (e) {}
+            });
+        } catch (e) {}
+
         // WebRTC signalling over Socket.IO; inputs arriving on the UDP DataChannel go to the game like socket inputs
         net.setupPeer(socket, (id, inputData) => {
             applyInputLater(id, inputData);

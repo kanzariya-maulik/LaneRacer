@@ -129,7 +129,16 @@ function makeVoice(spatial, profile = engineType) {
         return {
             out, panner,
             set(rpm, load, cut, stutter, crackle) {
-                P.rpm.value = rpm; P.load.value = load; P.cut.value = cut; P.stutter.value = stutter; P.crackle.value = crackle;
+                const now = ctx.currentTime;
+                if (typeof P.rpm.setValueAtTime === 'function') {
+                    P.rpm.setValueAtTime(rpm, now);
+                    P.load.setValueAtTime(load, now);
+                    P.cut.setValueAtTime(cut, now);
+                    P.stutter.setValueAtTime(stutter, now);
+                    P.crackle.setValueAtTime(crackle, now);
+                } else {
+                    P.rpm.value = rpm; P.load.value = load; P.cut.value = cut; P.stutter.value = stutter; P.crackle.value = crackle;
+                }
             },
             setProfile(p) { node.port.postMessage({ profile: p }); },
             stop() { node.port.postMessage('stop'); node.disconnect(); out.disconnect(); },

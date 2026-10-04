@@ -212,6 +212,7 @@ function simStep(sample = true) {
     }
     const stamped = {
         seq: ++inputSeq,
+        time: performance.now(),
         steer: input.steer,
         throttle: input.throttle,
         brake: input.brake,
@@ -1750,7 +1751,8 @@ function applyNet(nowS, dt) {
     const latest = netBuf.latest(), gs = clientState.gameState;
     if (!latest || !gs) return;
     const serverT = netBuf.serverNow(nowS);
-    const renderT = renderClock.advance(dt, serverT, netBuf.targetDelayS());
+    const targetDelay = netBuf.targetDelayS(clientState.net?.rttMs);
+    const renderT = renderClock.advance(dt, serverT, targetDelay);
     const presentT = presentClock.advance(dt, serverT, 0);
     const gameT = netBuf.gameTime(serverT);
     for (const id in gs) {
@@ -1759,7 +1761,8 @@ function applyNet(nowS, dt) {
         const p = gs[id];
         let pose;
         if (id === clientState.me && predictor && predictor.car) {
-            pose = predictor.pose(simAcc / STEP_S, ownPose);
+            const alpha = Math.max(0, Math.min(1, simAcc / STEP_S));
+            pose = predictor.pose(alpha, ownPose);
             const e = latest.cars.get(i);
             if (e) decodeFlags(e[6], p);
         } else {
@@ -1774,7 +1777,7 @@ function applyNet(nowS, dt) {
         p.curLap = p.lapStart === null || p.lapStart === undefined || p.finished ? null : Math.max(0, gameT - p.lapStart);
     }
     const n = window.lanraceNet || (window.lanraceNet = {}); // F3 overlay readings
-    n.delayMs = netBuf.targetDelayS() * 1000;
+    n.delayMs = targetDelay * 1000;
     n.jitterMs = netBuf.jitterS * 1000;
     n.lossPct = netBuf.expected ? Math.max(0, 100 * (1 - netBuf.received / netBuf.expected)) : 0;
     n.predErrCm = predictor && predictor.car ? (predictor.lastError / scale) * 100 : null;
@@ -1962,6 +1965,11 @@ function updateHUD(withTower = true) {
     $('hud-rank').innerText = racing ? me.rank : '--';
     $('hud-lap').innerText = racing ? lapLabel(me.lap) : '--';
     $('hud-speed').innerText = racing ? kmh(me.speed) : '--';
+
+    // Live ping indicator on screen
+    if (window.updatePingUI) {
+        window.updatePingUI(clientState.net?.rttMs, clientState.net?.link);
+    }
 
     // Own lap times: purple = fastest overall, green = personal best
     const curEl = $('lt-current');

@@ -202,3 +202,56 @@ test('present mode through a RenderClock (target delay 0): even frame steps on j
     errs.sort((a, c) => a - c);
     assert.ok(errs[Math.floor(errs.length * 0.95)] < 0.05, `p95 step error ${(errs[Math.floor(errs.length * 0.95)] * 100).toFixed(1)}%`);
 });
+
+test('compact binary snapshot serialization: round-trip accuracy and 32-byte layout', () => {
+    const original = {
+        s: 54321,
+        t: 12.345,
+        c: [
+            [0, 150.2, 300.8, 1.2345, 75.5, -0.125, 7, 25.1, 10.4, 0.18, 102],
+            [1, 120.0, 280.0, -0.5432, 60.0, 0.05, 0, 15.0, -5.0, 0.0, -1]
+        ]
+    };
+    const bin = N.packBinarySnapshot(original);
+    assert.ok(bin instanceof ArrayBuffer);
+    assert.strictEqual(bin.byteLength, 2 * 32, '32 bytes per car');
+
+    const decoded = N.decodeBinarySnapshot(bin);
+    assert.strictEqual(decoded.s, original.s);
+    assert.ok(Math.abs(decoded.t - original.t) < 0.001);
+    assert.strictEqual(decoded.c.length, 2);
+
+    // Car 0 checks
+    const c0 = decoded.c[0];
+    assert.strictEqual(c0[0], 0); // carIndex
+    assert.ok(Math.abs(c0[1] - 150.2) < 0.01); // posX
+    assert.ok(Math.abs(c0[2] - 300.8) < 0.01); // posY
+    assert.ok(Math.abs(c0[3] - 1.2345) < 0.001); // angle
+    assert.ok(Math.abs(c0[4] - 75.5) < 0.02); // speed
+    assert.ok(Math.abs(c0[5] - (-0.125)) < 0.001); // steer
+    assert.strictEqual(c0[6], 7); // flags
+    assert.ok(Math.abs(c0[7] - 25.1) < 0.02); // velX
+    assert.ok(Math.abs(c0[8] - 10.4) < 0.02); // velY
+    assert.ok(Math.abs(c0[9] - 0.18) < 0.01); // tow
+    assert.strictEqual(c0[10], 102); // lastSeq
+
+    // Car 1 checks (unacknowledged seq = -1)
+    const c1 = decoded.c[1];
+    assert.strictEqual(c1[0], 1);
+    assert.strictEqual(c1[10], -1);
+});
+
+test('LAN mode adaptive delay: sub-15ms RTT floors to 12ms (LAN_MIN_DELAY_S)', () => {
+    const calm = new N.SnapshotBuffer();
+    for (let k = 0; k < 100; k++) {
+        calm.push(pkt(k + 1, k / 60, [car(0, k)]), 1 + k / 60);
+    }
+    // WAN mode (no rtt or rtt >= 15ms)
+    assert.ok(Math.abs(calm.targetDelayS() - N.MIN_DELAY_S) < 0.002);
+    assert.ok(Math.abs(calm.targetDelayS(50) - N.MIN_DELAY_S) < 0.002);
+
+    // LAN mode (rtt < 15ms and low jitter)
+    const lanDelay = calm.targetDelayS(5);
+    assert.ok(Math.abs(lanDelay - N.LAN_MIN_DELAY_S) < 0.005, `expected ~${N.LAN_MIN_DELAY_S}, got ${lanDelay}`);
+});
+

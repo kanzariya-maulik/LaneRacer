@@ -1166,6 +1166,72 @@ body {
     color: #fff;
 }
 
+.hud-ping {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 1.15rem;
+    font-variant-numeric: tabular-nums;
+    padding: 6px 18px;
+}
+
+.ping-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #94a3b8;
+    box-shadow: 0 0 6px rgba(148, 163, 184, 0.6);
+    flex-shrink: 0;
+    transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.ping-dot.ping-good {
+    background: #10b981;
+    box-shadow: 0 0 8px #10b981;
+}
+
+.ping-dot.ping-fair {
+    background: #38bdf8;
+    box-shadow: 0 0 8px #38bdf8;
+}
+
+.ping-dot.ping-warn {
+    background: #f59e0b;
+    box-shadow: 0 0 8px #f59e0b;
+}
+
+.ping-dot.ping-bad {
+    background: #ef4444;
+    box-shadow: 0 0 8px #ef4444;
+}
+
+.ping-link-badge {
+    font-size: 0.72rem;
+    font-weight: 800;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.15);
+    color: #93c5fd;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.lobby-ping-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: #0c1322;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 6px;
+    padding: 0 12px;
+    height: 36px;
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: #e2e8f0;
+    font-variant-numeric: tabular-nums;
+}
+
 #hud-bottom {
     position: absolute;
     bottom: 30px; right: 30px;
