@@ -14,14 +14,14 @@ const FULL = { throttle: 1, brake: 0, steer: 0, handbrake: false };
 const BRAKE = { throttle: 0, brake: 1, steer: 0, handbrake: false };
 const HANDBRAKE_STEER = { throttle: 0.3, brake: 0, steer: 0.8, handbrake: true };
 
-test('profiles exist and have correct specifications', () => {
+test('profiles exist and have unified equal performance specifications', () => {
     assert.ok(PROFILES.tuner, 'tuner profile exists');
     assert.ok(PROFILES.nascar, 'nascar profile exists');
     assert.ok(PROFILES.gt3, 'gt3 profile exists');
 
-    assert.strictEqual(PROFILES.tuner.MAX_STEER, 1.05);
-    assert.strictEqual(PROFILES.nascar.DRAFT_MULT, 2.5);
-    assert.strictEqual(PROFILES.gt3.MASS, 1350);
+    assert.strictEqual(PROFILES.tuner.MAX_STEER, 0.85);
+    assert.strictEqual(PROFILES.tuner.MASS, 1250);
+    assert.strictEqual(PROFILES.tuner.POWER, 650000);
 });
 
 test('Pacejka lateral friction model produces peak friction at optimal slip', () => {

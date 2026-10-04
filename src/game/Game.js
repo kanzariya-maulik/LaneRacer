@@ -36,7 +36,6 @@ class Game {
         this.onFinish = onFinish;
         this.mode = mode;
         this.isDriftMode = (this.settings.mode === 'formula-d');
-        this.driftScorer = this.isDriftMode ? new DriftScorer() : null;
         this.dt = 1 / TICK_RATE;
         this.time = 0;                     // race clock (s), starts at lights out
         this.clock = 0;                    // session clock (s) for client interpolation, never frozen
@@ -301,22 +300,8 @@ class Game {
     drive(p) {
         const t = this.track, wasLimited = p.limiter;
         const after = this.isDriftMode
-            ? DriftDrive.driveCar(p, p.input, t, this.dt, p.vehicleClass || this.settings.vehicleClass || 'tuner')
+            ? DriftDrive.driveCar(p, p.input, t, this.dt)
             : Drive.driveCar(p, p.input, t, this.dt);
-
-        if (this.isDriftMode && this.driftScorer) {
-            const scoring = this.driftScorer.update(p, t, Object.values(this.players), this.dt);
-            const ds = this.driftScorer.getPlayer(p.id);
-            p.driftScore = ds.totalScore + ds.currentCombo;
-            p.driftAngle = ds.angleDeg;
-            p.driftMultiplier = ds.multiplier;
-            p.driftCombo = ds.currentCombo;
-            if (scoring && scoring.event === 'banked') {
-                this.io.emit('drift_banked', { id: p.id, banked: scoring.banked, totalScore: scoring.totalScore });
-            } else if (scoring && scoring.event === 'spinout') {
-                this.io.emit('drift_spinout', { id: p.id, angle: scoring.angle });
-            }
-        }
 
         if (this.mode === 'quali' && p.limiter && !wasLimited) p.lapStart = p.sectorStart = null; // crossing the pit entry line ends a timed lap
         this.checkLimits(p, after);
@@ -472,15 +457,6 @@ class Game {
     updateRanks() {
         const list = Object.values(this.players);
         if (!list.length) return;
-        if (this.isDriftMode) {
-            const ranked = [...list].sort((a, b) => (b.driftScore || 0) - (a.driftScore || 0));
-            const leader = ranked[0];
-            ranked.forEach((p, i) => {
-                p.rank = i + 1;
-                p.gap = i > 0 && leader.driftScore !== undefined && p.driftScore !== undefined ? (leader.driftScore - p.driftScore) : null;
-            });
-            return;
-        }
         const ranked = this.mode === 'quali' ? Game.qualiOrder(list) : Game.rankPlayers(list, this.track.checkpoints);
         const leader = ranked[0];
         const cpCount = this.track.checkpoints.length;

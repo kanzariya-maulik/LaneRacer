@@ -38,13 +38,169 @@ btnCloseChat?.addEventListener('click', (e) => {
     toggleChat(false);
 });
 
+// FLOATING LAST RACE STANDINGS LOGIC
+const floatingStandings = document.getElementById('floating-standings-container');
+const standingsBubbleBtn = document.getElementById('standings-bubble-btn');
+const standingsPopup = document.getElementById('standings-popup');
+const btnCloseStandings = document.getElementById('btn-close-standings');
+const standingsBadge = document.getElementById('standings-badge');
+const standingsList = document.getElementById('standings-list');
+const standingsEmptyState = document.getElementById('standings-empty-state');
+const standingsTrackBadge = document.getElementById('standings-track-badge');
+
+let isStandingsOpen = false;
+let lastRaceStandings = null;
+try {
+    const saved = localStorage.getItem('laneracer_last_race_results');
+    if (saved) lastRaceStandings = JSON.parse(saved);
+} catch (e) {}
+
+function formatRaceTime(sec) {
+    if (sec === null || sec === undefined || isNaN(sec)) return '—';
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return m > 0 ? `${m}:${s < 10 ? '0' : ''}${s.toFixed(3)}` : s.toFixed(3);
+}
+
+function renderStandingsPopup() {
+    if (!standingsList || !standingsEmptyState) return;
+    standingsList.innerHTML = '';
+
+    if (!lastRaceStandings || !lastRaceStandings.rows || lastRaceStandings.rows.length === 0) {
+        standingsEmptyState.classList.remove('hidden');
+        if (standingsTrackBadge) standingsTrackBadge.textContent = 'NO DATA';
+        return;
+    }
+
+    standingsEmptyState.classList.add('hidden');
+    if (standingsTrackBadge) {
+        standingsTrackBadge.textContent = (lastRaceStandings.trackName || 'CIRCUIT').toUpperCase();
+    }
+
+    const fastestLapId = lastRaceStandings.fastestLapId;
+    const myId = clientState?.me;
+
+    lastRaceStandings.rows.forEach((r) => {
+        const li = document.createElement('li');
+        if (r.id === myId) li.classList.add('me');
+        if (r.position === 1 && !r.dnf) li.classList.add('podium-1');
+        else if (r.position === 2 && !r.dnf) li.classList.add('podium-2');
+        else if (r.position === 3 && !r.dnf) li.classList.add('podium-3');
+
+        // Team color bar
+        const teamBar = document.createElement('span');
+        teamBar.className = 'std-team';
+        const team = (teams || DEFAULT_TEAMS).find(t => t.id === r.teamId);
+        teamBar.style.background = team?.chatColor || '#64748b';
+
+        // Position
+        const pos = document.createElement('span');
+        pos.className = 'std-pos';
+        pos.textContent = r.position;
+
+        // Driver name
+        const name = document.createElement('span');
+        name.className = 'std-name';
+        name.textContent = r.username || (r.id === myId ? (inputUser?.value?.trim() || 'YOU') : `Driver ${r.id.slice(0, 4)}`);
+
+        // Laps
+        const laps = document.createElement('span');
+        laps.className = 'std-laps';
+        laps.textContent = r.laps ?? '—';
+
+        // Best lap
+        const best = document.createElement('span');
+        best.className = 'std-best' + (r.id === fastestLapId ? ' fl' : '');
+        best.textContent = r.bestLap !== null && r.bestLap !== undefined ? (r.id === fastestLapId ? '⏱️ ' : '') + formatRaceTime(r.bestLap) : '—';
+
+        // Penalty
+        const pen = document.createElement('span');
+        pen.className = 'std-pen';
+        pen.textContent = r.penalty ? `+${r.penalty}s` : '';
+
+        // Total time / Gap
+        const time = document.createElement('span');
+        time.className = 'std-time' + (r.dnf ? ' dnf' : '');
+        if (r.dnf) {
+            time.textContent = 'DNF';
+        } else if (r.position === 1 || r.gap === null || r.gap === undefined) {
+            time.textContent = r.total ? formatRaceTime(r.total) : 'WINNER';
+        } else {
+            time.textContent = `+${Number(r.gap).toFixed(3)}`;
+        }
+
+        li.append(pos, teamBar, name, laps, best, pen, time);
+        standingsList.appendChild(li);
+    });
+}
+
+function toggleStandings(open) {
+    isStandingsOpen = (open !== undefined) ? !!open : !isStandingsOpen;
+    standingsPopup?.classList.toggle('hidden', !isStandingsOpen);
+    if (isStandingsOpen) {
+        if (standingsBadge) standingsBadge.classList.add('hidden');
+        renderStandingsPopup();
+    }
+}
+
+standingsBubbleBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleStandings();
+});
+
+btnCloseStandings?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleStandings(false);
+});
+
+window.updateLastRaceStandings = (res) => {
+    if (!res || !res.rows) return;
+    const trackName = clientState?.trackData?.name || clientState?.settings?.trackId || 'Race Circuit';
+    const myId = clientState?.me;
+    const enrichedRows = res.rows.map(r => {
+        const p = clientState?.players?.[r.id] || clientState?.gameState?.[r.id];
+        return {
+            ...r,
+            username: p?.username || r.username || (r.id === myId ? inputUser?.value?.trim() : `Driver ${r.id.slice(0, 4)}`),
+            teamId: p?.teamId || r.teamId || null
+        };
+    });
+
+    lastRaceStandings = {
+        rows: enrichedRows,
+        trackName,
+        fastestLapId: res.fastestLapId,
+        timestamp: Date.now()
+    };
+
+    try {
+        localStorage.setItem('laneracer_last_race_results', JSON.stringify(lastRaceStandings));
+    } catch (e) {}
+
+    if (standingsBadge) {
+        const myRow = enrichedRows.find(r => r.id === myId);
+        standingsBadge.textContent = myRow ? `P${myRow.position}` : 'NEW';
+        standingsBadge.classList.remove('hidden');
+    }
+
+    if (isStandingsOpen) {
+        renderStandingsPopup();
+    }
+};
+
 document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && isChatOpen) toggleChat(false);
+    if (e.key === 'Escape') {
+        if (isChatOpen) toggleChat(false);
+        if (isStandingsOpen) toggleStandings(false);
+    }
 });
 
 document.addEventListener('click', (e) => {
     if (isChatOpen && !document.getElementById('floating-chat-container')?.contains(e.target)) {
         toggleChat(false);
+    }
+    if (isStandingsOpen && !document.getElementById('floating-standings-container')?.contains(e.target)) {
+        toggleStandings(false);
     }
 });
 
@@ -64,8 +220,6 @@ const setQuali = document.getElementById('setting-quali');
 const setCollisions = document.getElementById('setting-collisions');
 const setBot = document.getElementById('setting-bot');
 const setMode = document.getElementById('setting-mode');
-const setVehicleClass = document.getElementById('setting-vehicle-class');
-const setVehicleClassItem = document.getElementById('setting-vehicle-class-item');
 
 try {
     const savedHostSettings = JSON.parse(localStorage.getItem('lanrace.hostSettings'));
@@ -78,7 +232,6 @@ try {
         if (savedHostSettings.collisions !== undefined && setCollisions) setCollisions.value = savedHostSettings.collisions ? '1' : '0';
         if (savedHostSettings.botCar !== undefined && setBot) setBot.value = savedHostSettings.botCar ? '1' : '0';
         if (savedHostSettings.mode && setMode) setMode.value = savedHostSettings.mode;
-        if (savedHostSettings.vehicleClass && setVehicleClass) setVehicleClass.value = savedHostSettings.vehicleClass;
     }
 } catch (e) {}
 
@@ -412,17 +565,59 @@ function updateTeamPreview() {
     }
 }
 
+function selectTeam(teamId) {
+    if (!teamId) return;
+    const target = (teams || DEFAULT_TEAMS).find(t => t.id === teamId);
+    if (!target) return;
+
+    selectedTeam = target.id;
+    explicitTeamSelected = true;
+
+    try {
+        localStorage.setItem('lanrace.teamId', selectedTeam);
+        saveCookieProfile({ username: inputUser.value.trim(), teamId: selectedTeam, assist: getAssistValStr() });
+    } catch (e) {}
+
+    // Optimistically update local player state
+    if (clientState.me && clientState.players && clientState.players[clientState.me]) {
+        clientState.players[clientState.me].teamId = selectedTeam;
+        clientState.players[clientState.me].color = target.chatColor;
+    }
+
+    if (lastJoin) {
+        lastJoin.teamId = selectedTeam;
+    }
+
+    // Update 3D showroom and preview card immediately
+    updateTeamPreview();
+    renderTeamGrid();
+
+    // Broadcast update to server immediately if joined or connected
+    const username = inputUser.value.trim() || clientState.players?.[clientState.me]?.username;
+    if (isJoined || (clientState.me && clientState.players?.[clientState.me])) {
+        socket.emit('update_profile', {
+            username: username || `Player${Math.floor(Math.random() * 1000)}`,
+            teamId: selectedTeam,
+            assist: getAssistValStr()
+        });
+    }
+}
+window.selectTeam = selectTeam;
+
 function renderTeamGrid() {
     if (!teams || teams.length === 0) teams = DEFAULT_TEAMS;
 
-    // Sync selectedTeam with joined player state if connected
-    if (clientState.me && clientState.players[clientState.me]) {
-        selectedTeam = clientState.players[clientState.me].teamId;
-        explicitTeamSelected = true;
+    // If no team is selected yet, initialize from connected player or first team
+    if (!selectedTeam) {
+        if (clientState.me && clientState.players?.[clientState.me]?.teamId) {
+            selectedTeam = clientState.players[clientState.me].teamId;
+        } else {
+            selectedTeam = teams[0].id;
+        }
     }
 
-    // Auto-select first available team if no valid team selected
-    if (!selectedTeam || !teams.some(t => t.id === selectedTeam)) {
+    // Auto-select first available team if current selected team is invalid
+    if (!teams.some(t => t.id === selectedTeam)) {
         selectedTeam = teams[0].id;
     }
 
@@ -434,11 +629,12 @@ function renderTeamGrid() {
     for (const t of teams) {
         const drivers = members[t.id] || [];
         const n = drivers.length;
-        const full = n >= t.maxPlayers;
+        const isMyTeam = (clientState.me && clientState.players?.[clientState.me]?.teamId === t.id) || (t.id === selectedTeam);
+        const full = n >= t.maxPlayers && !isMyTeam;
         const card = document.createElement('button');
         card.type = 'button';
         card.className = 'team-card' + (t.id === selectedTeam ? ' selected' : '') + (full ? ' full' : '');
-        card.disabled = (full && t.id !== selectedTeam); // Editable in lobby even if joined
+        card.disabled = full;
         card.setAttribute('aria-pressed', t.id === selectedTeam);
 
         const img = document.createElement('img');
@@ -458,18 +654,11 @@ function renderTeamGrid() {
         driverList.textContent = drivers.length > 0 ? `🏎️ ${drivers.join(', ')}` : 'Vacant';
 
         card.append(img, name, count, driverList);
-        card.addEventListener('click', () => {
-            selectedTeam = t.id;
-            explicitTeamSelected = true;
-            try {
-                localStorage.setItem('lanrace.teamId', selectedTeam);
-                saveCookieProfile({ username: inputUser.value.trim(), teamId: selectedTeam, assist: getAssistValStr() });
-            } catch (e) {}
-            renderTeamGrid();
+        card.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (full) return;
+            selectTeam(t.id);
             closeTeamModal();
-            if (isJoined) {
-                socket.emit('update_profile', { username: inputUser.value.trim(), teamId: selectedTeam, assist: getAssistValStr() });
-            }
         });
         teamGrid.appendChild(card);
     }
@@ -546,8 +735,7 @@ function emitSettings() {
         qualiLaps: qualiVal > 0 ? qualiVal : 0,
         collisions: setCollisions.value === '1',
         botCar: setBot ? setBot.value === '1' : false,
-        mode: setMode ? setMode.value : 'f1',
-        vehicleClass: setVehicleClass ? setVehicleClass.value : 'tuner'
+        mode: setMode ? setMode.value : 'f1'
     };
     try {
         localStorage.setItem('lanrace.hostSettings', JSON.stringify(settings));
@@ -560,9 +748,6 @@ setQuali.addEventListener('change', emitSettings);
 setCollisions.addEventListener('change', emitSettings);
 setBot?.addEventListener('change', emitSettings);
 setMode?.addEventListener('change', () => {
-    if (setVehicleClassItem) {
-        setVehicleClassItem.style.display = setMode.value === 'formula-d' ? 'block' : 'none';
-    }
     const driftTracks = ['ebisu', 'longbeach'];
     const f1Tracks = ['monza', 'spa', 'silverstone', 'suzuka', 'sakhir'];
     if (setMode.value === 'formula-d') {
@@ -576,7 +761,6 @@ setMode?.addEventListener('change', () => {
     }
     emitSettings();
 });
-setVehicleClass?.addEventListener('change', emitSettings);
 
 chatForm.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -593,12 +777,6 @@ window.updateLobbyUI = () => {
 
     if (setMode && clientState.settings?.mode) {
         setMode.value = clientState.settings.mode;
-    }
-    if (setVehicleClass && clientState.settings?.vehicleClass) {
-        setVehicleClass.value = clientState.settings.vehicleClass;
-    }
-    if (setVehicleClassItem && setMode) {
-        setVehicleClassItem.style.display = setMode.value === 'formula-d' ? 'block' : 'none';
     }
 
     for (const [id, player] of Object.entries(clientState.players)) {
@@ -664,7 +842,6 @@ window.updateLobbyUI = () => {
         if (setCollisions) setCollisions.disabled = false;
         if (setBot) setBot.disabled = false;
         if (setMode) setMode.disabled = false;
-        if (setVehicleClass) setVehicleClass.disabled = false;
 
         btnReady.classList.add('hidden');
         if (isJoined) btnStart.classList.remove('hidden');
@@ -692,7 +869,6 @@ window.updateLobbyUI = () => {
         if (setCollisions) setCollisions.disabled = true;
         if (setBot) setBot.disabled = true;
         if (setMode) setMode.disabled = true;
-        if (setVehicleClass) setVehicleClass.disabled = true;
 
         btnStart.classList.add('hidden');
         if (isJoined) btnReady.classList.remove('hidden');
@@ -702,11 +878,13 @@ window.updateLobbyUI = () => {
     const me = clientState.players[myId];
     const spOverlay = document.getElementById('spectator-overlay');
     const floatingChat = document.getElementById('floating-chat-container');
+    const floatingStandingsEl = document.getElementById('floating-standings-container');
     if (clientState.status === 'LOBBY' || !me) {
         // Visitors who haven't joined stay in the lobby even mid-race
         screenLobby.classList.remove('hidden');
         screenGame.classList.add('hidden');
         if (floatingChat) floatingChat.classList.remove('hidden');
+        if (floatingStandingsEl) floatingStandingsEl.classList.remove('hidden');
         // Server state wins: syncs arrive whenever anyone joins, so don't reset a ready player
         amReady = !!me?.isReady;
         btnReady.innerText = amReady ? 'Unready' : 'Ready Up';
@@ -718,6 +896,10 @@ window.updateLobbyUI = () => {
         if (floatingChat) {
             floatingChat.classList.add('hidden');
             toggleChat(false);
+        }
+        if (floatingStandingsEl) {
+            floatingStandingsEl.classList.add('hidden');
+            toggleStandings(false);
         }
         spOverlay.classList.toggle('hidden', !me.isSpectating);
     }
@@ -762,11 +944,13 @@ window.handleStatusChange = (status) => {
     const raceResults = document.getElementById('race-results');
     const lights = document.getElementById('lights');
     const floatingChat = document.getElementById('floating-chat-container');
+    const floatingStandingsEl = document.getElementById('floating-standings-container');
 
     if (status === 'LOBBY') {
         screenLobby.classList.remove('hidden');
         screenGame.classList.add('hidden');
         if (floatingChat) floatingChat.classList.remove('hidden');
+        if (floatingStandingsEl) floatingStandingsEl.classList.remove('hidden');
         [cdOverlay, spOverlay, results, lights].forEach(el => el.classList.add('hidden')); // the race classification stays up over the lobby
         return;
     }
@@ -777,6 +961,10 @@ window.handleStatusChange = (status) => {
     if (floatingChat) {
         floatingChat.classList.add('hidden');
         toggleChat(false);
+    }
+    if (floatingStandingsEl) {
+        floatingStandingsEl.classList.add('hidden');
+        toggleStandings(false);
     }
 
     screenLobby.classList.add('hidden');

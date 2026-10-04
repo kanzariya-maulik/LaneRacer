@@ -164,33 +164,24 @@
                             <div class="setting-item">
                                 <label for="setting-mode">Game Mode</label>
                                 <select id="setting-mode" class="custom-select">
-                                    <option value="f1" selected>🏎️ F1 Championship</option>
-                                    <option value="formula-d">🔥 Formula-D Drift</option>
-                                </select>
-                            </div>
-
-                            <div class="setting-item" id="setting-vehicle-class-item">
-                                <label for="setting-vehicle-class">Drift Vehicle Class</label>
-                                <select id="setting-vehicle-class" class="custom-select">
-                                    <option value="tuner" selected>Formula-D Tuner (1000 HP)</option>
-                                    <option value="nascar">V8 Muscle Stock Car (750 HP)</option>
-                                    <option value="gt3">GT3 Supercar (620 HP)</option>
+                                    <option value="f1" selected>🏎️ F1 Grand Prix</option>
+                                    <option value="formula-d">⚡ Formula-D Sports Sprint</option>
                                 </select>
                             </div>
 
                             <div class="setting-item">
                                 <label for="setting-track">Track</label>
                                 <select id="setting-track" class="custom-select">
-                                    <optgroup label="🏎️ F1 Grand Prix Circuits">
+                                    <optgroup label="🏎️ Grand Prix Circuits">
                                         <option value="monza" selected>Monza</option>
                                         <option value="spa">Spa-Francorchamps</option>
                                         <option value="silverstone">Silverstone</option>
                                         <option value="suzuka">Suzuka</option>
                                         <option value="sakhir">Bahrain (Sakhir)</option>
                                     </optgroup>
-                                    <optgroup label="🔥 Formula-D Drift Arenas">
-                                        <option value="ebisu">Ebisu Minami Drift Touge</option>
-                                        <option value="longbeach">Long Beach GP Drift Complex</option>
+                                    <optgroup label="⚡ Sprint & Arena Circuits">
+                                        <option value="ebisu">Ebisu Minami Touge</option>
+                                        <option value="longbeach">Long Beach GP Complex</option>
                                     </optgroup>
                                 </select>
                             </div>
@@ -242,30 +233,6 @@
     <!-- GAME SCREEN -->
     <div id="game-screen" class="screen hidden">
         <canvas id="game-canvas"></canvas>
-        
-        <!-- DRIFT HUD (Formula-D Mode) -->
-        <div id="drift-hud" class="hidden">
-            <div class="drift-top-panel">
-                <div class="drift-score-box">
-                    <span class="drift-label">DRIFT SCORE</span>
-                    <span id="drift-total-score">0</span>
-                </div>
-                <div class="drift-combo-container">
-                    <div id="drift-combo-points">+0</div>
-                    <div id="drift-multiplier-badge">1.0x</div>
-                </div>
-            </div>
-            <div class="drift-angle-widget">
-                <div class="drift-angle-gauge">
-                    <div class="drift-angle-center">
-                        <span id="drift-angle-val">0°</span>
-                        <span class="drift-angle-lbl">SLIP</span>
-                    </div>
-                </div>
-                <div id="drift-status-msg"></div>
-            </div>
-            <div id="drift-clip-notify" class="hidden">CLIPPING POINT!</div>
-        </div>
 
         <!-- HUD -->
         <div id="hud">
@@ -378,6 +345,44 @@
                 <div id="team-grid" class="team-grid-modal"></div>
             </div>
         </div>
+    </div>
+
+    <!-- FLOATING LAST RACE STANDINGS WIDGET (Bottom Left) -->
+    <div id="floating-standings-container">
+        <!-- Standings Popup Window -->
+        <div id="standings-popup" class="standings-popup hidden">
+            <div class="standings-popup-header">
+                <div class="standings-popup-title">
+                    <span class="standings-flag-icon">🏁</span>
+                    <span>Last Race Standings</span>
+                    <span id="standings-track-badge" class="standings-track-badge">MONZA</span>
+                </div>
+                <button id="btn-close-standings" class="standings-popup-close-btn" type="button" title="Close Standings">✕</button>
+            </div>
+            <div class="standings-cols-header">
+                <span>POS</span>
+                <span></span>
+                <span>DRIVER</span>
+                <span>LAPS</span>
+                <span>BEST LAP</span>
+                <span>PEN</span>
+                <span>TIME / GAP</span>
+            </div>
+            <div id="standings-list-container" class="standings-list-container">
+                <ol id="standings-list" class="standings-list"></ol>
+                <div id="standings-empty-state" class="standings-empty-state">
+                    <span style="font-size: 2.2rem; margin-bottom: 6px;">🏁</span>
+                    <p style="font-weight: 700; color: #f1f5f9; margin-bottom: 4px;">No Race Results Yet</p>
+                    <small style="color: #94a3b8;">Complete a race to view the classification and fastest laps here!</small>
+                </div>
+            </div>
+        </div>
+
+        <!-- Standings Bubble Button (Bottom Left) -->
+        <button id="standings-bubble-btn" class="standings-bubble-btn" type="button" title="View Last Race Standings">
+            <span class="standings-bubble-flag"></span>
+            <span id="standings-badge" class="standings-badge hidden">NEW</span>
+        </button>
     </div>
 
     <!-- FLOATING CHAT WIDGET -->

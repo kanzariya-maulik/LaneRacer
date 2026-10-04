@@ -45,12 +45,8 @@ export function driveDriftCar(p, input, t, dt, profileKey = 'tuner') {
     const before = Physics.nearestOnTrack(p.x, p.y, t), beforePit = nearPit(p.x, p.y);
     const grass = before.dist > t.width / 2 + KERB_M * scale && !(beforePit && beforePit.dist <= pit.width / 2 && pitAlong(pit, beforePit) >= pit.closeS);
     
-    const aMode = p.assist ? String(p.assist).toLowerCase() : 'full';
-    const isNumAssist = aMode.includes(',') && parseInt(aMode.split(',')[1] || '0', 10) > 0;
-    const hasBrakeAssist = (aMode === 'full' || aMode === 'high' || aMode === 'medium' || aMode === 'brake' || isNumAssist) && !p.inPit;
-    const used = hasBrakeAssist ? brakeAssist(p, input, t, before, p.assist) : input;
-    
-    // In Formula-D mode, handbrake can also be set directly on input
+    // In Formula-D drift mode, use direct responsive input without F1 circuit brake interference
+    const used = { ...input };
     if (input.handbrake) used.handbrake = true;
 
     p.dragMul = (p.drs ? BOOST_DRAG : 1) * (1 - (p.tow || 0));

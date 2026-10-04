@@ -2,61 +2,32 @@
 // Pacejka non-linear friction, dynamic weight transfer, steering angle lock, and handbrake initiation.
 // Shared between server (authoritative sim) and browser (client-side prediction).
 
+// Unified, equal-spec high-performance Formula-D Sports Sprint car model
+// All players in this mode race with identical, high-octane performance specs
+const FORMULA_D_SPEC = {
+    name: 'Formula-D Sports Sprint',
+    MASS: 1250,             // kg
+    POWER: 650000,          // W (~875 hp twin-turbo high-power engine)
+    CDA: 1.25,              // drag area, m²
+    CLA: 1.5,               // aerodynamic downforce
+    WHEELBASE: 2.65,        // m
+    MAX_STEER: 0.85,        // ~49° steering lock for razor-sharp agile turning
+    STEER_FADE: 115,        // m/s
+    PEAK_SLIP: 0.16,        // ~9.2° peak slip angle
+    PEAK_MU: 1.75,          // high baseline asphalt grip for crisp, responsive turns
+    SLIDE_MU: 1.35,         // strong, predictable sliding grip
+    TRACTION: 0.60,         // balanced 40/60 weight distribution
+    HANDBRAKE_REAR_MU: 0.35,// e-brake grip drop for sharp hairpins
+    DRAFT_MULT: 1.25,       // slipstream drafting boost
+    CG_HEIGHT: 0.36,        // centre of gravity height, m
+    TRACK_WIDTH: 1.85,      // m
+};
+
 const PROFILES = {
-    tuner: {
-        name: 'Formula-D Drift Tuner',
-        MASS: 1200,             // kg
-        POWER: 746000,          // W (~1000 hp)
-        CDA: 1.25,              // drag area, m²
-        CLA: 1.4,               // downforce area, m²
-        WHEELBASE: 2.65,        // m
-        MAX_STEER: 1.05,        // ~60° max steering lock
-        STEER_FADE: 120,        // m/s
-        PEAK_SLIP: 0.15,        // ~8.6° peak slip angle
-        PEAK_MU: 1.55,          // peak asphalt grip
-        SLIDE_MU: 0.92,         // sliding friction after peak slip
-        TRACTION: 0.65,         // rear load share
-        HANDBRAKE_REAR_MU: 0.25,// e-brake grip drop
-        DRAFT_MULT: 1.0,
-        CG_HEIGHT: 0.38,        // centre of gravity height, m
-        TRACK_WIDTH: 1.80,      // m
-    },
-    nascar: {
-        name: 'V8 Muscle Stock Car',
-        MASS: 1550,             // kg (heavy inertia)
-        POWER: 560000,          // W (~750 hp V8)
-        CDA: 1.55,              // drag area
-        CLA: 0.9,               // lower downforce
-        WHEELBASE: 2.80,        // m
-        MAX_STEER: 0.66,        // ~38° steering lock
-        STEER_FADE: 95,         // m/s
-        PEAK_SLIP: 0.13,        // ~7.5° peak slip
-        PEAK_MU: 1.38,          // asphalt grip
-        SLIDE_MU: 0.82,         // sliding friction
-        TRACTION: 0.58,
-        HANDBRAKE_REAR_MU: 0.30,
-        DRAFT_MULT: 2.5,        // 2.5x Massive Slingshot drafting boost!
-        CG_HEIGHT: 0.45,
-        TRACK_WIDTH: 1.90,
-    },
-    gt3: {
-        name: 'GT3 Sports Supercar',
-        MASS: 1350,             // kg
-        POWER: 462000,          // W (~620 hp twin-turbo)
-        CDA: 1.30,              // drag area
-        CLA: 2.6,               // high aerodynamic downforce
-        WHEELBASE: 2.70,        // m
-        MAX_STEER: 0.73,        // ~42° steering lock
-        STEER_FADE: 105,        // m/s
-        PEAK_SLIP: 0.14,        // ~8.0° peak slip
-        PEAK_MU: 1.58,
-        SLIDE_MU: 0.96,
-        TRACTION: 0.62,
-        HANDBRAKE_REAR_MU: 0.28,
-        DRAFT_MULT: 1.2,
-        CG_HEIGHT: 0.35,
-        TRACK_WIDTH: 1.95,
-    }
+    tuner: FORMULA_D_SPEC,
+    nascar: FORMULA_D_SPEC,
+    gt3: FORMULA_D_SPEC,
+    sprint: FORMULA_D_SPEC,
 };
 
 const COMMON = {
@@ -184,43 +155,46 @@ function step(car, input, dt, scale, offTrack = false, assist = 'off', profileKe
     const maxLatFrictionCircle = Math.sqrt(Math.max(0, maxLatGrip * maxLatGrip - (ft * 0.5) * (ft * 0.5)));
     const maxLatAccel = maxLatFrictionCircle / cfg.MASS;
 
-    const latMu = pacejkaLateralMu(currentSlipAngle, cfg.PEAK_SLIP, baseMu, slideMu);
-    const actualLatGrip = latMu * totalNormalForce;
-    const actualLatAccel = actualLatGrip / cfg.MASS;
-
     // Steering & Counter-steer dynamics:
-    // When sliding, the front wheels naturally experience a self-aligning torque toward the velocity vector
+    // Front wheels naturally experience self-aligning torque toward the velocity vector when sliding
     let rawSteerInput = input.steer;
-    if (assistLevel > 0 && Math.abs(vl) > 1.0 && Math.abs(vf) > 3.0) {
-        const velHeading = Math.atan2(vy, vx);
-        let counterAngle = velHeading - car.angle;
-        while (counterAngle > Math.PI) counterAngle -= Math.PI * 2;
-        while (counterAngle < -Math.PI) counterAngle += Math.PI * 2;
-        
-        // Counter-steer assist blends player input with self-aligning vector
-        const assistAmount = Math.min(1.0, Math.abs(counterAngle) / 0.5) * assistLevel * cfg.COUNTER_STEER_ASSIST;
+    const velHeading = Math.atan2(vy, vx);
+    let counterAngle = velHeading - car.angle;
+    while (counterAngle > Math.PI) counterAngle -= Math.PI * 2;
+    while (counterAngle < -Math.PI) counterAngle += Math.PI * 2;
+
+    if (assistLevel > 0 && Math.abs(vl) > 1.2 && Math.abs(vf) > 3.0) {
         const targetSteer = Math.max(-1, Math.min(1, counterAngle / cfg.MAX_STEER));
-        rawSteerInput = rawSteerInput * (1 - assistAmount * 0.5) + targetSteer * (assistAmount * 0.5);
+        if (Math.abs(input.steer) < 0.2) {
+            // Player is coasting/holding drift: auto self-align to catch and stabilize the drift angle
+            rawSteerInput = targetSteer * assistLevel * cfg.COUNTER_STEER_ASSIST;
+        } else if (Math.sign(input.steer) === Math.sign(targetSteer)) {
+            // Player is actively counter-steering: provide 100% full steering lock authority
+            rawSteerInput = input.steer;
+        } else {
+            // Player is fighting the slide (initiating deeper angle): blend with player control
+            rawSteerInput = input.steer * 0.7 + targetSteer * 0.3 * (1 - assistLevel * 0.5);
+        }
     }
 
     const steerSpeedFactor = 1 / (1 + Math.abs(vf) / cfg.STEER_FADE);
     const maxSteer = cfg.MAX_STEER * steerSpeedFactor;
     car.steer = Math.max(-maxSteer, Math.min(maxSteer, rawSteerInput * maxSteer));
 
-    // Yaw calculation (Bicycle model with drift yaw agility)
+    // Yaw calculation (Bicycle model with dynamic drift yaw control)
     let yaw = (vf / cfg.WHEELBASE) * Math.tan(car.steer);
     
-    // Power oversteer & handbrake yaw kick
+    // Handbrake flick & power oversteer initiation
     if (isHandbrake && Math.abs(vf) > 4.0) {
         // Handbrake induces aggressive rotation in the direction of steering or slide
-        const kickDir = Math.sign(car.steer) || Math.sign(vl) || 1;
-        yaw += kickDir * 2.2 * (1 - Math.min(1, Math.abs(vl) / 10));
+        const kickDir = Math.sign(car.steer) || (Math.sign(vl) !== 0 ? -Math.sign(vl) : 1);
+        yaw += kickDir * 2.4 * (1 - Math.min(1, Math.abs(vl) / 12));
     } else if (input.throttle > 0.7 && car.isDrifting) {
-        // Feathering throttle in a drift maintains yaw rotation
-        yaw += Math.sign(vl) * 0.4 * input.throttle;
+        // High throttle in drift allows controlled yaw rotation
+        yaw += (Math.sign(vl) !== 0 ? -Math.sign(vl) : 1) * 0.35 * input.throttle;
     }
 
-    const maxAllowedYaw = (maxLatAccel / Math.max(Math.abs(vf), 1)) * 2.2;
+    const maxAllowedYaw = (maxLatAccel / Math.max(Math.abs(vf), 1)) * 2.5;
     yaw = Math.max(-maxAllowedYaw, Math.min(maxAllowedYaw, yaw));
     car.angle += yaw * dt;
 
@@ -229,8 +203,21 @@ function step(car, input, dt, scale, offTrack = false, assist = 'off', profileKe
     vf = vx * fx + vy * fy;
     vl = -vx * fy + vy * fx;
 
-    // Sideways tire scrub / damping based on Pacejka lateral force
-    const scrub = actualLatAccel * dt;
+    // Dynamic Lateral Force and Grip Recovery:
+    // - Full throttle allows sustained high-angle power sliding
+    // - Lifting/easing throttle (input.throttle < 0.5) triggers rapid tire bite & grip recovery
+    // - Counter-steering pulls the front of the car toward the inside of the turn to keep it on track
+    const isCounterSteering = (vl < 0 && car.steer < 0) || (vl > 0 && car.steer > 0);
+    const counterPullGrip = isCounterSteering ? Math.abs(car.steer) * 1.8 * baseMu : 0;
+    const gripRecoveryGrip = (1 - input.throttle) * (car.isDrifting ? 1.6 : 0.6) * baseMu;
+    const throttleSlideMod = car.isDrifting ? (0.65 + 0.35 * input.throttle) : 1.0;
+
+    const latMu = pacejkaLateralMu(currentSlipAngle, cfg.PEAK_SLIP, baseMu, slideMu);
+    const effectiveLatGrip = (latMu * throttleSlideMod + gripRecoveryGrip + counterPullGrip) * totalNormalForce;
+    const effectiveLatAccel = effectiveLatGrip / cfg.MASS;
+
+    // Sideways tire scrub / damping
+    const scrub = effectiveLatAccel * dt;
     vl -= Math.sign(vl) * Math.min(Math.abs(vl), scrub);
 
     // Longitudinal drag & rolling resistance
@@ -257,7 +244,7 @@ function step(car, input, dt, scale, offTrack = false, assist = 'off', profileKe
 
     // Store accelerations for next tick weight transfer
     car.prevAx = (vf - beforeVf) / dt;
-    car.prevAy = actualLatAccel * Math.sign(vl);
+    car.prevAy = effectiveLatAccel * Math.sign(vl);
     car.driftSpeed = Math.abs(car.speed / scale) * 3.6; // in km/h
 }
 

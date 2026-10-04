@@ -1575,45 +1575,12 @@ function updateHUD(withTower = true) {
     $('drs-hint').textContent = hint;
 
     const isDriftMode = clientState.settings?.mode === 'formula-d';
-    const driftHud = $('drift-hud');
-    if (driftHud) {
-        driftHud.classList.toggle('hidden', !isDriftMode || !racing);
-        if (isDriftMode && racing) {
-            $('drift-total-score').innerText = Math.floor(me.driftScore || 0).toLocaleString();
-            $('drift-combo-points').innerText = `+${Math.floor(me.driftCombo || 0)}`;
-            $('drift-multiplier-badge').innerText = `${(me.driftMultiplier || 1.0).toFixed(1)}x`;
-            const angleDeg = Math.round(me.driftAngle || 0);
-            $('drift-angle-val').innerText = `${angleDeg}°`;
-
-            const msgEl = $('drift-status-msg');
-            if (msgEl) {
-                if (me.driftSpinout) {
-                    msgEl.innerText = 'SPINOUT!';
-                    msgEl.className = 'spinout';
-                } else if (angleDeg >= 30) {
-                    msgEl.innerText = 'GREAT ANGLE!';
-                    msgEl.className = 'great';
-                } else if (angleDeg >= 15) {
-                    msgEl.innerText = 'DRIFTING';
-                    msgEl.className = 'drifting';
-                } else {
-                    msgEl.innerText = '';
-                    msgEl.className = '';
-                }
-            }
-
-            const clipEl = $('drift-clip-notify');
-            if (clipEl) {
-                clipEl.classList.toggle('hidden', !me.driftClipping);
-            }
-        }
-    }
 
     if (withTower) {
         // Timing tower
         const ttHead = $('tt-head');
         if (ttHead && ttHead.firstElementChild) {
-            ttHead.firstElementChild.textContent = isDriftMode ? 'DRIFT RANK' : 'TIMING';
+            ttHead.firstElementChild.textContent = 'TIMING';
         }
         const quali = clientState.status === 'QUALIFYING' || clientState.status === 'QUALI_RESULTS'; // ghosts also mean collisions off
         const ol = $('leaderboard-list');
@@ -1643,10 +1610,7 @@ function updateHUD(withTower = true) {
             }
             const gap = gapText(rows, i, towerMode);
             const time = el('span', 'tt-gap');
-            if (isDriftMode) {
-                time.textContent = `${Math.floor(p.driftScore || 0).toLocaleString()} pts`;
-                time.classList.add('lead');
-            } else if (quali) {
+            if (quali) {
                 time.textContent = gap ? gap : fmtTime(p.bestLap);
                 if (p.bestLap !== null && p.bestLap === fastest) time.classList.add('t-purple');
                 const bars = el('span', 'tt-sectors');
