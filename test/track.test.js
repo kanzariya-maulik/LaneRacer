@@ -12,8 +12,8 @@ const CAR_RADIUS = 18; // Physics.checkCarCollision
 
 const tracks = Track.loadAll();
 
-test('loads all eleven circuits', () => {
-    assert.deepStrictEqual(Object.keys(tracks).sort(), ['cota', 'hungaroring', 'interlagos', 'montreal', 'monza', 'sakhir', 'silverstone', 'spa', 'spielberg', 'suzuka', 'zandvoort']);
+test('loads all thirteen circuits', () => {
+    assert.deepStrictEqual(Object.keys(tracks).sort(), ['cota', 'hungaroring', 'imola', 'interlagos', 'monaco', 'montreal', 'monza', 'sakhir', 'silverstone', 'spa', 'spielberg', 'suzuka', 'zandvoort']);
 });
 
 for (const id of Track.TRACK_IDS) {
@@ -29,7 +29,7 @@ for (const id of Track.TRACK_IDS) {
         assert.ok(t.checkpoints.length >= 15 && t.checkpoints.length <= 19, `${t.checkpoints.length} checkpoints`);
         assert.strictEqual(t.checkpoints[0].x, t.start.x);
         assert.strictEqual(t.checkpoints[0].y, t.start.y);
-        for (const cp of t.checkpoints) assert.strictEqual(cp.radius, t.width / 2 + 80);
+        for (const cp of t.checkpoints) assert.strictEqual(cp.radius, t.width / 2 + t.wallOffset); // out to the barrier
         const [a, b, c] = t.sectorCps;
         assert.strictEqual(a, 0);
         assert.ok(b >= 3 && c - b >= 3 && t.checkpoints.length - c >= 3, `sector cps ${t.sectorCps}`);
@@ -134,8 +134,9 @@ for (const id of Track.TRACK_IDS) {
 }
 
 // Published height differences (m): Spa ~102, Suzuka ~40, Sakhir ~20, Silverstone ~12, Monza ~15, Spielberg ~65, Interlagos ~40,
-// Hungaroring ~35, COTA ~41 (F1 car heights give ~30 along the racing surface), Zandvoort ~10 (dunes), Montreal ~5
-const ELEVATION_RANGE = { spa: [80, 130], suzuka: [30, 55], sakhir: [10, 30], silverstone: [6, 20], monza: [8, 25], spielberg: [50, 75], interlagos: [30, 55], hungaroring: [25, 45], cota: [24, 45], zandvoort: [5, 15], montreal: [2, 10] };
+// Hungaroring ~35, COTA ~41 (F1 car heights give ~30 along the racing surface), Zandvoort ~10 (dunes), Montreal ~5,
+// Monaco ~42, Imola ~33
+const ELEVATION_RANGE = { spa: [80, 130], suzuka: [30, 55], sakhir: [10, 30], silverstone: [6, 20], monza: [8, 25], spielberg: [50, 75], interlagos: [30, 55], hungaroring: [25, 45], cota: [24, 45], zandvoort: [5, 15], montreal: [2, 10], monaco: [35, 50], imola: [28, 42] };
 for (const id of Track.TRACK_IDS) {
     test(`${id}: real elevation, one height per path point, ${ELEVATION_RANGE[id].join('-')} m range`, () => {
         const t = tracks[id];
@@ -212,12 +213,14 @@ test('a track without a pit lane still builds', () => {
 
 for (const id of Track.TRACK_IDS) {
     test(`${id}: pit entry barrier reaches past the track run-off`, () => {
-        const t = tracks[id], out = t.pit.closeWall[0];
-        assert.ok(Physics.nearestOnTrack(out.x, out.y, t).dist >= t.width / 2 + 80, 'gap around the barrier end');
+        const t = tracks[id], out = t.pit.closeWall[0], near = Physics.nearestOnTrack(out.x, out.y, t);
+        // past the run-off barrier, or (Monaco: the pit lane leaves inside the Rascasse hairpin) against the road, closer than a
+        // car is wide
+        assert.ok(near.dist >= t.width / 2 + t.wallOffset || near.dist - t.width / 2 < 2 * t.scale, 'gap around the barrier end'); // past this track's barrier
     });
 }
 
-const DRS_COUNT = { monza: 2, spa: 2, silverstone: 2, suzuka: 1, sakhir: 3, interlagos: 2, cota: 2, zandvoort: 2, spielberg: 3, montreal: 3, hungaroring: 2 };
+const DRS_COUNT = { monza: 2, spa: 2, silverstone: 2, suzuka: 1, sakhir: 3, interlagos: 2, cota: 2, zandvoort: 2, spielberg: 3, montreal: 3, hungaroring: 2, monaco: 1, imola: 1 };
 for (const id of Track.TRACK_IDS) {
     test(`${id}: DRS zones on flat-out straights`, () => {
         const t = tracks[id], total = t.cum[t.path.length];
@@ -225,10 +228,13 @@ for (const id of Track.TRACK_IDS) {
         for (const z of t.drsZones) {
             for (const s of [z.detectS, z.startS, z.endS]) assert.ok(s >= 0 && s < total);
             // the activation point is on a straight or a corner exit (the FIA opens some just past an apex: Hungaroring T1,
-            // Zandvoort T10/T13): past the corner's slowest point and flat out within ~40 m
+            // Zandvoort T10/T13, Monaco T19): past the corner's slowest point and flat out within 60 m
             const p = Track.pointAt(t.path, t.cum, t.startS + z.startS), n = t.path.length, i = Physics.nearestOnTrack(p.x, p.y, t).i;
-            assert.strictEqual(t.safeSpeed[(i + 4) % n], 100, `${id} zone starts in a corner`);
-            assert.ok(t.safeSpeed[i] >= t.safeSpeed[(i - 2 + n) % n], `${id} zone starts before the apex`);
+            const ahead = Physics.nearestOnTrack(...Object.values(Track.pointAt(t.path, t.cum, t.startS + z.startS + 60 * t.scale)).slice(0, 2), t).i;
+            assert.strictEqual(t.safeSpeed[ahead], 100, `${id} zone starts in a corner`);
+            let slow = i; // the corner's slowest point is behind the activation, or within 15 m (corner positions are ±10 m)
+            for (let k = i; k !== ahead; k = (k + 1) % n) if (t.safeSpeed[k] < t.safeSpeed[slow] - 0.5) slow = k;
+            assert.ok((((t.cum[slow] - t.cum[i]) % t.cum[n]) + t.cum[n]) % t.cum[n] <= 15 * t.scale, `${id} zone starts before the apex`);
         }
     });
 }

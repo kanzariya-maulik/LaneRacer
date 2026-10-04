@@ -10,7 +10,7 @@ const { SCALE, SOURCES, only } = require('./import-tracks');
 
 const OUT_DIR = path.join(__dirname, '..', 'data', 'tracks');
 const CACHE = path.join(__dirname, 'build', 'f1');
-const F1 = { // MultiViewer circuit key, 2023 race session in the F1 live timing archive
+const F1 = { // MultiViewer circuit key, race session in the F1 live timing archive, year (2023 unless given)
     monza: [39, '2023-09-03_Italian_Grand_Prix/2023-09-03_Race'],
     spa: [7, '2023-07-30_Belgian_Grand_Prix/2023-07-30_Race'],
     silverstone: [2, '2023-07-09_British_Grand_Prix/2023-07-09_Race'],
@@ -22,12 +22,14 @@ const F1 = { // MultiViewer circuit key, 2023 race session in the F1 live timing
     spielberg: [19, '2023-07-02_Austrian_Grand_Prix/2023-07-02_Race'],
     montreal: [23, '2023-06-18_Canadian_Grand_Prix/2023-06-18_Race'],
     hungaroring: [4, '2023-07-23_Hungarian_Grand_Prix/2023-07-23_Race'],
+    monaco: [22, '2023-05-28_Monaco_Grand_Prix/2023-05-28_Race'],
+    imola: [6, '2024-05-19_Emilia_Romagna_Grand_Prix/2024-05-19_Race', 2024], // no 2023 race (cancelled)
 };
 const MAX_FIT_M = 5;       // outline fit (RMS)
 const OFF_MARGIN_M = 5;    // a car sample further than the real half-width plus this from the centreline is in the pits or off track
 const WINDOW = 30;         // points (~300 m) searched around a car's last match: keeps it on its own level at a bridge
 const SMOOTH = 2;          // points each side, after the median
-const ATTRIBUTION = 'Elevation: F1 live timing car positions (2023 race)';
+const ATTRIBUTION = (year) => `Elevation: F1 live timing car positions (${year} race)`;
 
 async function cached(name, url) {
     const f = path.join(CACHE, name);
@@ -63,7 +65,7 @@ function similarity(A, B) {
 
 // Our centreline (metres) with the 2023 race's car samples fitted onto it; also used to measure lines and the grid
 async function fitF1(src) {
-    const [key, session] = F1[src.id];
+    const [key, session, year = 2023] = F1[src.id];
     const file = path.join(OUT_DIR, `${src.id}.json`);
     const track = JSON.parse(fs.readFileSync(file, 'utf8'));
     const P = track.path.map((p) => ({ x: p.x / SCALE, y: p.y / SCALE })), n = P.length;
@@ -80,7 +82,7 @@ async function fitF1(src) {
     };
 
     // Official outline onto our centreline: same lap fraction â†” same place, best start offset
-    const mv = JSON.parse(await cached(`mv-${key}.json`, `https://api.multiviewer.app/api/v1/circuits/${key}/2023`));
+    const mv = JSON.parse(await cached(year === 2023 ? `mv-${key}.json` : `mv-${key}-${year}.json`, `https://api.multiviewer.app/api/v1/circuits/${key}/${year}`));
     const M = mv.x.map((x, i) => ({ x: x / 10, y: mv.y[i] / 10 }));
     const mc = [0];
     for (let i = 1; i < M.length; i++) mc.push(mc[i - 1] + Math.hypot(M[i].x - M[i - 1].x, M[i].y - M[i - 1].y));
@@ -93,7 +95,7 @@ async function fitF1(src) {
         if (!fit || f.e < fit.e) fit = f;
     }
     // Car samples (metres, F1 frame). At some circuits (Suzuka) the feed sits ~15 m off the outline, so refine on these
-    const raw = await cached(`${src.id}-position.txt`, `https://livetiming.formula1.com/static/2023/${encodeURI(session)}/Position.z.jsonStream`);
+    const raw = await cached(`${src.id}-position.txt`, `https://livetiming.formula1.com/static/${year}/${encodeURI(session)}/Position.z.jsonStream`);
     const S = [];
     for (const line of raw.split('\n')) {
         const q = line.indexOf('"');
@@ -168,7 +170,7 @@ async function importElevation(src) {
     const sm = filled.map((_, i) => { let s = 0; for (let d = -SMOOTH; d <= SMOOTH; d++) s += filled[(i + d + n) % n]; return s / (2 * SMOOTH + 1); });
     const lo = Math.min(...sm);
     track.z = sm.map((v) => +(v - lo).toFixed(2)); // cm: crests and compressions come from second differences
-    track.attribution = (track.attribution || '').replace(/; Elevation:.*$/, '') + `; ${ATTRIBUTION}`;
+    track.attribution = (track.attribution || '').replace(/; Elevation:.*$/, '') + `; ${ATTRIBUTION(F1[src.id][2] || 2023)}`;
     fs.writeFileSync(file, JSON.stringify(track));
     const counts = buckets.map((b) => b.length).sort((a, c) => a - c);
     console.log(`${src.id}: fit ${fit.e.toFixed(1)} m, ${used} samples (${skipped} off track), median ${counts[n >> 1]} per point, ${n - known.length} gaps, range ${Math.max(...track.z).toFixed(1)} m`);

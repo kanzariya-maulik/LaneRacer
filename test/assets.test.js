@@ -4,67 +4,58 @@ const fs = require('fs');
 const path = require('path');
 
 const PUB = path.join(__dirname, '..', 'public');
-const TEAMS = require('../public/teams.json');
+const teams = require('../public/teams.json');
+const pngSize = (f) => { const b = fs.readFileSync(f); return [b.readUInt32BE(16), b.readUInt32BE(20)]; };
+let Shape;
+test.before(async () => { Shape = await import('../public/js/carShape.js'); });
 
-function readGlbJson(file) {
-    const buf = fs.readFileSync(file);
-    assert.strictEqual(buf.toString('ascii', 0, 4), 'glTF');
-    const len = buf.readUInt32LE(12);
-    assert.strictEqual(buf.toString('ascii', 16, 20), 'JSON');
-    return JSON.parse(buf.toString('utf8', 20, 20 + len));
-}
+test('every team has a 320×120 lobby thumbnail', () => {
+    for (const t of teams) assert.deepStrictEqual(pngSize(path.join(PUB, 'liveries', `${t.id}-thumb.png`)), [320, 120], t.id);
+});
 
-test('car.glb has body, four wheels, livery UVs and no vertex colours', () => {
-    const gltf = readGlbJson(path.join(PUB, 'models', 'car.glb'));
-    const nodeNames = gltf.nodes.map(n => n.name);
-    for (const n of ['body', 'wheel_FL', 'wheel_FR', 'wheel_RL', 'wheel_RR']) assert.ok(nodeNames.includes(n), `missing node ${n}`);
-    const matNames = gltf.materials.map(m => m.name);
-    for (const m of ['livery', 'tyre', 'rim']) assert.ok(matNames.includes(m), `missing material ${m}`);
-    const body = gltf.meshes[gltf.nodes.find(n => n.name === 'body').mesh];
-    for (const prim of body.primitives) {
-        assert.ok('TEXCOORD_0' in prim.attributes, 'body needs UVs');
-        assert.ok(!('COLOR_0' in prim.attributes), 'part-id colours must not ship (three would tint the car)');
+// The car (public/js/carShape.js): the game and the physics collision box depend on its size, its parts and its budgets
+test('car body: inside the collision box (x -2.56..2.92 m, |y| ≤ 0.98 m, 0 < z < 1.0 m), triangles within budget per detail', () => {
+    const budget = { low: 8000, mid: 20000, high: 40000 };
+    for (const d of ['low', 'mid', 'high']) {
+        const { pos, idx } = Shape.bodyArrays(d);
+        assert.ok(idx.length / 3 <= budget[d], `${d}: ${idx.length / 3} triangles`);
+        let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+        for (let i = 0; i < pos.length; i += 3) { // three.js frame: (x, z up, -y)
+            x0 = Math.min(x0, pos[i]); x1 = Math.max(x1, pos[i]); z0 = Math.min(z0, pos[i + 1]); z1 = Math.max(z1, pos[i + 1]); y0 = Math.min(y0, -pos[i + 2]); y1 = Math.max(y1, -pos[i + 2]);
+        }
+        assert.ok(x0 >= -2.57 && x1 <= 2.94, `${d}: x ${x0.toFixed(2)}..${x1.toFixed(2)}`);
+        assert.ok(y0 >= -0.98 && y1 <= 0.98, `${d}: y ${y0.toFixed(2)}..${y1.toFixed(2)}`);
+        assert.ok(z0 > 0 && z1 < 1.0, `${d}: z ${z0.toFixed(2)}..${z1.toFixed(2)}`);
     }
 });
 
+test('car body: smooth normals face out of their triangles (no inside-out patches)', () => {
+    const { pos: P, nrm: N, idx: I } = Shape.bodyArrays('mid');
+    let bad = 0, n = 0;
+    for (let t = 0; t < I.length; t += 3) {
+        const [a, b, c] = [I[t], I[t + 1], I[t + 2]], p = (q) => [P[q * 3], P[q * 3 + 1], P[q * 3 + 2]], A = p(a), B = p(b), C = p(c);
+        const u = [B[0] - A[0], B[1] - A[1], B[2] - A[2]], v = [C[0] - A[0], C[1] - A[1], C[2] - A[2]];
+        const f = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]], l = Math.hypot(...f);
+        if (l < 1e-9) continue;
+        for (const q of [a, b, c]) { n++; if (f[0] * N[q * 3] + f[1] * N[q * 3 + 1] + f[2] * N[q * 3 + 2] < 0) bad++; }
+    }
+    assert.ok(bad / n < 0.03, `${bad} of ${n} vertex normals point into their triangle`);
+});
 
-function pngSize(file) {
-    const buf = fs.readFileSync(file);
-    assert.strictEqual(buf.toString('ascii', 1, 4), 'PNG');
-    return [buf.readUInt32BE(16), buf.readUInt32BE(20)];
-}
-
-test('every team has a 1024² livery and a 320×120 thumbnail', () => {
-    for (const t of TEAMS) {
-        assert.deepStrictEqual(pngSize(path.join(PUB, 'liveries', `${t.id}.png`)), [1024, 1024], t.id);
-        assert.deepStrictEqual(pngSize(path.join(PUB, 'liveries', `${t.id}-thumb.png`)), [320, 120], t.id);
+test('every team livery paints every part of the car, in the team colours', () => {
+    const N = 256; // a small atlas is enough to see every part
+    const grey = [138, 143, 150];
+    for (const t of teams) {
+        assert.ok(Shape.LIVERIES[t.id], `${t.id}: no livery rules`);
+        const px = Shape.paintLivery(t.id, N), colours = new Set();
+        for (let k = 0; k < N * N; k++) colours.add(`${px[k * 4]},${px[k * 4 + 1]},${px[k * 4 + 2]}`);
+        assert.ok(colours.size >= 3, `${t.id}: only ${colours.size} colours`);
+        assert.ok(!colours.has(grey.join(',')), `${t.id}: fell back to plain grey`);
     }
 });
 
-function glb() { return readGlbJson(path.join(PUB, 'models', 'car.glb')); }
-const tris = (g, mesh) => g.meshes[mesh].primitives.reduce((s, p) => s + g.accessors[p.indices].count / 3, 0);
-
-test('car body: at most 8000 triangles and inside the old size box (glTF is Y-up: z → -Y)', () => {
-    const g = glb(), body = g.nodes.find(n => n.name === 'body');
-    assert.ok(tris(g, body.mesh) <= 8000, `${tris(g, body.mesh)} triangles`);
-    assert.strictEqual(g.meshes[body.mesh].primitives.length, 1, 'body must stay one draw call per car (one material)');
-    for (const p of g.meshes[body.mesh].primitives) {
-        const { min, max } = g.accessors[p.attributes.POSITION];
-        assert.ok(min[0] >= -2.95 && max[0] <= 2.95, 'length');
-        assert.ok(min[1] >= 0 && max[1] <= 1.05, 'height');
-        assert.ok(min[2] >= -1.0 && max[2] <= 1.0, 'width');
-    }
-});
-
-test('wheels: same pivots and radius, tyre then rim, round 32-sided tyres with a shoulder', () => {
-    const g = glb();
-    const want = { wheel_FL: [1.6, 0.36, -0.8], wheel_FR: [1.6, 0.36, 0.8], wheel_RL: [-1.85, 0.36, -0.78], wheel_RR: [-1.85, 0.36, 0.78] };
-    for (const [name, pos] of Object.entries(want)) {
-        const n = g.nodes.find(x => x.name === name);
-        n.translation.forEach((v, i) => assert.ok(Math.abs(v - pos[i]) < 1e-3, `${name} pivot moved`));
-        const [tyre, rim] = g.meshes[n.mesh].primitives;
-        assert.deepStrictEqual([g.materials[tyre.material].name, g.materials[rim.material].name], ['tyre', 'rim'], 'game batches tyre then rim');
-        assert.ok(Math.abs(g.accessors[tyre.attributes.POSITION].max[1] - 0.36) < 2e-3, 'radius 0.36');
-        assert.ok(g.accessors[tyre.indices].count / 3 >= 400, 'old 24-sided tyre is gone');
-    }
+test('wheel pivots and sizes: 720 mm tyres, 305 mm front and 405 mm rear, where the car rests on them', () => {
+    assert.strictEqual(Shape.WHEEL_RADIUS, 0.36);
+    assert.deepStrictEqual(Shape.WHEELS.wheel_FL, [1.60, 0.80, 0.305]);
+    assert.deepStrictEqual(Shape.WHEELS.wheel_RR, [-1.85, -0.78, 0.405]);
 });

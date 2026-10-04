@@ -3,16 +3,21 @@
 const fs = require('fs');
 const path = require('path');
 const { SCALE, BASE, SOURCES, only } = require('./import-tracks');
+const { densify, resample, align, nearestIndex } = require('./geo');
+const { fitF1 } = require('./import-elevation');
 
 // Raceway ways (and their nodes) in a bbox 'west,south,east,north', via Overpass: the plain OSM API refuses busy city areas
-const osmUrl = (bbox) => { const [w, s, e, n] = bbox.split(','); return 'https://maps.mail.ru/osm/tools/overpass/api/interpreter?data=' + encodeURIComponent(`[out:xml];way[highway=raceway](${s},${w},${n},${e});(._;>;);out;`); };
+// (plus the listed ways whatever they are: Monaco's pit lane runs partly on a service road)
+const osmUrl = (bbox, ids = []) => { const [w, s, e, n] = bbox.split(','); return 'https://maps.mail.ru/osm/tools/overpass/api/interpreter?data=' + encodeURIComponent(`[out:xml];(way[highway=raceway](${s},${w},${n},${e});${ids.length ? `way(id:${ids.join(',')});` : ''});(._;>;);out;`); };
 const CACHE = path.join(__dirname, 'build', 'osm');
 const OUT_DIR = path.join(__dirname, '..', 'data', 'tracks');
 const PIT_WIDTH_M = 10; // 12 m would overlap the 1.5×-widened track at Sakhir/Suzuka
 const STEP_M = 5;
+const WIDTH_MULT = 1.5; // import-tracks: the road is drawn 1.5x the real width
 const MAX_FIT_M = 5;
 const ATTRIBUTION = 'Pit lane © OpenStreetMap contributors (ODbL)';
-// bbox, OSM pit way, ICP seed [theta, tx, ty] (TUMFTM metres → local OSM metres), found once by a rotation/translation search
+// bbox, OSM pit way(s), ICP seed [theta, tx, ty] (TUMFTM metres → local OSM metres; found by a rotation search when missing),
+// (every lane is then moved clear of the drawn road where it would cover it: clearOfRoad)
 const PITS = {
     monza: { bbox: '9.275,45.605,9.300,45.635', way: '38168747', seed: [-0.004017, 722558.13, 5042407.6] },
     spa: { bbox: '5.955,50.425,5.985,50.448', way: '323851541', seed: [-0.037237, 423016.43, 5575985.87] },
@@ -25,99 +30,22 @@ const PITS = {
     spielberg: { bbox: '14.755,47.214,14.775,47.228', way: '289111668', seed: [0.004265, 1116430.59, 5219731.35] },
     montreal: { bbox: '-73.535,45.493,-73.515,45.516', way: '413000959', seed: [-0.017425, -5736215.10, 5029581.54] },
     hungaroring: { bbox: '19.240,47.575,19.256,47.588', way: '231417580', seed: [0.022517, 1445386.07, 5259347.85] },
+    // Monaco: OSM lacks the pit lane along the start straight (2023 race cars in the pits: right of the track, ~11 m out)
+    monaco: { bbox: '7.410,43.725,7.435,43.745', way: ['850261588', { follow: 1, offsetM: 11 }, '1388331347'] },
+    imola: { bbox: '11.700,44.335,11.725,44.350', way: '196368195' },
 };
 
-function parseOsm(xml) {
+function parseOsm(xml, keep = []) {
     const nodes = {};
     for (const m of xml.matchAll(/<node id="(\d+)"[^>]*lat="([-\d.]+)" lon="([-\d.]+)"/g)) nodes[m[1]] = [+m[2], +m[3]];
     const ways = [];
     for (const m of xml.matchAll(/<way id="(\d+)"[^>]*>([\s\S]*?)<\/way>/g)) {
         const tags = {};
         for (const t of m[2].matchAll(/<tag k="([^"]+)" v="([^"]*)"/g)) tags[t[1]] = t[2];
-        if (tags.highway !== 'raceway' || tags.area === 'yes') continue;
+        if ((tags.highway !== 'raceway' && !keep.includes(m[1])) || tags.area === 'yes') continue;
         ways.push({ id: m[1], tags, nds: [...m[2].matchAll(/<nd ref="(\d+)"/g)].map(x => nodes[x[1]]).filter(Boolean) });
     }
     return ways;
-}
-
-// Points every ≤ step metres along a polyline of [x, y]
-function densify(pts, step) {
-    const out = [];
-    for (let i = 0; i + 1 < pts.length; i++) {
-        const [a, b] = [pts[i], pts[i + 1]];
-        const k = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / step));
-        for (let j = 0; j < k; j++) out.push([a[0] + (b[0] - a[0]) * j / k, a[1] + (b[1] - a[1]) * j / k]);
-    }
-    if (pts.length) out.push(pts.at(-1));
-    return out;
-}
-
-// Points exactly every step metres, plus the end point
-function resample(pts, step) {
-    const cum = [0];
-    for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
-    const out = [];
-    let i = 0;
-    for (let s = 0; s < cum.at(-1) - step / 2; s += step) {
-        while (cum[i + 1] < s) i++;
-        const t = (s - cum[i]) / (cum[i + 1] - cum[i] || 1);
-        out.push([pts[i][0] + (pts[i + 1][0] - pts[i][0]) * t, pts[i][1] + (pts[i + 1][1] - pts[i][1]) * t]);
-    }
-    out.push(pts.at(-1));
-    return out;
-}
-
-// Nearest-point lookup on a 20 m grid hash
-function nearestIndex(Q) {
-    const cell = 20, grid = new Map();
-    Q.forEach((q, i) => {
-        const k = Math.floor(q[0] / cell) + ',' + Math.floor(q[1] / cell);
-        if (!grid.has(k)) grid.set(k, []);
-        grid.get(k).push(i);
-    });
-    return (p) => {
-        const cx = Math.floor(p[0] / cell), cy = Math.floor(p[1] / cell);
-        let best = -1, bd = Infinity;
-        for (let r = 0; r < 30 && (best < 0 || r * cell < Math.sqrt(bd) + cell); r++) {
-            for (let dx = -r; dx <= r; dx++) for (let dy = -r; dy <= r; dy++) {
-                if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
-                for (const i of grid.get((cx + dx) + ',' + (cy + dy)) || []) {
-                    const d = (Q[i][0] - p[0]) ** 2 + (Q[i][1] - p[1]) ** 2;
-                    if (d < bd) { bd = d; best = i; }
-                }
-            }
-        }
-        return [best, Math.sqrt(bd)];
-    };
-}
-
-// Trimmed ICP (median distance, outliers > 3× median dropped) of P onto Q from a seed
-function align(P, Q, [theta, tx, ty]) {
-    const nearest = nearestIndex(Q);
-    let median = Infinity;
-    for (let it = 0; it < 40; it++) {
-        const c = Math.cos(theta), s = Math.sin(theta);
-        const pairs = P.map((p) => {
-            const [j, d] = nearest([c * p[0] - s * p[1] + tx, s * p[0] + c * p[1] + ty]);
-            return { p, q: Q[j], d };
-        });
-        const ds = pairs.map(x => x.d).sort((a, b) => a - b);
-        median = ds[ds.length >> 1];
-        const keep = pairs.filter(x => x.d <= Math.max(3 * median, 10));
-        const mean = (f) => keep.reduce((acc, x) => [acc[0] + f(x)[0] / keep.length, acc[1] + f(x)[1] / keep.length], [0, 0]);
-        const mp = mean(x => x.p), mq = mean(x => x.q);
-        let sxx = 0, sxy = 0;
-        for (const { p, q } of keep) {
-            const a = [p[0] - mp[0], p[1] - mp[1]], b = [q[0] - mq[0], q[1] - mq[1]];
-            sxx += a[0] * b[0] + a[1] * b[1];
-            sxy += a[0] * b[1] - a[1] * b[0];
-        }
-        theta = Math.atan2(sxy, sxx);
-        const c2 = Math.cos(theta), s2 = Math.sin(theta);
-        tx = mq[0] - (c2 * mp[0] - s2 * mp[1]);
-        ty = mq[1] - (s2 * mp[0] + c2 * mp[1]);
-    }
-    return { theta, tx, ty, median };
 }
 
 // No seed yet: try a rotation every 5° (centroids matched) and keep the best fit
@@ -151,24 +79,55 @@ async function cached(file, url) {
 
 async function importPit(src) {
     const cfg = PITS[src.id];
-    const ways = parseOsm(await cached(`${src.id}.osm`, osmUrl(cfg.bbox)));
+    const pitWays = [].concat(cfg.way).filter((w) => typeof w === 'string');
+    const ways = parseOsm(await cached(`${src.id}.osm`, osmUrl(cfg.bbox, pitWays)), pitWays);
     const all = ways.flatMap(w => w.nds);
-    const lat0 = all.reduce((s, p) => s + p[0], 0) / all.length;
+    const csv = await cached(`${src.file}.csv`, BASE + src.file + '.csv');
+    // A centreline built from OSM (osm-centreline.js) is already in OSM metres: same projection, nothing to fit
+    const own = /lat0=([-\d.]+)/.exec(csv);
+    const lat0 = own ? +own[1] : all.reduce((s, p) => s + p[0], 0) / all.length;
     const toXY = ([la, lo]) => [lo * 111320 * Math.cos(lat0 * Math.PI / 180), la * 110540];
     const isPit = (w) => /pit/i.test((w.tags.name || '') + (w.tags['name:en'] || '') + (w.tags.service || '') + (w.tags.raceway || ''));
     const Q = ways.filter(w => !isPit(w)).flatMap(w => densify(w.nds.map(toXY), 4));
 
-    const csv = await cached(`${src.file}.csv`, BASE + src.file + '.csv');
     const P = csv.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#')).map(l => l.split(',').map(Number)).map(r => [r[0], r[1]]);
 
-    const fit = cfg.seed ? align(P, Q, cfg.seed) : search(P, Q);
+    const origin = /origin=([-\d.]+),([-\d.]+)/.exec(csv); // centreline shifted to the origin by this much
+    const fit = own ? { theta: 0, tx: origin ? +origin[1] : 0, ty: origin ? +origin[2] : 0, median: 0 } : cfg.seed ? align(P, Q, cfg.seed) : search(P, Q);
     if (!(fit.median <= MAX_FIT_M)) throw new Error(`${src.id}: OSM fit ${fit.median.toFixed(2)} m > ${MAX_FIT_M} m`);
 
-    const way = ways.find(w => w.id === cfg.way);
-    if (!way) throw new Error(`${src.id}: OSM way ${cfg.way} not found`);
+    // One way, or several joined end to end (Monaco: pit lane + pit exit)
+    // A gap OSM lacks can be filled by { follow: 1 (right) / -1 (left), offsetM }: alongside the track's centreline at that
+    // offset, from the lane so far (where it is still beside the track) to the next way (where it is beside it again)
     const c = Math.cos(fit.theta), s = Math.sin(fit.theta);
     const toTum = ([x, y]) => { const dx = x - fit.tx, dy = y - fit.ty; return [c * dx + s * dy, -s * dx + c * dy]; };
-    let pit = densify(way.nds.map(toXY), 4).map(toTum);
+    const nearestP = (q) => { let bi = 0, bd = Infinity; P.forEach((p, i) => { const d = (p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2; if (d < bd) { bd = d; bi = i; } }); return [bi, Math.sqrt(bd)]; };
+    let xy = [], follow = null;
+    for (const item of [].concat(cfg.way)) {
+        if (typeof item === 'object') { follow = item; continue; }
+        const way = ways.find(w => w.id === item);
+        if (!way) throw new Error(`${src.id}: OSM way ${item} not found`);
+        let w = way.nds.map(toXY).map(toTum);
+        if (!xy.length) { xy = w; continue; }
+        if (follow) {
+            const beside = (q) => nearestP(q)[1] >= 0.7 * follow.offsetM;
+            while (xy.length > 1 && !beside(xy.at(-1))) xy.pop(); // OSM merges it into the track early
+            w = w.slice(Math.max(0, w.findIndex(beside)));
+            const n = P.length, [a] = nearestP(xy.at(-1)), [b] = nearestP(w[0]);
+            for (let i = (a + 1) % n; i !== b; i = (i + 1) % n) {
+                const p = P[i], q = P[(i + 1) % n], len = Math.hypot(q[0] - p[0], q[1] - p[1]) || 1;
+                xy.push([p[0] + (follow.follow * (q[1] - p[1]) * follow.offsetM) / len, p[1] - (follow.follow * (q[0] - p[0]) * follow.offsetM) / len]); // y north: right = (dy, -dx)
+            }
+            xy = xy.concat(w);
+            follow = null;
+            continue;
+        }
+        // Listed in driving order, each drawn that way (one-way): carry on from the next way's point nearest the end so far
+        const end = xy.at(-1), d = w.map((p) => Math.hypot(p[0] - end[0], p[1] - end[1])), j = d.indexOf(Math.min(...d));
+        if (d[j] > 20) throw new Error(`${src.id}: OSM way ${item} doesn't join the pit lane`);
+        xy = xy.concat(w.slice(j + 1));
+    }
+    let pit = densify(xy, 4);
 
     // Same direction as the track at the middle of the pit lane
     const m = pit.length >> 1;
@@ -180,7 +139,9 @@ async function importPit(src) {
     pit = resample(pit, STEP_M);
     const file = path.join(OUT_DIR, `${src.id}.json`);
     const track = JSON.parse(fs.readFileSync(file, 'utf8'));
-    pit = clearOfRoad(pit, P, track.width / SCALE / 2);
+    pit = await fitToCars(src, pit, P, track.width / SCALE / WIDTH_MULT / 2);
+    pit = smoothLane(pit);
+    pit = clearOfRoad(pit, P, track.width / SCALE / 2); // last: room for the pit wall beside the drawn (1.5x) road
     track.pit = {
         path: pit.map(([x, y]) => ({ x: +(x * SCALE).toFixed(1), y: +(-y * SCALE).toFixed(1) })),
         width: PIT_WIDTH_M * SCALE,
@@ -197,6 +158,7 @@ async function importPit(src) {
 // to drawn edge + wall clearance + half its width, tapering at ≤ 2.5 % so the lane stays smooth. P: TUMFTM centreline (m)
 const PIT_CLEAR_M = 1;    // drawn track edge → pit lane edge
 const PUSH_TAPER = 0.025; // m of push per m along the lane
+const MERGE_M = 80;        // the lane's ends, where it runs into the track
 function clearOfRoad(pit, P, drawnHalf) {
     const need = drawnHalf + PIT_CLEAR_M + PIT_WIDTH_M / 2;
     const near = pit.map(([x, y]) => {
@@ -210,11 +172,81 @@ function clearOfRoad(pit, P, drawnHalf) {
         return best;
     });
     // Beside the track = more than half a pit lane off the centreline (merging lanes overlap the road, and stay put)
-    const want = near.map((n) => (n.d > PIT_WIDTH_M / 2 + 4 ? Math.max(0, need - n.d) : 0));
+    // (beside the track = all but the first and last MERGE_M, where the lane runs into the road and overlaps it, as it should)
+    let along = 0;
+    const at = pit.map((p, i) => (along += i ? Math.hypot(p[0] - pit[i - 1][0], p[1] - pit[i - 1][1]) : 0)), len = at[at.length - 1];
+    const want = near.map((n, i) => (at[i] > MERGE_M && len - at[i] > MERGE_M ? Math.max(0, need - n.d) : 0));
     const push = want.map((_, i) => Math.max(...want.map((w, j) => w - Math.abs(i - j) * STEP_M * PUSH_TAPER)));
     const max = Math.max(...push);
     if (max > 0) console.log(`  pit lane moved out up to ${max.toFixed(1)} m to clear the drawn track`);
-    return pit.map(([x, y], i) => [x + near[i].nx * push[i], y + near[i].ny * push[i]]);
+    // Each point's own direction (away from its nearest bit of track) fans out near a bend: neighbours moving apart or
+    // together left kinks the pit wall poked through. The push vectors are averaged along the lane (±PUSH_BLEND points)
+    const PUSH_BLEND = 4, vx = push.map((d, i) => near[i].nx * d), vy = push.map((d, i) => near[i].ny * d);
+    const avg = (v, i) => { let s = 0, c = 0; for (let k = Math.max(0, i - PUSH_BLEND); k <= Math.min(v.length - 1, i + PUSH_BLEND); k++) { s += v[k]; c++; } return s / c; };
+    return pit.map(([x, y], i) => [x + avg(vx, i), y + avg(vy, i)]);
+}
+
+// Where the race cars drove in the pit lane is the real lane (F1 live timing positions of cars off the track, near the
+// pit lane): each point moves to the middle of the cars that passed it, by at most FIT_MAX_M, where at least FIT_MIN of
+// them did. Lanes OSM drew off (Spa's, Spielberg's exits) come right; the rest barely move. P: centreline, TUM frame
+const FIT_NEAR_M = 12, FIT_ALONG_M = 4, FIT_MIN = 15, FIT_MAX_M = 8;
+async function fitToCars(src, pit, P, realHalf) {
+    let data;
+    try { data = await fitF1(src); } catch (e) { console.log(`  ${src.id}: no F1 positions (${e.message}), lane as drawn`); return pit; }
+    const near = nearestIndex(densify([...P, P[0]], 1)), lane = nearestIndex(pit);
+    const cars = [];
+    for (const s of data.S) {
+        const g = data.fit.tr(s), q = [g.x, -g.y]; // fitF1: game frame metres (y down) → TUM (y north)
+        if (near(q)[1] < realHalf + 3) continue; // on the track
+        if (lane(q)[1] < FIT_NEAR_M) cars.push(q);
+    }
+    const CELL = FIT_NEAR_M, grid = new Map(), key = (x, y) => `${Math.floor(x / CELL)},${Math.floor(y / CELL)}`;
+    for (const c of cars) { const k = key(c[0], c[1]); if (!grid.has(k)) grid.set(k, []); grid.get(k).push(c); }
+    const n = pit.length, normal = pit.map((p, i) => {
+        const a = pit[Math.max(0, i - 1)], b = pit[Math.min(n - 1, i + 1)], len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+        return [(b[0] - a[0]) / len, (b[1] - a[1]) / len];
+    });
+    // sideways offset to the cars' middle per point (null: too few cars), the ends 0 (they join the track where OSM says)
+    const off = pit.map((p, i) => {
+        if (i < 3 || i > n - 4) return 0;
+        const [tx, ty] = normal[i], offs = [];
+        for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (const c of grid.get(`${Math.floor(p[0] / CELL) + dx},${Math.floor(p[1] / CELL) + dy}`) || []) {
+            const ex = c[0] - p[0], ey = c[1] - p[1];
+            if (Math.abs(ex * tx + ey * ty) <= FIT_ALONG_M && Math.hypot(ex, ey) <= FIT_NEAR_M) offs.push(-ty * ex + tx * ey);
+        }
+        if (offs.length < FIT_MIN) return null;
+        offs.sort((x, y) => x - y);
+        return Math.max(-FIT_MAX_M, Math.min(FIT_MAX_M, offs[offs.length >> 1]));
+    });
+    // gaps bridged linearly, then averaged over ±FIT_BLEND points: the lane bends into the fitted stretch, no steps
+    const known = off.map((o, i) => (o === null ? -1 : i)).filter((i) => i >= 0);
+    const filled = off.map((o, i) => {
+        if (o !== null) return o;
+        const a = [...known].reverse().find((k) => k < i), b = known.find((k) => k > i);
+        return off[a] + ((off[b] - off[a]) * (i - a)) / (b - a);
+    });
+    const FIT_BLEND = 5, smooth = filled.map((_, i) => { let s = 0, c = 0; for (let d = -FIT_BLEND; d <= FIT_BLEND; d++) { const k = i + d; if (k >= 0 && k < n) { s += filled[k]; c++; } } return i < 3 || i > n - 4 ? 0 : s / c; });
+    const moved = Math.max(...smooth.map(Math.abs));
+    const out = pit.map((p, i) => [p[0] - normal[i][1] * smooth[i], p[1] + normal[i][0] * smooth[i]]);
+    console.log(`  ${src.id}: pit lane fitted to ${cars.length} race-car positions, moved up to ${moved.toFixed(1)} m`);
+    return out;
+}
+
+// Kinks where OSM ways join, or where clearOfRoad's taper starts, made the lane jerk at speed: relax each point toward
+// its neighbours' midpoint, never more than SMOOTH_MAX_M from where it was (the real layout stays), ends fixed
+const SMOOTH_PASSES = 40, SMOOTH_MAX_M = 2.5;
+function smoothLane(pit) {
+    const orig = pit.map((p) => [...p]), out = pit.map((p) => [...p]);
+    for (let k = 0; k < SMOOTH_PASSES; k++) {
+        for (let i = 2; i < out.length - 2; i++) {
+            const a = out[i - 1], b = out[i + 1], o = orig[i];
+            let x = (out[i][0] + (a[0] + b[0]) / 2) / 2, y = (out[i][1] + (a[1] + b[1]) / 2) / 2;
+            const d = Math.hypot(x - o[0], y - o[1]);
+            if (d > SMOOTH_MAX_M) { x = o[0] + ((x - o[0]) * SMOOTH_MAX_M) / d; y = o[1] + ((y - o[1]) * SMOOTH_MAX_M) / d; }
+            out[i] = [x, y];
+        }
+    }
+    return out;
 }
 
 async function main() {

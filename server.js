@@ -10,7 +10,9 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 // Serve static files from the public directory
-app.use(express.static(path.join(__dirname, 'public')));
+// no-cache: browsers check back (a cheap 304 when unchanged) instead of guessing how long a file stays fresh, so every
+// player gets the current game code after an update (stale modules otherwise linger, the terrain worker's most of all)
+app.use(express.static(path.join(__dirname, 'public'), { setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache') }));
 // Three.js served locally so LAN play works without internet
 app.use('/vendor/three', express.static(path.join(__dirname, 'node_modules', 'three')));
 

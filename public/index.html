@@ -111,6 +111,8 @@
                                             <option value="spielberg">Red Bull Ring</option>
                                             <option value="montreal">Montreal</option>
                                             <option value="hungaroring">Hungaroring</option>
+                                            <option value="monaco">Monaco</option>
+                                            <option value="imola">Imola</option>
                                         </select>
                                     </label>
                                     <label>Laps
@@ -155,30 +157,33 @@
         <!-- HUD -->
         <div id="hud">
             <div id="hud-top">
-                <div class="hud-box">Pos: <span id="hud-rank">1</span>/<span id="hud-total">1</span></div>
-                <div class="hud-box">Lap: <span id="hud-lap">1</span></div>
+                <div class="hud-stat"><span class="hs-label">POS</span><span class="hs-big" id="hud-rank">1</span><span class="hs-small">/<span id="hud-total">1</span></span></div>
+                <div class="hud-stat"><span class="hs-label">LAP</span><span class="hs-big" id="hud-lap">1</span><span class="hs-small" id="hud-laps"></span></div>
             </div>
+            <!-- One dash card, bottom right: shift lights; gear | speed | DRS; lap time; last / best; sectors; fastest lap -->
             <div id="hud-bottom">
-                <div id="lap-times">
-                    <div class="lt-row lt-now"><span class="lt-label">LAP</span><span id="lt-current">--</span></div>
-                    <div class="lt-row"><span class="lt-label">LAST</span><span id="lt-delta"></span><span id="lt-last">--</span></div>
-                    <div class="lt-row"><span class="lt-label">BEST</span><span id="lt-best">--</span></div>
-                    <div class="lt-row lt-fl"><span class="lt-label"><svg class="stopwatch" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13.5" r="8" fill="none" stroke="currentColor" stroke-width="2.4"/><rect x="9.5" y="1.5" width="5" height="2.6" rx="1" fill="currentColor"/><path d="M12 13.5V8.6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="M18.4 5.6l1.6-1.6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></span><span id="lt-fl-who"></span><span id="lt-fl">--</span></div>
-                    <div id="sector-panel">
-                        <div class="sec" id="sec-1"><i></i><span>S1</span><em class="sec-best"></em></div>
-                        <div class="sec" id="sec-2"><i></i><span>S2</span><em class="sec-best"></em></div>
-                        <div class="sec" id="sec-3"><i></i><span>S3</span><em class="sec-best"></em></div>
+                <div id="cluster">
+                    <div id="rev-lights"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+                    <div class="cl-main">
+                        <div class="cl-gear"><div id="hud-gear">1</div><small>GEAR</small></div>
+                        <div class="cl-speed"><span id="hud-speed">0</span><small>KM/H</small></div>
+                        <div class="cl-drs"><div id="drs-badge" class="drs-off" title="DRS: press E (gamepad Y) when green">DRS</div><div id="drs-hint"></div></div>
+                    </div>
+                    <div id="lap-times">
+                        <div class="lt-row lt-now"><span class="lt-label">LAP</span><span id="lt-current">--</span></div>
+                        <div class="lt-pair">
+                            <div class="lt-row"><span class="lt-label">LAST</span><span id="lt-last">--</span><span id="lt-delta"></span></div>
+                            <div class="lt-row"><span class="lt-label">BEST</span><span id="lt-best">--</span></div>
+                        </div>
+                        <div id="sector-panel">
+                            <div class="sec" id="sec-1"><i></i><span>S1</span><em class="sec-best"></em></div>
+                            <div class="sec" id="sec-2"><i></i><span>S2</span><em class="sec-best"></em></div>
+                            <div class="sec" id="sec-3"><i></i><span>S3</span><em class="sec-best"></em></div>
+                        </div>
+                        <div class="lt-row lt-fl"><span class="lt-label"><svg class="stopwatch" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13.5" r="8" fill="none" stroke="currentColor" stroke-width="2.4"/><rect x="9.5" y="1.5" width="5" height="2.6" rx="1" fill="currentColor"/><path d="M12 13.5V8.6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="M18.4 5.6l1.6-1.6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></span><span id="lt-fl-who"></span><span id="lt-fl">--</span></div>
                     </div>
                 </div>
-                <div id="drs-badge" class="drs-off" title="DRS — press E (gamepad Y) when green">DRS</div>
-                <div id="drs-hint"></div>
-                <div id="gear-hud">
-                    <div id="rev-lights"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
-                    <div id="hud-gear">1</div>
-                </div>
-                <div class="hud-speedometer"><span id="hud-speed">0</span> KM/H</div>
             </div>
-            
             <canvas id="minimap" width="220" height="220"></canvas>
             <div id="session-bar"></div>
             <pre id="netstats" class="hidden"></pre>

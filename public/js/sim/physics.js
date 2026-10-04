@@ -1,4 +1,4 @@
-// Collision box = car.glb from front wing tip (+2.92 m) to rear wing (−2.56 m), wheel to wheel (±0.98 m).
+// Collision box = the car (carShape.js) from front wing tip (+2.92 m) to rear wing (−2.56 m), wheel to wheel (±0.98 m).
 // Its middle sits ahead of the car's origin (between the axles), so the box is offset forward.
 const CAR_HALF_LENGTH_M = 2.74;
 const CAR_CENTER_OFFSET_M = 0.18;

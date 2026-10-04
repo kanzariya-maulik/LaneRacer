@@ -5,7 +5,7 @@ import Physics from './physics.js';
 import { brakeAssist } from './assist.js';
 import { slopeAt, roadAt } from './elevation.js';
 
-export const WALL_OFFSET = 80;     // world units past the track edge; Track.js checkpoints use the same
+export const WALL_OFFSET = 80;     // world units past the track edge, unless the track sets wallOffset; Track.js uses the same
 export const PIT_RUNOFF_M = 2;     // barrier this far outside the pit lane edge
 export const KERB_M = 1.5;         // kerbs past the track edge drive like asphalt
 export const PIT_LIMIT_KMH = 80;    // unless the circuit sets its own (circuits.json pitLimitKmh: Zandvoort 60)
@@ -98,12 +98,18 @@ export function driveCar(p, input, t, dt) {
     }
 
     // Barrier: outside both the track's run-off and the pit lane's
-    const wallDist = t.width / 2 + WALL_OFFSET;
+    const wallDist = t.width / 2 + (t.wallOffset ?? WALL_OFFSET);
     const pitDist = pit && pit.width / 2 + PIT_RUNOFF_M * scale;
     const after = Physics.nearestOnTrack(p.x, p.y, t, p.roadI), afterPit = nearPit(p.x, p.y);
     // The pit lane upstream of the closure barrier is off-limits (no pit stops)
     const afterS = afterPit && pitAlong(pit, afterPit);
-    const overTrack = after.dist - wallDist, overPit = afterPit && afterS >= pit.closeS ? afterPit.dist - pitDist : Infinity;
+    // No barrier where the track opens between two nearby legs (Track.js openWalls: the infield of a hairpin)
+    const open = (n) => {
+        if (!t.openWall) return false;
+        const a = t.path[n.i], b = t.path[(n.i + 1) % t.path.length];
+        return !!t.openWall[-(b.y - a.y) * (p.x - n.px) + (b.x - a.x) * (p.y - n.py) > 0 ? 0 : 1][n.i];
+    };
+    const overTrack = open(after) ? -Infinity : after.dist - wallDist, overPit = afterPit && afterS >= pit.closeS ? afterPit.dist - pitDist : Infinity;
     if (overTrack > 0 && overPit > 0) {
         const [near, lim] = overPit < overTrack ? [afterPit, pitDist] : [after, wallDist];
         const nx = (p.x - near.px) / near.dist, ny = (p.y - near.py) / near.dist;
@@ -114,7 +120,7 @@ export function driveCar(p, input, t, dt) {
     // Barrier stops the car body: pull the centre in by how far the rectangle reaches toward it
     const edge = Physics.nearestOnTrack(p.x, p.y, t, p.roadI), edgePit = nearPit(p.x, p.y);
     const reach = (n) => n.dist > 1e-9 ? Physics.carReach(p, (p.x - n.px) / n.dist, (p.y - n.py) / n.dist, scale) : 0;
-    const inTrack = edge.dist + reach(edge) <= wallDist;
+    const inTrack = edge.dist + reach(edge) <= wallDist || open(edge);
     const inPitLane = edgePit && pitAlong(pit, edgePit) >= pit.closeS && edgePit.dist + reach(edgePit) <= pitDist;
     if (!inTrack && !inPitLane && edge.dist <= wallDist && !(edgePit && edgePit.dist <= pitDist && pitAlong(pit, edgePit) >= pit.closeS)) {
         const nx = (p.x - edge.px) / edge.dist, ny = (p.y - edge.py) / edge.dist;

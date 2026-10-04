@@ -82,33 +82,24 @@ test('crossWall: crossing reports the normal back toward the side the car came f
     assert.strictEqual(Physics.crossWall(50, 10, 50, -10, []), null, 'no wall');
 });
 
-// ---- car hitbox matches car.glb ----
-const fsH = require('fs'), pathH = require('path');
-function carExtents() {
-    const buf = fsH.readFileSync(pathH.join(__dirname, '..', 'public', 'models', 'car.glb'));
-    const g = JSON.parse(buf.toString('utf8', 20, 20 + buf.readUInt32LE(12)));
+// ---- car hitbox matches the car model (public/js/carShape.js: body, and the wheels: pivot ± radius / half width) ----
+async function carExtents() {
+    const S = await import('../public/js/carShape.js'), { pos } = S.bodyArrays('high');
     let front = -Infinity, rear = Infinity, side = 0;
-    for (const n of g.nodes) {
-        if (n.mesh === undefined) continue;
-        const t = n.translation || [0, 0, 0];
-        for (const p of g.meshes[n.mesh].primitives) {
-            const { min, max } = g.accessors[p.attributes.POSITION];
-            front = Math.max(front, t[0] + max[0]); rear = Math.min(rear, t[0] + min[0]);
-            side = Math.max(side, Math.abs(t[2] + min[2]), Math.abs(t[2] + max[2])); // glTF z = -(Blender y)
-        }
-    }
+    for (let i = 0; i < pos.length; i += 3) { front = Math.max(front, pos[i]); rear = Math.min(rear, pos[i]); side = Math.max(side, Math.abs(pos[i + 2])); }
+    for (const [x, y, w] of Object.values(S.WHEELS)) { front = Math.max(front, x + S.WHEEL_RADIUS); rear = Math.min(rear, x - S.WHEEL_RADIUS); side = Math.max(side, Math.abs(y) + w / 2); }
     return { front, rear, side };
 }
 
-test('collision box matches the car model: front wing to rear wing, wheel to wheel', () => {
-    const e = carExtents(), off = Physics.CAR_CENTER_OFFSET_M ?? 0, hl = Physics.CAR_HALF_LENGTH_M;
+test('collision box matches the car model: front wing to rear wing, wheel to wheel', async () => {
+    const e = await carExtents(), off = Physics.CAR_CENTER_OFFSET_M ?? 0, hl = Physics.CAR_HALF_LENGTH_M;
     assert.ok(Math.abs(off + hl - e.front) < 0.03, `box front ${(off + hl).toFixed(2)} vs model ${e.front.toFixed(2)}`);
     assert.ok(Math.abs(off - hl - e.rear) < 0.03, `box rear ${(off - hl).toFixed(2)} vs model ${e.rear.toFixed(2)}`);
     assert.ok(Physics.CAR_HALF_WIDTH_M >= e.side - 0.005 && Physics.CAR_HALF_WIDTH_M <= e.side + 0.05, `width ${e.side}`);
 });
 
-test('nose-to-tail: cars touch where the wings touch, not before', () => {
-    const S = 6, e = carExtents(), len = e.front - e.rear;
+test('nose-to-tail: cars touch where the wings touch, not before', async () => {
+    const S = 6, e = await carExtents(), len = e.front - e.rear;
     const a = { x: 0, y: 0, angle: 0 };
     assert.strictEqual(Physics.carOverlap(a, { x: -(len + 0.05) * S, y: 0, angle: 0 }, S), null, '5 cm gap: no contact');
     assert.ok(Physics.carOverlap(a, { x: -(len - 0.05) * S, y: 0, angle: 0 }, S), '5 cm overlap: contact');

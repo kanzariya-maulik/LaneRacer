@@ -5,7 +5,7 @@ const Assist = require('./Assist');
 const RacingLine = require('./RacingLine');
 const Elevation = require('../../public/js/sim/elevation.js'); // shared with the browser
 
-const TRACK_IDS = ['monza', 'spa', 'silverstone', 'suzuka', 'sakhir', 'interlagos', 'cota', 'zandvoort', 'spielberg', 'montreal', 'hungaroring'];
+const TRACK_IDS = ['monza', 'spa', 'silverstone', 'suzuka', 'sakhir', 'interlagos', 'cota', 'zandvoort', 'spielberg', 'montreal', 'hungaroring', 'monaco', 'imola'];
 const DATA_DIR = path.join(__dirname, '..', '..', 'data', 'tracks');
 const CHECKPOINT_COUNT = 16;
 const GRID_SLOTS = 22; // 11 teams x 2 drivers
@@ -101,9 +101,14 @@ function buildPit(raw, circuit, track) {
     const inner = lateral(pointAt(pts, cum, closeS, false), trackSide * half);
     const up = pointAt(pts, cum, closeS - CLOSE_RAMP_M * scale, false);
     let outerOff = half + PIT_RUNOFF_M * scale;
-    // Outer end reaches past the track's run-off barrier, so there is no way round it
-    const short = width / 2 + WALL_OFFSET - Physics.nearestOnTrack(lateral(up, -trackSide * outerOff).x, lateral(up, -trackSide * outerOff).y, track).dist;
-    if (short > 0) outerOff += short + scale;
+    // Outer end reaches past the track's run-off barrier, so there is no way round it (stepped out until it does: the
+    // track isn't square to the barrier there); stops at another part of the road rather than crossing it
+    for (let k = 0; k < 20; k++) {
+        const o = lateral(up, -trackSide * outerOff), d = Physics.nearestOnTrack(o.x, o.y, track).dist;
+        const short = width / 2 + track.wallOffset - d;
+        if (short <= 0 || (k > 0 && d - width / 2 < 2 * scale)) break; // the first step as before; further ones not across a road
+        outerOff += short + scale;
+    }
     const closeWall = [lateral(up, -trackSide * outerOff), inner].map(({ x, y }) => ({ x, y }));
 
     return { path: pts, width: raw.pit.width, cum, len, entryS, exitS, span, startOnPit, trackSide, limStart: limLo, limEnd: limHi, wall, garages, garageSpan, closeS, closeWall, fitM: raw.pit.fitM, limitKmh: circuit.pitLimitKmh || null };
@@ -135,6 +140,10 @@ function buildBridges(t) {
             const out = [], step = 5 * t.scale, k = Math.ceil(len / 2 / step);
             for (let q = -k; q <= k; q++) {
                 const s = rd.s + (q * len) / (2 * k), p = pointAt(P, t.cum, s), w = ((s % total) + total) % total;
+                // direction from a few metres either side, not the segment's own: at a segment joint two points would
+                // face different ways, and the walls offset from them stepped sideways (a face standing out of the wall)
+                const a = pointAt(P, t.cum, s - 4 * t.scale), b = pointAt(P, t.cum, s + 4 * t.scale);
+                p.angle = Math.atan2(b.y - a.y, b.x - a.x);
                 let e = 0; while (t.cum[e + 1] < w) e++;
                 const f = (w - t.cum[e]) / (t.cum[e + 1] - t.cum[e] || 1);
                 out.push({ x: p.x, y: p.y, angle: p.angle, h: t.z ? t.z[e] + (t.z[(e + 1) % n] - t.z[e]) * f : 0 });
@@ -159,11 +168,39 @@ function buildBridges(t) {
     return bridges;
 }
 
+// Where no barrier stands, per point and side ([right, left], 1 = open): the barrier is the line a fixed distance from the
+// nearest track, so between two legs of track not far apart (inside a hairpin: La Source) it fenced off a thin island of
+// grass, stubs of barrier standing in the infield. Open where another leg (more than OPEN_APART_M along the lap) is within
+// two barrier distances of the barrier line: the grass between the legs stays open, as at the real circuits (cutting it
+// still breaks the lap's checkpoints and track limits). Not near a bridge (its levels keep their own walls)
+const OPEN_APART_M = 60;
+function openWalls(t) {
+    const P = t.path, n = P.length, total = t.cum[n], wall = t.width / 2 + t.wallOffset, apart = OPEN_APART_M * t.scale;
+    const lapGap = (a, b) => { const d = Math.abs(t.cum[a] - t.cum[b]); return Math.min(d, total - d); };
+    const nearBridge = (i) => (t.bridges || []).some((b) => [b.lower.s, b.upper.s].some((s) => { const d = Math.abs(t.cum[i] - s); return Math.min(d, total - d) < b.under / 2 + 40 * t.scale; }));
+    const out = [new Array(n).fill(0), new Array(n).fill(0)];
+    for (let i = 0; i < n; i++) {
+        if (nearBridge(i)) continue;
+        for (const [k, side] of [[0, 1], [1, -1]]) {
+            const f = lateral(pointAt(P, t.cum, t.cum[i]), side * wall);
+            for (let j = 0; j < n && !out[k][i]; j++) {
+                if (lapGap(i, j) <= apart) continue;
+                const a = P[j], b = P[(j + 1) % n], ex = b.x - a.x, ey = b.y - a.y, l2 = ex * ex + ey * ey;
+                const u = l2 ? Math.max(0, Math.min(1, ((f.x - a.x) * ex + (f.y - a.y) * ey) / l2)) : 0;
+                if (Math.hypot(f.x - a.x - u * ex, f.y - a.y - u * ey) < 2 * wall) out[k][i] = 1;
+            }
+        }
+    }
+    return out;
+}
+
 function build(raw, circuit = {}) {
     const { path: pts, width, scale } = raw;
     const cum = cumulative(pts);
     const total = cum[pts.length];
     const startS = (circuit.startLineM || 0) * scale;
+    // Barrier distance past the drawn edge: WALL_OFFSET, or the circuit's own (Monaco: walls right beside the street)
+    const wallOffset = circuit.barrierM != null ? circuit.barrierM * scale : WALL_OFFSET;
     const start = pointAt(pts, cum, startS);
 
     // Checkpoints: the start line and both sector lines are checkpoints, the rest evenly spaced per sector
@@ -180,7 +217,7 @@ function build(raw, circuit = {}) {
         sectorCps.push(checkpoints.length);
         for (let j = 0; j < count; j++) {
             const p = pointAt(pts, cum, startS + bounds[k] + (j * len) / count);
-            checkpoints.push({ x: p.x, y: p.y, radius: width / 2 + WALL_OFFSET });
+            checkpoints.push({ x: p.x, y: p.y, radius: width / 2 + wallOffset });
         }
     }
 
@@ -213,9 +250,11 @@ function build(raw, circuit = {}) {
     // z: real elevation per path point (metres above the lowest point); grade / vcurv: slope and crest / compression for
     // the car physics (public/js/sim/elevation.js)
     const shape = raw.z ? Elevation.profile(raw.z, cum, scale) : { grade: null, vcurv: null };
-    const track = { id: raw.id, name: raw.name, scale, width, limit, edgeR, edgeL, gridLine, path: pts, z: raw.z || null, grade: shape.grade, vcurv: shape.vcurv, cum, start, startS, drsZones, checkpoints, sectorCps, startPositions, safeSpeed: Assist.safeSpeeds(pts, scale, shape.vcurv), pit: null };
+    const tunnels = (raw.tunnels || []).map(([a, b]) => [a * scale, b * scale]); // lap distances from row 0 (Monaco)
+    const track = { id: raw.id, name: raw.name, scale, width, wallOffset, tunnels, limit, edgeR, edgeL, gridLine, path: pts, z: raw.z || null, grade: shape.grade, vcurv: shape.vcurv, cum, start, startS, drsZones, checkpoints, sectorCps, startPositions, safeSpeed: Assist.safeSpeeds(pts, scale, shape.vcurv), pit: null };
     if (raw.pit) track.pit = buildPit(raw, circuit, track);
     track.bridges = buildBridges(track);
+    track.openWall = openWalls(track);
     track.racingLine = RacingLine.compute(track); // visual guide, sent to clients in game_init
     return track;
 }

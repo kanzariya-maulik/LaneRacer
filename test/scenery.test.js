@@ -10,8 +10,8 @@ const tracks = Track.loadAll();
 for (const id of Track.TRACK_IDS) {
     test(`${id}: scenery stays clear of the track and pit lane`, () => {
         const t = tracks[id], out = S.placeScenery(t, 1, S.seedOf(id));
-        const clear = t.width / 2 + 80 + 3 * t.scale;
-        for (const o of [...out.grandstands, ...out.trees, ...out.billboards]) {
+        const clear = t.width / 2 + t.wallOffset + 3 * t.scale; // past the barrier
+        for (const o of [...out.grandstands, ...out.trees, ...out.billboards, ...out.buildings, ...out.posts, ...out.boards, ...(out.landmark ? [out.landmark] : [])]) {
             assert.ok(Physics.nearestOnTrack(o.x, o.y, t).dist > clear, `${id}: object on or near the track at ${o.x},${o.y}`);
             if (t.pit) assert.ok(Physics.nearestOnPath(o.x, o.y, t.pit.path, false).dist > t.pit.width / 2 + 6 * t.scale, `${id}: object in the pit lane`);
         }
@@ -20,6 +20,11 @@ for (const id of Track.TRACK_IDS) {
             const x = g.x + (Math.cos(g.angle) * a - Math.sin(g.angle) * d) * t.scale, y = g.y + (Math.sin(g.angle) * a + Math.cos(g.angle) * d) * t.scale;
             assert.ok(Physics.nearestOnTrack(x, y, t).dist > clear, `${id}: grandstand reaches the track at ${x},${y}`);
             if (t.pit) assert.ok(Physics.nearestOnPath(x, y, t.pit.path, false).dist > t.pit.width / 2 + 6 * t.scale, `${id}: grandstand over the pit lane`);
+        }
+        // Whole building footprints (w × d m)
+        for (const b of out.buildings) for (const a of [-b.w / 2, b.w / 2]) for (const d of [-b.d / 2, b.d / 2]) {
+            const x = b.x + (Math.cos(b.angle) * a - Math.sin(b.angle) * d) * t.scale, y = b.y + (Math.sin(b.angle) * a + Math.cos(b.angle) * d) * t.scale;
+            assert.ok(Physics.nearestOnTrack(x, y, t).dist > clear, `${id}: building reaches the track at ${x},${y}`);
         }
         assert.ok(out.grandstands.length >= 2, 'grandstands at the main straight and slow corners');
         assert.ok(out.trees.length > 50 && out.billboards.length > 3);
@@ -83,7 +88,7 @@ for (const id of Track.TRACK_IDS) {
             const xs = P.map((p) => p.x), ys = P.map((p) => p.y), gw = Math.max(...xs) - Math.min(...xs) + 8000, gh = Math.max(...ys) - Math.min(...ys) + 8000;
             const x0 = (Math.min(...xs) + Math.max(...xs) - gw) / 2, y0 = (Math.min(...ys) + Math.max(...ys) - gh) / 2, N = SEGS + 1, cw = gw / SEGS, ch = gh / SEGS;
             const vr = { 1: S.vergeReach(t, 1), [-1]: S.vergeReach(t, -1) };
-            const H = S.terrainHeights(t, x0, y0, gw, gh, SEGS, S.terrainGround(t, vr), 0.6, t.width / 2 + 1.5 * t.scale);
+            const H = S.terrainHeights(t, x0, y0, gw, gh, SEGS, S.terrainGround(t, vr), 0.6, S.carveReach(t, vr)); // as game3d
             const at = (x, y) => { // the triangle three.js draws there (cell corners a (0,0) b (0,1) c (1,1) d (1,0), split b-d)
                 const u = (x - x0) / cw, v = (y - y0) / ch, ix = Math.floor(u), iy = Math.floor(v), fu = u - ix, fv = v - iy;
                 const A = H[iy * N + ix], B = H[(iy + 1) * N + ix], Cc = H[(iy + 1) * N + ix + 1], D = H[iy * N + ix + 1];
@@ -100,7 +105,36 @@ for (const id of Track.TRACK_IDS) {
         assert.ok(worst < 0.05, `${id}: terrain ${worst.toFixed(2)} m above the road`);
     });
 
-    test(`${id}: no road floats: just past every verge edge the ground is within the 3 m grass skirt (bridges excepted)`, () => {
+    test(`${id}: the pit lane is clear: no verge grass across it, the ground under it`, () => {
+        const t = tracks[id], pit = t.pit, { at, vr } = ground(), over = [], verge = [], Z = E.pathHeights(t, pit.path);
+        for (let i = 1; i < pit.path.length - 2; i++) {
+            if (pit.cum[i] < pit.closeS) continue;
+            const p = pit.path[i], q = pit.path[i + 1], ang = Math.atan2(q.y - p.y, q.x - p.x), surf = Z[i];
+            for (const l of [-0.9, 0, 0.9]) {
+                const o = (l * pit.width) / 2, x = p.x - Math.sin(ang) * o, y = p.y + Math.cos(ang) * o;
+                if (at(x, y) > surf) over.push(Math.round(pit.cum[i] / t.scale));
+                const nr = Physics.nearestOnTrack(x, y, t), a = t.path[nr.i], b = t.path[(nr.i + 1) % t.path.length];
+                const side = -(b.y - a.y) * (x - a.x) + (b.x - a.x) * (y - a.y) > 0 ? 1 : -1;
+                if (nr.dist > t.width / 2 && nr.dist < vr[side][nr.i]) verge.push(Math.round(pit.cum[i] / t.scale));
+            }
+        }
+        assert.deepStrictEqual([...new Set(over)], [], `${id}: ground over the pit lane at metres`);
+        assert.deepStrictEqual([...new Set(verge)], [], `${id}: verge grass across the pit lane at metres`);
+    });
+
+    test(`${id}: the run-off is at road level out to the verge edge (cars drive there; the barrier stands on it)`, () => {
+        const t = tracks[id], P = t.path, n = P.length, { at, vr } = ground(), bad = [];
+        for (let i = 0; i < n; i++) {
+            const a = P[(i - 1 + n) % n], b = P[(i + 1) % n], h = Math.atan2(b.y - a.y, b.x - a.x);
+            for (const dir of [1, -1]) for (const f of [0.5, 1]) {
+                const o = dir * (t.width / 2 + (vr[dir][i] - t.width / 2) * f), x = P[i].x - Math.sin(h) * o, y = P[i].y + Math.cos(h) * o;
+                if (at(x, y) > t.z[i] + 0.05) bad.push(Math.round(t.cum[i] / t.scale));
+            }
+        }
+        assert.deepStrictEqual([...new Set(bad)], [], `${id}: ground over the run-off at metres`);
+    });
+
+    test(`${id}: no road floats: just past every verge edge the ground is within the grass skirt or its retaining wall (bridges excepted)`, () => {
         const t = tracks[id], P = t.path, n = P.length, { at, vr } = ground(), bad = [], crossings = [];
         for (let i = 0; i < n; i++) for (let j = i + 3; j < n - (i === 0 ? 1 : 0); j++) { // where the track crosses itself
             const a = P[i], b = P[(i + 1) % n], c = P[j], d = P[(j + 1) % n], r = (b.x - a.x) * (d.y - c.y) - (b.y - a.y) * (d.x - c.x);
@@ -108,15 +142,22 @@ for (const id of Track.TRACK_IDS) {
             const u = ((c.x - a.x) * (d.y - c.y) - (c.y - a.y) * (d.x - c.x)) / r, v = ((c.x - a.x) * (b.y - a.y) - (c.y - a.y) * (b.x - a.x)) / r;
             if (u >= 0 && u <= 1 && v >= 0 && v <= 1) crossings.push({ x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u });
         }
+        const depth = { 1: S.skirtDepth(t, vr[1], 1, at), [-1]: S.skirtDepth(t, vr[-1], -1, at) }; // walls reach the drawn ground
         for (let i = 0; i < n; i++) {
             const a = P[i], b = P[(i + 1) % n], len = Math.hypot(b.x - a.x, b.y - a.y), nx = -(b.y - a.y) / len, ny = (b.x - a.x) / len;
             for (const dir of [1, -1]) {
                 const o = dir * (vr[dir][i] + 1 * t.scale), x = a.x + nx * o, y = a.y + ny * o, near = Physics.nearestOnTrack(x, y, t);
                 if (crossings.some((c) => Math.hypot(x - c.x, y - c.y) < 50 * t.scale)) continue; // at a bridge: open beneath
-                if (t.z[i] - at(x, y) > 3) bad.push(Math.round(t.cum[i] / t.scale));
+                if (depth[dir][i] === 0) continue; // the verge meets the pit lane: its asphalt carries on there
+                if (t.z[i] - at(x, y) > depth[dir][i]) bad.push(Math.round(t.cum[i] / t.scale));
             }
         }
         assert.deepStrictEqual([...new Set(bad)], [], `${id}: roads floating at metres`);
+        // Deep retaining walls only where a road runs along a hillside above another (Monaco) or onto a bridge (Suzuka's
+        // approach embankments); open circuits get at most short ones where the ground falls away past the barrier
+        const nearBridge = (i) => crossings.some((c) => Math.hypot(P[i].x - c.x, P[i].y - c.y) < 200 * t.scale);
+        const deep = [1, -1].flatMap((dir) => depth[dir].map((d, i) => (d > 6 && !nearBridge(i) ? i : -1)).filter((i) => i >= 0));
+        if (id !== 'monaco') assert.deepStrictEqual(deep.map((i) => Math.round(t.cum[i] / t.scale)), [], `${id}: retaining walls over 6 m deep at metres`);
     });
 }
 test('scenery is deterministic and scales with density', () => {

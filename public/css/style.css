@@ -615,3 +615,103 @@ input:disabled { opacity: 0.7; }
 #rev-lights.flash i { animation: revflash 0.12s steps(1) infinite; }
 @keyframes revflash { 50% { background: #1f2937; box-shadow: none; } }
 #hud-gear { font: 900 2.4rem/1 sans-serif; color: #fff; text-shadow: 0 2px 6px #000; min-width: 1.4em; text-align: center; }
+
+/* ===================== HUD v2: broadcast style =====================
+   Thin translucent panels, no thick borders; everything sized in em from #hud's font size, which follows the window
+   height, so the HUD takes the same share of the view on a laptop or a big screen. Edges only: the middle is the road. */
+#hud { font-size: clamp(11px, 1.85vh, 17px); --glass: rgba(10, 13, 22, 0.62); --edge: rgba(255, 255, 255, 0.1); --pad: 1.4em; }
+#hud .glass, #hud-top .hud-stat, #leaderboard, #lap-times, #cluster, #minimap, #session-bar, #lights {
+    background: var(--glass); border: 1px solid var(--edge); border-radius: 0.7em; box-shadow: 0 0.3em 1.2em rgba(0, 0, 0, 0.25);
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+}
+
+/* Top left: position and lap, one slim row */
+#hud-top { top: var(--pad); left: var(--pad); gap: 0.5em; }
+.hud-stat { display: flex; align-items: baseline; gap: 0.35em; padding: 0.35em 0.9em 0.4em; color: #fff; font-variant-numeric: tabular-nums; }
+.hs-label { font-size: 0.72em; font-weight: 800; letter-spacing: 0.15em; color: #94a3b8; }
+.hs-big { font-size: 1.7em; font-weight: 900; line-height: 1; }
+.hs-small { font-size: 0.95em; font-weight: 700; color: #cbd5e1; }
+
+/* Minimap under it, smaller and see-through */
+#minimap { top: calc(var(--pad) + 3.4em); left: var(--pad); width: 11em; height: 11em; border-radius: 0.8em; }
+
+/* Top centre: qualifying clock (and the leader's lap when spectating) */
+#session-bar { top: var(--pad); padding: 0.35em 1.1em; font-size: 0.95em; font-weight: 800; letter-spacing: 0.08em; border-radius: 0.7em; }
+#lights { top: calc(var(--pad) + 2.8em); gap: 0.6em; padding: 0.6em 0.9em; border-radius: 0.9em; background: rgba(8, 8, 8, 0.8); }
+#lights .light { width: 1.9em; height: 1.9em; }
+
+/* Top right: timing tower, narrower */
+#leaderboard { top: var(--pad); right: var(--pad); width: 16em; border-radius: 0.7em; }
+#tt-head { padding: 0.3em 0.8em; font-size: 0.8em; letter-spacing: 0.15em; background: linear-gradient(90deg, #e10600, #a80500); }
+#tt-mode { font-size: 0.8em; }
+#leaderboard-list { font-size: 0.8em; padding: 0.2em 0; }
+#leaderboard-list li { height: 1.75em; padding: 0 0.8em 0 0.5em; gap: 0.5em; }
+.tt-gap { min-width: 5em; }
+
+/* Bottom right: lap times, then the dash cluster */
+#hud-bottom { bottom: var(--pad); right: var(--pad); display: flex; flex-direction: column; align-items: flex-end; gap: 0.5em; }
+#lap-times { width: 15em; margin: 0; padding: 0.45em 0.8em 0.55em; font-size: 0.9em; }
+.lt-row { line-height: 1.3; gap: 0.6em; }
+.lt-label { font-size: 0.72em; min-width: 2.6em; letter-spacing: 0.12em; }
+.lt-now #lt-current { font-size: 1.35em; }
+#sector-panel { margin-top: 0.4em; gap: 0.35em; }
+.sec { font-size: 0.78em; }
+.sec i { height: 0.35em; }
+
+#cluster { padding: 0.5em 0.7em 0.55em; min-width: 15em; }
+#cluster #rev-lights { display: flex; justify-content: space-between; gap: 0.2em; padding: 0 0 0.45em; background: none; }
+#cluster #rev-lights i { width: 0.62em; height: 0.62em; }
+.cl-main { display: flex; align-items: center; gap: 0.8em; }
+#cluster #hud-gear { font: 900 2.6em/1 inherit; min-width: 0.9em; text-align: center; color: #fff; text-shadow: none; }
+.cl-speed { flex: 1; display: flex; align-items: baseline; justify-content: flex-end; gap: 0.3em; font-variant-numeric: tabular-nums; }
+.cl-speed #hud-speed { font-size: 2.4em; font-weight: 900; line-height: 1; color: #fff; font-style: italic; }
+.cl-speed small { font-size: 0.7em; font-weight: 800; letter-spacing: 0.12em; color: #94a3b8; }
+#cluster #drs-badge { margin: 0; font-size: 0.85em; letter-spacing: 0.15em; padding: 0.35em 0.6em; border-width: 2px; border-radius: 0.4em; }
+#cluster #drs-hint { margin: 0.35em 0 0; font-size: 0.7em; text-align: right; color: #cbd5e1; text-shadow: none; }
+
+/* Messages in the middle stay small and high, clear of the car */
+#pit-limiter { bottom: auto; top: calc(var(--pad) + 6.5em); font-size: 0.9em; padding: 0.35em 0.9em; border-radius: 0.4em; }
+#race-msg { font-size: 0.95em; padding: 0.45em 1em; }
+#sector-flash { top: 26%; font-size: 1.6em; }
+#fl-card { left: var(--pad); bottom: var(--pad); min-width: 17em; font-size: 0.9em; }
+
+/* Narrow or short windows: drop the least needed */
+@media (max-height: 560px), (max-width: 760px) {
+    #sector-panel .sec-best, .lt-fl { display: none; }
+    #minimap { width: 8.5em; height: 8.5em; }
+}
+
+/* ===================== HUD v3: map top right, timing tower top left, one dash card ===================== */
+#minimap { top: var(--pad); left: auto; right: var(--pad); width: 12em; height: 12em; }
+#leaderboard { top: calc(var(--pad) + 3.4em); left: var(--pad); right: auto; width: 15em; }
+
+/* The dash card: everything about your car in one place, bottom right */
+#hud-bottom { gap: 0; }
+#cluster { width: 17em; min-width: 0; padding: 0.55em 0.8em 0.6em; }
+#cluster #rev-lights { padding: 0 0.1em 0.5em; }
+.cl-main { gap: 0.6em; align-items: stretch; }
+.cl-gear { display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 2.6em; padding: 0.1em 0.35em 0.15em;
+    background: rgba(255, 255, 255, 0.06); border-radius: 0.45em; }
+.cl-gear small, .cl-speed small { font-size: 0.62em; font-weight: 800; letter-spacing: 0.14em; color: #94a3b8; }
+#cluster #hud-gear { font: 900 2.3em/1 inherit; color: #fff; min-width: 0; }
+.cl-speed { flex-direction: column; align-items: flex-end; justify-content: center; gap: 0; }
+.cl-speed #hud-speed { font-size: 2.5em; }
+.cl-drs { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.25em; min-width: 4.2em; }
+#cluster #drs-badge { font-size: 0.8em; }
+#cluster #drs-hint { margin: 0; font-size: 0.55em; text-align: center; letter-spacing: 0.06em; line-height: 1.2; max-width: 9em; }
+
+/* lap times, inside the card under a hairline */
+#cluster #lap-times { width: auto; margin: 0.55em 0 0; padding: 0.5em 0 0; background: none; border: 0; border-top: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 0; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; font-size: 0.85em; }
+.lt-now { justify-content: space-between; }
+.lt-now #lt-current { font-size: 1.45em; }
+.lt-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 0.2em 1em; margin-top: 0.15em; }
+.lt-pair .lt-row { gap: 0.4em; }
+.lt-pair .lt-label { min-width: 0; }
+#lt-delta { font-size: 0.75em; margin-left: 0.2em; }
+#cluster .lt-fl { margin-top: 0.35em; font-size: 0.9em; }
+
+@media (max-height: 560px), (max-width: 760px) {
+    #minimap { width: 8.5em; height: 8.5em; }
+    #leaderboard { width: 13em; }
+}

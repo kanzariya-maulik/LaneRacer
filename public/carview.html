@@ -1,0 +1,41 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Car viewer</title>
+<style>html, body { margin: 0; background: #d9dde2; overflow: hidden; } canvas { display: block; }</style>
+<script type="importmap">
+    { "imports": { "three": "/vendor/three/build/three.module.js", "three/addons/": "/vendor/three/examples/jsm/" } }
+</script>
+</head>
+<body>
+<!-- Dev tool: the car alone. ?team=ferrari&view=side|front|back|top|three&detail=high -->
+<script type="module">
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { buildCar, liveryTexture } from './js/carModel.js';
+const q = new URLSearchParams(location.search), team = q.get('team') || 'redbull', view = q.get('view') || 'three', detail = q.get('detail') || 'high';
+const thumb = view === 'thumb'; // lobby thumbnail: transparent, side on, nose right
+if (thumb) document.documentElement.style.background = document.body.style.background = 'transparent';
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: thumb });
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = thumb ? null : new THREE.Color(0xd9dde2);
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+scene.add(new THREE.HemisphereLight(0xffffff, 0x777777, 1.2));
+const sun = new THREE.DirectionalLight(0xffffff, 2.2); sun.position.set(3, 6, 4); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); sun.shadow.normalBias = 0.02; sun.shadow.bias = -0.0004; Object.assign(sun.shadow.camera, { left: -4, right: 4, top: 4, bottom: -4 }); scene.add(sun);
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(30, 30), new THREE.MeshStandardMaterial({ color: 0xc8ccd2 })); floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; if (!thumb) scene.add(floor);
+const car = buildCar(detail), tex = liveryTexture(team, 8);
+car.traverse((o) => { if (o.isMesh) { o.castShadow = true; if (o.material.name === 'livery') { o.material.map = q.get('plain') ? null : tex; if (q.get('plain')) o.material.color.set(0x8f969e); o.material.envMapIntensity = 0.3; } } });
+if (q.get('normals')) car.traverse((o) => { if (o.isMesh) o.material = new THREE.MeshNormalMaterial(); });
+ if (q.get('noshadow')) renderer.shadowMap.enabled = false;
+scene.add(car);
+const V = { side: [[0, 0.6, -7.5], [0, 0.45, 0]], front: [[7, 0.7, 0], [0, 0.45, 0]], back: [[-7, 1.1, 0], [0, 0.45, 0]], top: [[0, 9, 0.001], [0, 0, 0]], three: [[4.2, 2.2, -4.6], [0.2, 0.35, 0]], close: [[1.6, 1.5, -2.2], [0.3, 0.6, 0]], thumb: [[0.18, 0.45, 6.1], [0.18, 0.45, 0]] }[view];
+const cam = new THREE.PerspectiveCamera(view === 'top' ? 40 : thumb ? 22 : 35, innerWidth / innerHeight, 0.05, 100);
+cam.position.set(...V[0]); cam.lookAt(...V[1]);
+renderer.setAnimationLoop(() => renderer.render(scene, cam));
+</script>
+</body>
+</html>

@@ -40,6 +40,24 @@ export function heightAt(t, x, y, angle, hint) {
     return { h: t.z[i] + (t.z[j] - t.z[i]) * f, sx: (g * (b.x - a.x)) / len, sy: (g * (b.y - a.y)) / len, i };
 }
 
+// Height (m) of each point of a path beside the track (the pit lane): the road beside it, followed from point to point
+// like a car's road, so a stretch passing near another part of the track (Interlagos) keeps to its own road's height
+// Then smoothed along the lane (it has no steps of its own where the road beside it changes, Spielberg / Interlagos):
+// a median over ±2 points, a mean over ±6 (~30 m), the window shrinking at the ends so they still meet the track
+const PATH_MEDIAN = 2, PATH_MEAN = 6;
+export function pathHeights(t, path) {
+    let hint;
+    const raw = path.map((p, k) => {
+        const a = path[Math.max(0, k - 1)], b = path[Math.min(path.length - 1, k + 1)];
+        const r = heightAt(t, p.x, p.y, Math.atan2(b.y - a.y, b.x - a.x), hint);
+        hint = r.i;
+        return r.h;
+    });
+    const n = raw.length, win = (A, k, w) => A.slice(k - Math.min(w, k, n - 1 - k), k + Math.min(w, k, n - 1 - k) + 1);
+    const med = raw.map((_, k) => { const s = win(raw, k, PATH_MEDIAN).sort((x, y) => x - y); return s[s.length >> 1]; });
+    return med.map((_, k) => { const s = win(med, k, PATH_MEAN); return s.reduce((x, y) => x + y, 0) / s.length; });
+}
+
 // For the car physics: slope and vertical curvature felt along heading `angle` (grade < 0 = downhill ahead)
 export function slopeAt(t, x, y, angle, hint) {
     if (!t.grade) return { grade: 0, vcurv: 0 };

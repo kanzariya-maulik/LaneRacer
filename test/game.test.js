@@ -637,7 +637,8 @@ for (const id of Track.TRACK_IDS) {
         const cl = Track.pointAt(pit.path, pit.cum, pit.closeS, false);
         const c = Physics.nearestOnTrack(cl.x, cl.y, tr);
         const k = -pit.trackSide; // from the track toward the pit lane
-        for (const offM of [0.5, 0.9, 1.2, 1.5]) {
+        // where a car fits between the road edge and the barrier (not at Monaco: its wall stands right there instead)
+        for (const offM of [0.5, 0.9, 1.2, 1.5].filter((o) => o + 1.1 < tr.wallOffset / tr.scale)) {
             const s0 = tr.cum[c.i] - 60 * tr.scale;
             const q = Track.pointAt(tr.path, tr.cum, s0);
             const off = tr.width / 2 + offM * tr.scale;
