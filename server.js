@@ -9,8 +9,16 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
+// Disable browser caching during active gameplay and development
+app.use((req, res, next) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  next();
+});
+
 // Serve static files from the public directory
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public'), { etag: false, maxAge: 0 }));
 // Three.js served locally so LAN play works without internet
 app.use('/vendor/three', express.static(path.join(__dirname, 'node_modules', 'three')));
 

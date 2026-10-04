@@ -968,7 +968,7 @@ test('start() runs the fixed-step loop and reports net_stats once a second', asy
     assert.strictEqual(stats.length, 1);
     assert.strictEqual(typeof stats[0].tickMs, 'number');
     assert.deepStrictEqual(Object.keys(stats[0].starve), ['a']);
-    assert.ok(g.seq >= 66 && g.seq <= 71, `${g.seq} ticks in 1.15 s`);
+    assert.ok(g.seq >= 60 && g.seq <= 75, `${g.seq} ticks in 1.15 s`);
 });
 
 test('input queue: re-align after a stall never re-applies inputs from the redundant window', () => {

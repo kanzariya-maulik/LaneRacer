@@ -1262,9 +1262,15 @@ body {
 #minimap {
     position: absolute;
     top: 92px; left: 24px;
-    background: rgba(15, 23, 42, 0.6);
-    border: 3px solid #fff;
-    border-radius: 16px;
+    background: rgba(10, 16, 30, 0.78);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 2.5px solid rgba(255, 255, 255, 0.85);
+    border-radius: 14px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.55), inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+    pointer-events: none;
+    z-index: 10;
+    transition: width 0.25s ease, height 0.25s ease;
 }
 
 /* 3D spectators need to see the race: banner instead of full-screen dim */

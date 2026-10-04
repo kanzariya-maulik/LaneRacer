@@ -170,6 +170,14 @@
                             </div>
 
                             <div class="setting-item">
+                                <label for="setting-time-of-day">Time of Day / Atmosphere</label>
+                                <select id="setting-time-of-day" class="custom-select">
+                                    <option value="day" selected>☀️ Day (Clear Sun)</option>
+                                    <option value="night">🌙 Night (Starry Sky & Moon)</option>
+                                </select>
+                            </div>
+
+                            <div class="setting-item">
                                 <label for="setting-track">Track</label>
                                 <select id="setting-track" class="custom-select">
                                     <optgroup label="🏎️ Grand Prix Circuits">
@@ -194,9 +202,9 @@
                             <div class="setting-item">
                                 <label for="setting-quali">Qualifying</label>
                                 <select id="setting-quali" class="custom-select">
-                                    <option value="2" selected>On (out-lap + 2 laps)</option>
+                                    <option value="0" selected>Off</option>
                                     <option value="1">On (out-lap + 1 lap)</option>
-                                    <option value="0">Off</option>
+                                    <option value="2">On (out-lap + 2 laps)</option>
                                 </select>
                             </div>
 
@@ -416,9 +424,9 @@
         { "imports": { "three": "/vendor/three/build/three.module.js", "three/addons/": "/vendor/three/examples/jsm/" } }
     </script>
     <script src="/socket.io/socket.io.js"></script>
-    <script src="js/socket.js"></script>
-    <script src="js/app.js"></script>
-    <script type="module" src="js/showroom3d.js"></script>
-    <script type="module" src="js/game3d.js"></script>
+    <script src="js/socket.js?v=night6"></script>
+    <script src="js/app.js?v=night6"></script>
+    <script type="module" src="js/showroom3d.js?v=night6"></script>
+    <script type="module" src="js/game3d.js?v=night6"></script>
 </body>
 </html>

@@ -6,7 +6,7 @@ let clientState = {
     players: {},
     hostId: null,
     status: 'LOBBY',
-    settings: { trackId: 'monza', maxLaps: 3, qualifying: true },
+    settings: { trackId: 'monza', maxLaps: 3, qualifying: false },
     sessionBest: [null, null, null], // fastest valid sector times this session
     sessionBestIds: [null, null, null], // who set each (purple sector)
     fastestLap: null,                // { id, time, lap }: the session's purple lap
@@ -263,6 +263,8 @@ socket.on('game_init', (data) => {
     if (data.session) clientState.session = { phase: data.session.phase, endsAt: Date.now() + data.session.endsInMs };
     clientState.mySectors = [null, null, null];
     clientState.myBestSectors = [null, null, null];
+    if (data.settings) clientState.settings = data.settings;
+    if (data.isDriftMode !== undefined) clientState.isDriftMode = data.isDriftMode;
     if (window.initGameVisuals) window.initGameVisuals();
 });
 

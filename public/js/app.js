@@ -220,6 +220,7 @@ const setQuali = document.getElementById('setting-quali');
 const setCollisions = document.getElementById('setting-collisions');
 const setBot = document.getElementById('setting-bot');
 const setMode = document.getElementById('setting-mode');
+const setTimeOfDay = document.getElementById('setting-time-of-day');
 
 try {
     const savedHostSettings = JSON.parse(localStorage.getItem('lanrace.hostSettings'));
@@ -232,6 +233,7 @@ try {
         if (savedHostSettings.collisions !== undefined && setCollisions) setCollisions.value = savedHostSettings.collisions ? '1' : '0';
         if (savedHostSettings.botCar !== undefined && setBot) setBot.value = savedHostSettings.botCar ? '1' : '0';
         if (savedHostSettings.mode && setMode) setMode.value = savedHostSettings.mode;
+        if (savedHostSettings.timeOfDay && setTimeOfDay) setTimeOfDay.value = savedHostSettings.timeOfDay;
     }
 } catch (e) {}
 
@@ -735,7 +737,8 @@ function emitSettings() {
         qualiLaps: qualiVal > 0 ? qualiVal : 0,
         collisions: setCollisions.value === '1',
         botCar: setBot ? setBot.value === '1' : false,
-        mode: setMode ? setMode.value : 'f1'
+        mode: setMode ? setMode.value : 'f1',
+        timeOfDay: setTimeOfDay ? setTimeOfDay.value : 'day'
     };
     try {
         localStorage.setItem('lanrace.hostSettings', JSON.stringify(settings));
@@ -747,6 +750,7 @@ setLaps.addEventListener('change', emitSettings);
 setQuali.addEventListener('change', emitSettings);
 setCollisions.addEventListener('change', emitSettings);
 setBot?.addEventListener('change', emitSettings);
+setTimeOfDay?.addEventListener('change', emitSettings);
 setMode?.addEventListener('change', () => {
     const driftTracks = ['ebisu', 'longbeach'];
     const f1Tracks = ['monza', 'spa', 'silverstone', 'suzuka', 'sakhir'];
@@ -842,6 +846,7 @@ window.updateLobbyUI = () => {
         if (setCollisions) setCollisions.disabled = false;
         if (setBot) setBot.disabled = false;
         if (setMode) setMode.disabled = false;
+        if (setTimeOfDay) setTimeOfDay.disabled = false;
 
         btnReady.classList.add('hidden');
         if (isJoined) btnStart.classList.remove('hidden');
@@ -869,6 +874,7 @@ window.updateLobbyUI = () => {
         if (setCollisions) setCollisions.disabled = true;
         if (setBot) setBot.disabled = true;
         if (setMode) setMode.disabled = true;
+        if (setTimeOfDay) setTimeOfDay.disabled = true;
 
         btnStart.classList.add('hidden');
         if (isJoined) btnReady.classList.remove('hidden');
@@ -914,6 +920,7 @@ window.updateSettingsUI = () => {
     setQuali.value = clientState.settings.qualifying ? String(clientState.settings.qualiLaps || 2) : '0';
     setCollisions.value = clientState.settings.collisions === false ? '0' : '1';
     if (setBot) setBot.value = clientState.settings.botCar ? '1' : '0';
+    if (setTimeOfDay && clientState.settings.timeOfDay) setTimeOfDay.value = clientState.settings.timeOfDay;
 };
 
 window.appendChat = (username, color, msg) => {

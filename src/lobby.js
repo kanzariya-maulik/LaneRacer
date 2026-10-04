@@ -17,6 +17,7 @@ const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
 
 const VALID_MODES = ['f1', 'formula-d'];
 const VALID_CLASSES = ['tuner', 'nascar', 'gt3', 'all'];
+const VALID_TIME_OF_DAY = ['day', 'night'];
 
 function sanitizeSettings(current, incoming, trackIds) {
     if (!incoming || typeof incoming !== 'object') return current;
@@ -30,6 +31,9 @@ function sanitizeSettings(current, incoming, trackIds) {
     if (typeof incoming.botCar === 'boolean') next.botCar = incoming.botCar;
     if (typeof incoming.mode === 'string' && VALID_MODES.includes(incoming.mode.toLowerCase())) {
         next.mode = incoming.mode.toLowerCase();
+    }
+    if (typeof incoming.timeOfDay === 'string' && VALID_TIME_OF_DAY.includes(incoming.timeOfDay.toLowerCase())) {
+        next.timeOfDay = incoming.timeOfDay.toLowerCase();
     }
     if (typeof incoming.vehicleClass === 'string' && VALID_CLASSES.includes(incoming.vehicleClass.toLowerCase())) {
         next.vehicleClass = incoming.vehicleClass.toLowerCase();
