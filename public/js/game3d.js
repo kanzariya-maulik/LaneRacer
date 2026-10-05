@@ -238,49 +238,100 @@ function pollInput(dt) {
     while (simAcc >= STEP_S) { simStep(); simAcc -= STEP_S; }
 }
 
-// Virtual joystick for touch devices
+// Virtual joystick and touch pedals for mobile touch devices
 const joyZone = document.getElementById('joystick-zone');
 const joyBase = document.getElementById('joystick-base');
 const joyKnob = document.getElementById('joystick-knob');
+const pedalsZone = document.getElementById('touch-pedals-zone');
+const btnTouchGas = document.getElementById('touch-gas');
+const btnTouchBrake = document.getElementById('touch-brake');
+const btnTouchDrs = document.getElementById('touch-drs');
+
 let isTouching = false;
+let touchGasPressed = false;
+let touchBrakePressed = false;
+let touchDrsPressed = false;
 const joyCenter = { x: 0, y: 0 };
 const JOY_MAX = 50;
+let joySteer = 0, joyThrottle = 0, joyBrake = 0;
 
-if ('ontouchstart' in window) joyZone.style.display = 'block';
+const isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0) || (window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+if (isTouchDevice) {
+    if (joyZone) joyZone.style.display = 'block';
+    if (pedalsZone) pedalsZone.style.display = 'flex';
+}
 
-joyBase.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    const rect = joyBase.getBoundingClientRect();
-    joyCenter.x = rect.left + rect.width / 2;
-    joyCenter.y = rect.top + rect.height / 2;
-    isTouching = true;
-    updateJoystick(e.touches[0]);
-}, { passive: false });
+function computeTouchInput() {
+    if (!isTouching && !touchGasPressed && !touchBrakePressed && !touchDrsPressed) {
+        touchInput = null;
+        return;
+    }
+    const steer = isTouching ? joySteer : 0;
+    const throttle = touchGasPressed ? 1.0 : (isTouching && !touchBrakePressed ? joyThrottle : 0);
+    const brake = touchBrakePressed ? 1.0 : (isTouching && !touchGasPressed ? joyBrake : 0);
+    touchInput = {
+        steer,
+        throttle,
+        brake,
+        drs: touchDrsPressed,
+        handbrake: false,
+        explicitReverse: touchBrakePressed || (isTouching && joyBrake > 0.5)
+    };
+}
 
-joyBase.addEventListener('touchmove', (e) => {
-    e.preventDefault();
-    if (isTouching) updateJoystick(e.touches[0]);
-}, { passive: false });
+if (joyBase) {
+    joyBase.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        const rect = joyBase.getBoundingClientRect();
+        joyCenter.x = rect.left + rect.width / 2;
+        joyCenter.y = rect.top + rect.height / 2;
+        isTouching = true;
+        updateJoystick(e.touches[0]);
+    }, { passive: false });
 
-joyBase.addEventListener('touchend', (e) => {
-    e.preventDefault();
-    isTouching = false;
-    joyKnob.style.transform = 'translate(-50%, -50%)';
-    touchInput = null;
-}, { passive: false });
+    joyBase.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        if (isTouching) updateJoystick(e.touches[0]);
+    }, { passive: false });
+
+    const onJoyEnd = (e) => {
+        e.preventDefault();
+        isTouching = false;
+        joySteer = 0; joyThrottle = 0; joyBrake = 0;
+        if (joyKnob) joyKnob.style.transform = 'translate(-50%, -50%)';
+        computeTouchInput();
+    };
+    joyBase.addEventListener('touchend', onJoyEnd, { passive: false });
+    joyBase.addEventListener('touchcancel', onJoyEnd, { passive: false });
+}
 
 function updateJoystick(touch) {
     let dx = touch.clientX - joyCenter.x;
     let dy = touch.clientY - joyCenter.y;
     const dist = Math.hypot(dx, dy);
     if (dist > JOY_MAX) { dx = (dx / dist) * JOY_MAX; dy = (dy / dist) * JOY_MAX; }
-    joyKnob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
-    touchInput = {
-        steer: dx / JOY_MAX,
-        throttle: Math.max(0, -dy / JOY_MAX),
-        brake: Math.max(0, dy / JOY_MAX),
-    };
+    if (joyKnob) joyKnob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+    joySteer = dx / JOY_MAX;
+    joyThrottle = Math.max(0, -dy / JOY_MAX);
+    joyBrake = Math.max(0, dy / JOY_MAX);
+    computeTouchInput();
 }
+
+function bindPedal(btn, onStateChange) {
+    if (!btn) return;
+    const activate = (e) => { e.preventDefault(); e.stopPropagation(); onStateChange(true); btn.classList.add('active'); computeTouchInput(); };
+    const deactivate = (e) => { e.preventDefault(); e.stopPropagation(); onStateChange(false); btn.classList.remove('active'); computeTouchInput(); };
+    btn.addEventListener('touchstart', activate, { passive: false });
+    btn.addEventListener('touchend', deactivate, { passive: false });
+    btn.addEventListener('touchcancel', deactivate, { passive: false });
+    btn.addEventListener('mousedown', activate);
+    btn.addEventListener('mouseup', deactivate);
+    btn.addEventListener('mouseleave', deactivate);
+}
+
+bindPedal(btnTouchGas, (v) => { touchGasPressed = v; });
+bindPedal(btnTouchBrake, (v) => { touchBrakePressed = v; });
+bindPedal(btnTouchDrs, (v) => { touchDrsPressed = v; });
 
 // ---------- track geometry ----------
 let world = null;
@@ -2030,6 +2081,11 @@ function updateHUD(withTower = true) {
         hint = drsHint({ mode: clientState.status === 'QUALIFYING' ? 'quali' : 'race', inPit: me.inPit, drs: me.drs, drsAvailable: me.drsAvailable, lap: me.lap, inZone: condZone });
     }
     $('drs-hint').textContent = hint;
+    if (btnTouchDrs) {
+        const canDrs = !!(racing && (me.drsAvailable || me.drs));
+        btnTouchDrs.classList.toggle('hidden', !canDrs);
+        btnTouchDrs.classList.toggle('active', !!(racing && me.drs));
+    }
 
     const isDriftMode = clientState.settings?.mode === 'formula-d';
 
@@ -2322,6 +2378,7 @@ function frame(now) {
         fpsSince = now;
     } else if (now - fpsSince >= 1000) {
         const fps = (fpsFrames * 1000) / (now - fpsSince);
+        window.lanraceFps = fps;
         const next = adaptStep(res, fps);
         if (next.ratio !== res.ratio) renderer.setPixelRatio(next.ratio);
         res = next;

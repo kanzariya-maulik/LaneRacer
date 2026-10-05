@@ -233,6 +233,10 @@ class Game {
             for (const id in this.players) { starve[id] = this.players[id].starve; this.players[id].starve = 0; }
             this.io.emit('net_stats', { tickMs: +this.tickMs.toFixed(2), starve });
         }
+        if (this.seq % (TICK_RATE * 10) === 0) {
+            const active = Object.values(this.players).filter(p => !p.finished);
+            Logger.latency(`[SERVER_TICK] Seq: ${this.seq} | SessionTime: ${this.time.toFixed(1)}s | AvgTickCost: ${this.tickMs ? this.tickMs.toFixed(2) : 0}ms | ActiveCars: ${active.length}`);
+        }
     }
 
     // DRS: race — within 1 s of the car ahead at a zone's detection point, from lap 2; quali — free in the zones.
@@ -275,8 +279,9 @@ class Game {
         }
     }
 
-    // Moved off the grid slot before lights out: +5 s, once
+    // Moved off the grid slot before lights out: +10 s, once
     checkJumpStart(p) {
+        if (this.settings.jumpStart === false) return;
         if (p.input.throttle > 0) p.throttledEarly = true; // only the driver's own throttle counts, not a shunt from behind
         if (p.jumpStart || !p.throttledEarly || Math.hypot(p.x - p.gridX, p.y - p.gridY) <= JUMP_MOVE_M * this.track.scale) return;
         p.jumpStart = true;
@@ -422,7 +427,8 @@ class Game {
         }
 
         // A parked or disconnected-in-spirit car can't hold everyone on track forever
-        if (this.mode === 'race' && this.firstFinishAt !== undefined && this.time - this.firstFinishAt > FINISH_WINDOW_S) {
+        const finishWindow = this.settings.finishWindowS || FINISH_WINDOW_S;
+        if (this.mode === 'race' && this.firstFinishAt !== undefined && this.time - this.firstFinishAt > finishWindow) {
             for (const id of ids) {
                 const p = this.players[id];
                 if (!p.finished) Object.assign(p, { finished: true, dnf: true, finishTime: null, vx: 0, vy: 0, speed: 0 });
@@ -478,6 +484,7 @@ class Game {
 
     // All four wheels past the white line, once per excursion; pit lane, quali out-lap exempt
     checkLimits(p, near) {
+        if (this.settings.trackLimits === false) return;
         const t = this.track;
         if (near.dist <= t.width / 2) { p.offLimits = false; return; }
         if (this.frozen) return; // lights still on: jump starts are judged separately
@@ -516,6 +523,7 @@ class Game {
             };
         });
         list.forEach((p, i) => { p.finishOrder = i + 1; });
+        Logger.latency(`[RACE_CLASSIFICATION] Results:\n` + rows.map(r => `  P${r.position}: ${this.players[r.id]?.username || r.id} (${r.id}) - Total: ${r.total !== null ? r.total.toFixed(3) + 's' : 'DNF'} (Lap: ${r.laps}, Penalty: +${r.penalty}s)`).join('\n'));
         this.io.emit('race_results', { rows, fastestLapId: this.fastestLap?.id ?? null });
     }
 
@@ -539,6 +547,7 @@ class Game {
             this.io.emit('fastest_lap', this.fastestLap); // everyone's screen shows the purple fastest-lap graphic
         }
         p.lapStart = this.time;
+        Logger.latency(`[LAP_TIME] Car: ${p.username} (${p.id}) | Lap: ${p.lap} | Time: ${lapTime.toFixed(3)}s | Best: ${p.bestLap !== null ? p.bestLap.toFixed(3) + 's' : '-'} | Valid: ${p.lapValid}`);
         this.io.emit('timing', { id: p.id, lap: p.lap, lapTime, bestLap: p.bestLap, valid: p.lapValid,
             sessionBest: this.bestSectors, bestSectorIds: this.bestSectorIds, fastestLap: this.fastestLap });
         this.newLap(p);
@@ -558,6 +567,7 @@ class Game {
         const sessionBest = p.lapValid && (this.bestSectors[i] === null || time < this.bestSectors[i]);
         p.sectors[i] = time;
         p.sectorStart = this.time;
+        Logger.latency(`[SECTOR] Car: ${p.username} (${p.id}) | Lap: ${p.lap + 1} | S${n}: ${time.toFixed(3)}s | Valid: ${p.lapValid}`);
         this.io.emit('sector', { id: p.id, lap: p.lap + 1, sector: n, time, valid: p.lapValid, personalBest, sessionBest });
     }
 

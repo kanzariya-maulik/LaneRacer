@@ -41,6 +41,16 @@ function sanitizeSettings(current, incoming, trackIds) {
     if (typeof incoming.driftSubMode === 'string') {
         next.driftSubMode = incoming.driftSubMode;
     }
+    if (typeof incoming.trackLimits === 'boolean') {
+        next.trackLimits = incoming.trackLimits;
+    } else if (incoming.trackLimits !== undefined && (incoming.trackLimits === '0' || incoming.trackLimits === '1' || incoming.trackLimits === 0 || incoming.trackLimits === 1)) {
+        next.trackLimits = incoming.trackLimits === '1' || incoming.trackLimits === 1;
+    }
+    if (typeof incoming.jumpStart === 'boolean') {
+        next.jumpStart = incoming.jumpStart;
+    } else if (incoming.jumpStart !== undefined && (incoming.jumpStart === '0' || incoming.jumpStart === '1' || incoming.jumpStart === 0 || incoming.jumpStart === 1)) {
+        next.jumpStart = incoming.jumpStart === '1' || incoming.jumpStart === 1;
+    }
     return next;
 }
 

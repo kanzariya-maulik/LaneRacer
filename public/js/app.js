@@ -221,6 +221,8 @@ const setCollisions = document.getElementById('setting-collisions');
 const setBot = document.getElementById('setting-bot');
 const setMode = document.getElementById('setting-mode');
 const setTimeOfDay = document.getElementById('setting-time-of-day');
+const setTrackLimits = document.getElementById('setting-track-limits');
+const setJumpStart = document.getElementById('setting-jump-start');
 
 try {
     const savedHostSettings = JSON.parse(localStorage.getItem('lanrace.hostSettings'));
@@ -234,6 +236,8 @@ try {
         if (savedHostSettings.botCar !== undefined && setBot) setBot.value = savedHostSettings.botCar ? '1' : '0';
         if (savedHostSettings.mode && setMode) setMode.value = savedHostSettings.mode;
         if (savedHostSettings.timeOfDay && setTimeOfDay) setTimeOfDay.value = savedHostSettings.timeOfDay;
+        if (savedHostSettings.trackLimits !== undefined && setTrackLimits) setTrackLimits.value = savedHostSettings.trackLimits ? '1' : '0';
+        if (savedHostSettings.jumpStart !== undefined && setJumpStart) setJumpStart.value = savedHostSettings.jumpStart ? '1' : '0';
     }
 } catch (e) {}
 
@@ -738,7 +742,9 @@ function emitSettings() {
         collisions: setCollisions.value === '1',
         botCar: setBot ? setBot.value === '1' : false,
         mode: setMode ? setMode.value : 'f1',
-        timeOfDay: setTimeOfDay ? setTimeOfDay.value : 'day'
+        timeOfDay: setTimeOfDay ? setTimeOfDay.value : 'day',
+        trackLimits: setTrackLimits ? setTrackLimits.value === '1' : true,
+        jumpStart: setJumpStart ? setJumpStart.value === '1' : true
     };
     try {
         localStorage.setItem('lanrace.hostSettings', JSON.stringify(settings));
@@ -751,6 +757,8 @@ setQuali.addEventListener('change', emitSettings);
 setCollisions.addEventListener('change', emitSettings);
 setBot?.addEventListener('change', emitSettings);
 setTimeOfDay?.addEventListener('change', emitSettings);
+setTrackLimits?.addEventListener('change', emitSettings);
+setJumpStart?.addEventListener('change', emitSettings);
 setMode?.addEventListener('change', () => {
     const driftTracks = ['ebisu', 'longbeach'];
     const f1Tracks = ['monza', 'spa', 'silverstone', 'suzuka', 'sakhir'];
@@ -847,6 +855,8 @@ window.updateLobbyUI = () => {
         if (setBot) setBot.disabled = false;
         if (setMode) setMode.disabled = false;
         if (setTimeOfDay) setTimeOfDay.disabled = false;
+        if (setTrackLimits) setTrackLimits.disabled = false;
+        if (setJumpStart) setJumpStart.disabled = false;
 
         btnReady.classList.add('hidden');
         if (isJoined) btnStart.classList.remove('hidden');
@@ -875,6 +885,8 @@ window.updateLobbyUI = () => {
         if (setBot) setBot.disabled = true;
         if (setMode) setMode.disabled = true;
         if (setTimeOfDay) setTimeOfDay.disabled = true;
+        if (setTrackLimits) setTrackLimits.disabled = true;
+        if (setJumpStart) setJumpStart.disabled = true;
 
         btnStart.classList.add('hidden');
         if (isJoined) btnReady.classList.remove('hidden');
@@ -921,6 +933,8 @@ window.updateSettingsUI = () => {
     setCollisions.value = clientState.settings.collisions === false ? '0' : '1';
     if (setBot) setBot.value = clientState.settings.botCar ? '1' : '0';
     if (setTimeOfDay && clientState.settings.timeOfDay) setTimeOfDay.value = clientState.settings.timeOfDay;
+    if (setTrackLimits) setTrackLimits.value = clientState.settings.trackLimits === false ? '0' : '1';
+    if (setJumpStart) setJumpStart.value = clientState.settings.jumpStart === false ? '0' : '1';
 };
 
 window.appendChat = (username, color, msg) => {

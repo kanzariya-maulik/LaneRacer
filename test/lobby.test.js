@@ -102,3 +102,16 @@ test('sanitizeAssist: full or off, anything else falls back to full', () => {
     assert.strictEqual(lobby.sanitizeAssist('full'), 'full');
     assert.strictEqual(lobby.sanitizeAssist('turbo'), 'full');
 });
+
+test('sanitizeSettings: trackLimits and jumpStart toggles (booleans or numeric strings/numbers)', () => {
+    assert.strictEqual(lobby.sanitizeSettings(DEFAULTS, { trackLimits: false }, TRACK_IDS).trackLimits, false);
+    assert.strictEqual(lobby.sanitizeSettings(DEFAULTS, { trackLimits: true }, TRACK_IDS).trackLimits, true);
+    assert.strictEqual(lobby.sanitizeSettings(DEFAULTS, { trackLimits: '0' }, TRACK_IDS).trackLimits, false);
+    assert.strictEqual(lobby.sanitizeSettings(DEFAULTS, { trackLimits: '1' }, TRACK_IDS).trackLimits, true);
+    assert.strictEqual(lobby.sanitizeSettings(DEFAULTS, { jumpStart: false }, TRACK_IDS).jumpStart, false);
+    assert.strictEqual(lobby.sanitizeSettings(DEFAULTS, { jumpStart: true }, TRACK_IDS).jumpStart, true);
+    assert.strictEqual(lobby.sanitizeSettings(DEFAULTS, { jumpStart: '0' }, TRACK_IDS).jumpStart, false);
+    assert.strictEqual(lobby.sanitizeSettings(DEFAULTS, { jumpStart: '1' }, TRACK_IDS).jumpStart, true);
+    assert.strictEqual(lobby.sanitizeSettings({ ...DEFAULTS, trackLimits: false }, { trackLimits: 'invalid' }, TRACK_IDS).trackLimits, false);
+    assert.strictEqual(lobby.sanitizeSettings({ ...DEFAULTS, jumpStart: false }, { jumpStart: 'invalid' }, TRACK_IDS).jumpStart, false);
+});

@@ -83,8 +83,14 @@ function setupWebRTC() {
                         // 60 Hz game state arriving over UDP
                         onFastPacket(msg.data);
                     } else if (msg.type === 'PONG') {
-                        clientState.net.rttMs = performance.now() - msg.clientTime;
-                        updatePingUI(clientState.net.rttMs, clientState.net.link);
+                        const rawRtt = performance.now() - msg.clientTime;
+                        if (rawRtt >= 0 && rawRtt < 1000) {
+                            clientState.net.rttMs = (clientState.net.rttMs === null || clientState.net.rttMs === undefined)
+                                ? rawRtt
+                                : clientState.net.rttMs * 0.25 + rawRtt * 0.75;
+                            clientState.net.link = 'UDP';
+                            updatePingUI(clientState.net.rttMs, clientState.net.link);
+                        }
                     }
                 } catch (e) {}
             };
@@ -233,21 +239,58 @@ function updatePingUI(rttMs, link = 'UDP') {
 }
 window.updatePingUI = updatePingUI;
 
-// Ping twice a second for responsive on-screen ping display and stats overlay: over UDP when it's live, else Socket.IO
+// Ping twice a second for responsive on-screen ping display and stats overlay: over UDP when open, else Socket.IO
 setInterval(() => {
     const t = performance.now();
-    if (udpReady && rtcDataChannel && rtcDataChannel.readyState === 'open' && t - lastUdpRx < 500) {
+    const isUdpAlive = udpReady && rtcDataChannel && rtcDataChannel.readyState === 'open';
+    const isUdpFresh = isUdpAlive && (t - lastUdpRx < 1500);
+
+    // Keepalive / probe over UDP if channel is open (even during lobby)
+    if (isUdpAlive) {
+        try {
+            rtcDataChannel.send(JSON.stringify({ type: 'PING', clientTime: t, binary: true }));
+        } catch (e) {}
+    }
+
+    if (isUdpFresh) {
         clientState.net.link = 'UDP';
-        try { rtcDataChannel.send(JSON.stringify({ type: 'PING', clientTime: t, binary: true })); } catch (e) { /* next loop */ }
     } else {
         clientState.net.link = 'TCP';
         socket.emit('net_ping', t, (back) => {
-            clientState.net.rttMs = performance.now() - back;
-            updatePingUI(clientState.net.rttMs, clientState.net.link);
+            const rawRtt = performance.now() - back;
+            if (rawRtt >= 0 && rawRtt < 1000) {
+                // If UDP is not responsive, display TCP ping
+                if (!isUdpFresh) {
+                    clientState.net.rttMs = (clientState.net.rttMs === null || clientState.net.rttMs === undefined)
+                        ? rawRtt
+                        : clientState.net.rttMs * 0.25 + rawRtt * 0.75;
+                    updatePingUI(clientState.net.rttMs, clientState.net.link);
+                }
+            }
         });
     }
 }, 500);
 socket.on('net_stats', (s) => { clientState.net.tickMs = s.tickMs; clientState.net.starve = s.starve || {}; });
+
+// Send periodic telemetry to server for logs/latency.log
+setInterval(() => {
+    if (!socket.connected) return;
+    const net = clientState.net;
+    const n = window.lanraceNet || {};
+    const fps = window.lanraceFps || 60;
+    socket.emit('latency_telemetry', {
+        rttMs: net.rttMs,
+        link: net.link,
+        jitterMs: n.jitterMs,
+        lossPct: n.lossPct,
+        delayMs: n.delayMs,
+        predErrCm: n.predErrCm,
+        fps: Math.round(fps),
+        screenWidth: window.innerWidth,
+        screenHeight: window.innerHeight,
+        isMobile: ('ontouchstart' in window) || (navigator.maxTouchPoints > 0)
+    });
+}, 2000);
 
 
 // Fast updates are queued; game3d.js drains them into its snapshot buffer every frame

@@ -12,7 +12,7 @@ const state = {
     status: 'LOBBY', // LOBBY, QUALIFYING, QUALI_RESULTS, COUNTDOWN, RACE, FINISHED
     players: {},
     hostId: null,
-    settings: { trackId: 'monza', maxLaps: 3, qualifying: false, collisions: true, mode: 'f1', timeOfDay: 'day', vehicleClass: 'tuner' }
+    settings: { trackId: 'monza', maxLaps: 3, qualifying: false, collisions: true, mode: 'f1', timeOfDay: 'day', vehicleClass: 'tuner', trackLimits: true, jumpStart: true }
 };
 
 let gameInstance = null;
@@ -54,7 +54,13 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
     net = transport;
     io.on('connection', (socket) => {
         const clientIp = socket.handshake?.address || socket.request?.socket?.remoteAddress;
-        console.log(`Player connected: ${socket.id} (${clientIp})`);
+        const userAgent = socket.handshake?.headers?.['user-agent'] || '';
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile/i.test(userAgent);
+        const deviceDesc = isMobile
+            ? (userAgent.includes('iPhone') ? 'iPhone' : userAgent.includes('Android') ? 'Android' : 'Mobile Phone')
+            : 'Desktop PC';
+        console.log(`Player connected: ${socket.id} (${clientIp}) [${deviceDesc}]`);
+        Logger.latency(`[CONNECT] Socket: ${socket.id} | IP: ${clientIp} | Device: ${deviceDesc}`);
 
         // Disable TCP Nagle algorithm on Socket.IO fallback connection to eliminate 10-40ms buffering latency
         try {
@@ -108,6 +114,7 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
             }
 
             Logger.player(socket.id, username, `Joined lobby (Host: ${state.hostId === socket.id}, Team: ${teamId})`);
+            Logger.latency(`[LOBBY_JOIN] Player: ${username} (${socket.id}) | Device: ${deviceDesc} | Team: ${teamId} | Host: ${state.hostId === socket.id}`);
 
             if (clientIp) ipProfileCache[clientIp] = { username, teamId, assist };
 
@@ -117,6 +124,18 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
 
             // Late joiner: give them the running session so the spectator view has something to draw
             if (gameInstance && state.status !== 'LOBBY') socket.emit('game_init', gameInstance.initPayload());
+        });
+
+        socket.on('latency_telemetry', (data) => {
+            if (!data) return;
+            const player = state.players[socket.id];
+            const username = player?.username || 'Guest';
+            const transportType = data.transport || (net.hasOpenChannel(socket.id) ? 'UDP-DataChannel' : 'Socket.IO-TCP');
+            Logger.latency(
+                `[TELEMETRY] Player: ${username} (${socket.id}) | Device: ${data.isMobile ? 'Mobile' : 'Desktop'} ` +
+                `| Transport: ${transportType} | Ping: ${data.rttMs ?? '?'}ms | Jitter: ${data.jitterMs ?? '?'}ms ` +
+                `| Loss: ${data.lossPercent ?? 0}% | Delay: ${data.targetDelayMs ?? '?'}ms | FPS: ${data.fps ?? '?'}`
+            );
         });
 
         socket.on('update_profile', (data) => {
@@ -284,6 +303,9 @@ function syncBotPlayer(io) {
             net.cleanup(socket.id);
             if (!state.players[socket.id]) return;
 
+            const leavingUser = state.players[socket.id].username;
+            Logger.latency(`[DISCONNECT] Socket: ${socket.id} | Player: ${leavingUser}`);
+
             delete state.players[socket.id];
             if (gameInstance) gameInstance.removePlayer(socket.id);
             io.emit('player_left', socket.id);
@@ -331,6 +353,7 @@ function startQuali(io, racers) {
 function startRace(io, grid) {
     setStatus(io, 'COUNTDOWN');
     Logger.game(`Session started: COUNTDOWN with ${grid.length} cars on track ${state.settings.trackId} (botCar: ${state.settings.botCar})`);
+    Logger.latency(`[RACE_START] Track: ${state.settings.trackId} | Racers: ${grid.map(p => `${p.username} (${p.id})`).join(', ')}`);
     const race = new Game(io, grid, TRACKS[state.settings.trackId], state.settings, () => finishRace(io), 'race', net);
     gameInstance = race;
     race.start(); // cars are drawn on the grid, frozen until lights out
@@ -342,6 +365,7 @@ function startRace(io, grid) {
         race.release();
         setStatus(io, 'RACE');
         Logger.game(`Lights out! RACE GREEN FLAG.`);
+        Logger.latency(`[RACE_GREEN_FLAG] Track: ${state.settings.trackId}`);
         io.emit('session', { phase: 'RACE', endsInMs: null });
     }, 5000 + 500 + Math.random() * 2000);
 }
@@ -350,6 +374,7 @@ function finishRace(io) {
     clearTimers(); // pending lights must not fire after the race is over
     setStatus(io, 'FINISHED');
     Logger.game('Race completed. Entering FINISHED status.');
+    Logger.latency(`[RACE_FINISH] Track: ${state.settings.trackId}`);
     later(() => {
         state.status = 'LOBBY';
         for (const id in state.players) {

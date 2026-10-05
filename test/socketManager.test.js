@@ -182,7 +182,8 @@ test('empty grid at lights out does not leave the server stuck in RACE', (t) => 
     t.mock.timers.reset();
 });
 
-test('assist is each player\'s own choice: picked at join, changed any time, applied to their car in a running session', () => {
+test('assist is each player\'s own choice: picked at join, changed any time, applied to their car in a running session', (t) => {
+    t.mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
     const io = fakeIo();
     setupSocketManager(io, noNet);
     const a = io.connect('a');
@@ -202,4 +203,5 @@ test('assist is each player\'s own choice: picked at join, changed any time, app
     assert.strictEqual(init.players.b.assist, 'full');
     a.fire('disconnect');
     b.fire('disconnect');
+    t.mock.timers.reset();
 });

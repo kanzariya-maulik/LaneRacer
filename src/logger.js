@@ -45,6 +45,9 @@ const Logger = {
     game(msg) {
         writeLog('game_events.log', msg);
     },
+    latency(msg) {
+        writeLog('latency.log', msg);
+    },
     all(tag, msg) {
         writeLog('activity.log', `[${tag}] ${msg}`);
     }

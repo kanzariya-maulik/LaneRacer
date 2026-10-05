@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>LAN Race</title>
     <link rel="stylesheet" href="css/style.css">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;900&display=swap" rel="stylesheet">
@@ -228,6 +228,22 @@
                                     <option value="1">On (1 AI Bot)</option>
                                 </select>
                             </div>
+
+                            <div class="setting-item">
+                                <label for="setting-track-limits">Track Limits Penalty</label>
+                                <select id="setting-track-limits" class="custom-select">
+                                    <option value="1" selected>On (Warnings & +5s)</option>
+                                    <option value="0">Off (No Penalties)</option>
+                                </select>
+                            </div>
+
+                            <div class="setting-item">
+                                <label for="setting-jump-start">Jump Start Penalty</label>
+                                <select id="setting-jump-start" class="custom-select">
+                                    <option value="1" selected>On (+10s for early move)</option>
+                                    <option value="0">Off (Free Movement)</option>
+                                </select>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -310,6 +326,19 @@
         <div id="joystick-zone">
             <div id="joystick-base">
                 <div id="joystick-knob"></div>
+            </div>
+        </div>
+
+        <!-- Mobile Touch Pedals (Right Side) -->
+        <div id="touch-pedals-zone">
+            <button type="button" id="touch-drs" class="touch-drs-btn hidden" title="DRS">DRS</button>
+            <div class="touch-pedals-group">
+                <button type="button" id="touch-brake" class="touch-pedal touch-brake" title="Brake / Reverse">
+                    <span>BRAKE</span>
+                </button>
+                <button type="button" id="touch-gas" class="touch-pedal touch-gas" title="Accelerate">
+                    <span>GAS</span>
+                </button>
             </div>
         </div>
 

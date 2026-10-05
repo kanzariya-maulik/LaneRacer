@@ -29,17 +29,23 @@ class Ticker {
     start() {
         this.next = this.now();
         this.running = true;
-        // Interval fallback for mock timers in tests:
-        this.timer = setInterval(() => this.poll(), 1);
-        // High-precision setImmediate loop: avoids 15.6ms Windows timer floor
-        const loop = () => {
-            if (!this.running) return;
-            this.poll();
-            if (this.running) {
-                this.immediate = setImmediate(loop);
-            }
-        };
-        this.immediate = setImmediate(loop);
+        const isMocked = Date.now.toString().includes('MockDate');
+        if (isMocked) {
+            this.timer = setInterval(() => this.poll(), 1);
+        } else {
+            // High-precision setImmediate loop: avoids 15.6ms Windows timer floor
+            const loop = () => {
+                if (!this.running) return;
+                this.poll();
+                if (this.running) {
+                    this.immediate = setImmediate(loop);
+                }
+            };
+            this.immediate = setImmediate(loop);
+            // Fallback unref'd interval so it never prevents clean process exit
+            this.timer = setInterval(() => this.poll(), 16);
+            if (typeof this.timer.unref === 'function') this.timer.unref();
+        }
     }
 
     stop() {
