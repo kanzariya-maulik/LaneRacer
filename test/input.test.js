@@ -22,6 +22,19 @@ test('releasing steer returns to centre within 0.1 s', () => {
     close(hold({}, 0.1, s).steer, 0);
 });
 
+test('lift off W: brakes by the share of braking the driver took off the assist', () => {
+    const fast = 40; // m/s
+    close(input.liftOffBrake(0, fast), 1, 1e-9);        // assist braking 0%: lifting off is full brake
+    close(input.liftOffBrake(0.7, fast), 0.3, 1e-9);    // 70%: the other 30% comes from lifting off
+    close(input.liftOffBrake(1, fast), 0, 1e-9);        // 100%: the assist brakes, lifting off just coasts
+    close(input.liftOffBrake(0, 0.5), 0, 1e-9);         // nearly stopped: no brake, or it would creep into reverse
+    let s = hold({ up: true }, 0.5);
+    for (let i = 0; i < 6; i++) s = input.keyboardStep(s, {}, DT, 0.3);
+    close(s.brake, 0.3);                                // W released: brake settles at the lift-off amount
+    close(input.keyboardStep(s, { up: true }, DT, 0.3).brake, 0, 1e-9);   // back on W: brake lets go at once
+    close(hold({ down: true }, 0.05).brake, 1);         // S is still full brake / reverse
+});
+
 test('throttle ramps in 0.2 s, brake in 0.05 s', () => {
     close(hold({ up: true }, 0.1).throttle, 0.5);
     close(hold({ up: true }, 0.2).throttle, 1);

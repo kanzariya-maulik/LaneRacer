@@ -7,13 +7,21 @@ export function approach(cur, target, rate, dt) {
     return Math.abs(target - cur) <= stepSize ? target : cur + Math.sign(target - cur) * stepSize;
 }
 
-// keys: { up, down, left, right, drs } booleans
-export function keyboardStep(prev, keys, dt) {
+export const LIFT_MIN_MS = 2; // m/s: below this lifting off doesn't brake (a held brake at a stop reverses)
+
+// Lift off W = brake, for the share of braking the driver took off the assist (brakeAssist 0–1).
+// At 100% the assist already brakes at the right time and amount, so lifting off just coasts.
+export function liftOffBrake(brakeAssist, speedMs) {
+    return speedMs > LIFT_MIN_MS ? Math.max(0, Math.min(1, 1 - brakeAssist)) : 0;
+}
+
+// keys: { up, down, left, right, drs } booleans; liftBrake: brake while neither W nor S is held (liftOffBrake)
+export function keyboardStep(prev, keys, dt, liftBrake = 0) {
     const steerTarget = (keys.right ? 1 : 0) - (keys.left ? 1 : 0);
     return {
         steer: approach(prev.steer, steerTarget, steerTarget === 0 ? RATES.steerOut : RATES.steerIn, dt),
         throttle: approach(prev.throttle, keys.up ? 1 : 0, RATES.throttle, dt),
-        brake: approach(prev.brake, keys.down ? 1 : 0, RATES.brake, dt),
+        brake: approach(prev.brake, keys.down ? 1 : keys.up ? 0 : liftBrake, RATES.brake, dt),
         drs: !!keys.drs,
     };
 }

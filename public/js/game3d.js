@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { buildCar, liveryTexture as carLivery, WHEEL_RADIUS } from './carModel.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { keyboardStep, gamepadInput } from './input.js';
+import { keyboardStep, gamepadInput, liftOffBrake } from './input.js';
+import { parseAssist } from './sim/carphysics.js';
 import { LEVELS, ratioRange, resolveLevel, autoPick, adaptStep, snapLight, frameCapped } from './quality.js';
 import { placeScenery, seedOf, vergeReach, terrainHeights, terrainGround, skirtDepth, gridSampler, carveReach, SKIRT_M } from './scenery.js';
 import { heightAt, pathHeights } from './sim/elevation.js';
@@ -216,7 +217,8 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) relea
 function simStep(sample = true) {
     if (sample) {
         const pad = gamepadInput((navigator.getGamepads ? [...navigator.getGamepads()] : []).find(Boolean));
-        input = pad || touchInput || keyboardStep(input, keys, STEP_S);
+        const car = predictor?.car, lift = car ? liftOffBrake(parseAssist(predictor.assist).brake, (car.speed || 0) / predictor.track.scale) : 0;
+        input = pad || touchInput || keyboardStep(input, keys, STEP_S, lift);
     }
     const stamped = { seq: ++inputSeq, steer: input.steer, throttle: input.throttle, brake: input.brake, drs: !!input.drs };
     if (predictor && predictor.car) predictor.step(stamped);
