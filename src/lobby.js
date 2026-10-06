@@ -22,6 +22,9 @@ function sanitizeSettings(current, incoming, trackIds) {
     if (Number.isFinite(incoming.maxLaps)) next.maxLaps = clamp(Math.round(incoming.maxLaps), 1, 50);
     if (typeof incoming.qualifying === 'boolean') next.qualifying = incoming.qualifying;
     if (typeof incoming.collisions === 'boolean') next.collisions = incoming.collisions;
+    // Qualifying run: untimed out-laps (1 = the drive from the pits to the line), then timed laps
+    if (Number.isFinite(incoming.outLaps)) next.outLaps = clamp(Math.round(incoming.outLaps), 1, 3);
+    if (Number.isFinite(incoming.qualiLaps)) next.qualiLaps = clamp(Math.round(incoming.qualiLaps), 1, 10);
     return next;
 }
 

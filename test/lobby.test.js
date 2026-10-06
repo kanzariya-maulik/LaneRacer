@@ -104,3 +104,13 @@ test('sanitizeAssist: full or off, anything else falls back to full', () => {
     assert.deepStrictEqual(lobby.sanitizeAssist('75,50'), { steer: 0.75, brake: 0.5 });
     assert.deepStrictEqual(lobby.sanitizeAssist('0,100'), { steer: 0, brake: 1 });
 });
+
+test('sanitizeSettings: out-laps 1–3 and timed quali laps 1–10, whole numbers, junk ignored', () => {
+    const base = { trackId: 'monza', maxLaps: 3, qualifying: true, outLaps: 1, qualiLaps: 2 };
+    const s = (inc) => lobby.sanitizeSettings(base, inc, ['monza']);
+    assert.deepStrictEqual([s({ outLaps: 2, qualiLaps: 5 }).outLaps, s({ outLaps: 2, qualiLaps: 5 }).qualiLaps], [2, 5]);
+    assert.deepStrictEqual([s({ outLaps: 0, qualiLaps: 0 }).outLaps, s({ outLaps: 0, qualiLaps: 0 }).qualiLaps], [1, 1]);
+    assert.deepStrictEqual([s({ outLaps: 9, qualiLaps: 99 }).outLaps, s({ outLaps: 9, qualiLaps: 99 }).qualiLaps], [3, 10]);
+    assert.strictEqual(s({ qualiLaps: 2.6 }).qualiLaps, 3);
+    assert.deepStrictEqual([s({ outLaps: '2', qualiLaps: null }).outLaps, s({ outLaps: '2', qualiLaps: null }).qualiLaps], [1, 2]);
+});

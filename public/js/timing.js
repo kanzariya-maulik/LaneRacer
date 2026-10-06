@@ -33,6 +33,13 @@ export function stepFollow(ids, current, step) {
     return ids[(((i + step) % ids.length) + ids.length) % ids.length];
 }
 
+// After finishing: which car to watch. ids in rank order; a car the player switched to stays watched (even once it
+// finishes), otherwise the best-placed car still running; null when nobody is left running (back to your own car)
+export function watchTarget(ids, me, isFinished, current) {
+    if (current && current !== me && ids.includes(current)) return current;
+    return ids.find((id) => id !== me && !isFinished(id)) ?? null;
+}
+
 // Lap distance (world units from the start line) inside a DRS zone; zones may wrap past the line
 export function inDrsZone(zones, lapS) {
     return zones.some((z) => (z.startS <= z.endS ? lapS >= z.startS && lapS < z.endS : lapS >= z.startS || lapS < z.endS));

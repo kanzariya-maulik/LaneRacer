@@ -13,7 +13,7 @@ import { Predictor, STEP_S } from './predict.js';
 import { Gearbox, shiftLights } from './audio/gearbox.js';
 import { estimateLoad } from './audio/mix.js';
 import * as Sound from './audio/audio.js';
-import { gapText, driverCode, lapDelta, stepFollow, inDrsZone, drsHint, liveSectors, resultCells, sectorClass, lastLapClass } from './timing.js';
+import { gapText, driverCode, lapDelta, stepFollow, watchTarget, inDrsZone, drsHint, liveSectors, resultCells, sectorClass, lastLapClass } from './timing.js';
 import { MODES, segmentColor, cornerMask, aheadM, trackIndex, nextMode } from './racingline.js';
 
 // World units per metre come from the track JSON (track.scale = 6).
@@ -180,6 +180,19 @@ window.onAssistChange = (v) => {
     }
 };
 
+// After finishing (race or qualifying run): watch the cars still out there, like F1 TV after the flag; V: your own car
+const WATCH_DELAY_MS = 2000;
+let finishedAt = null, ownView = false;
+function watchingAfterFinish() {
+    const gs = clientState.gameState, me = gs?.[clientState.me];
+    if (!me || !me.finished || isSpectator()) { finishedAt = null; ownView = false; return false; }
+    finishedAt ??= performance.now();
+    if (ownView || performance.now() - finishedAt < WATCH_DELAY_MS) return false;
+    spectateId = watchTarget(rankedCarIds(), clientState.me, (id) => !!gs[id]?.finished, spectateId);
+    return spectateId !== null; // nobody left running: stay on your own car
+}
+const watching = () => isSpectator() || watchingAfterFinish();
+
 function isSpectator() {
     return !!clientState.players[clientState.me]?.isSpectating || !clientState.gameState?.[clientState.me];
 }
@@ -193,9 +206,14 @@ function onKey(e, down) {
     if (down && key === 'escape' && !e.repeat) toggleHostPanel();
     if (down && key === 'm' && !e.repeat) window.showBanner?.(Sound.toggleMute() ? 'SOUND: MUTED' : 'SOUND: ON', true);
     if (down && e.key === 'F3') { e.preventDefault(); netstatsOn = !netstatsOn; netstatsEl.classList.toggle('hidden', !netstatsOn); }
-    if (down && clientState.status !== 'LOBBY' && isSpectator()) {
-        if (key === 'arrowleft') spectateId = stepFollow(rankedCarIds(), spectateId, -1);
-        if (key === 'arrowright') spectateId = stepFollow(rankedCarIds(), spectateId, 1);
+    if (down && clientState.status !== 'LOBBY' && watching()) {
+        const others = rankedCarIds().filter((id) => id !== clientState.me); // finished: every car but your own
+        if (key === 'arrowleft') spectateId = stepFollow(others, spectateId, -1);
+        if (key === 'arrowright') spectateId = stepFollow(others, spectateId, 1);
+    }
+    if (down && key === 'v' && !e.repeat && clientState.gameState?.[clientState.me]?.finished && !isSpectator()) {
+        ownView = !ownView;
+        window.showBanner?.(ownView ? 'YOUR CAR · V TO WATCH' : 'WATCHING', true);
     }
     const k = KEYMAP[key];
     if (!k) return;
@@ -1476,8 +1494,8 @@ function rankedCarIds() {
 }
 
 function followedCar() {
-    if (!isSpectator()) return cars[clientState.me];
-    spectateId = stepFollow(rankedCarIds(), spectateId, 0);
+    if (!watching()) return cars[clientState.me];
+    if (isSpectator()) spectateId = stepFollow(rankedCarIds(), spectateId, 0); // after finishing, watchingAfterFinish picked it
     return spectateId ? cars[spectateId] : null;
 }
 
@@ -1688,6 +1706,10 @@ function updateHUD(withTower = true) {
     const sec = (s) => sectorClass(s, clientState.sessionBest, clientState.sessionBestIds); // live: purple → green when beaten
 
     $('hud-total').innerText = Object.keys(gs).length;
+    // Finished and watching: say whose car is on screen and how to switch
+    const w = watchingAfterFinish(), wo = $('watch-overlay');
+    wo.classList.toggle('hidden', !w);
+    if (w) $('watch-name').textContent = clientState.players[spectateId]?.username || '';
     $('hud-rank').innerText = racing ? me.rank : '--';
     $('hud-lap').innerText = racing ? lapLabel(me.lap) : '--';
     $('hud-laps').textContent = racing && clientState.status !== 'QUALIFYING' ? `/${clientState.settings.maxLaps}` : '';
@@ -1723,7 +1745,7 @@ function updateHUD(withTower = true) {
     let bar = '';
     if (clientState.status === 'QUALIFYING' && sess) {
         bar = `QUALIFYING ${fmtClock(sess.endsAt - Date.now())}`;
-        if (racing) bar += me.finished ? ` · QUALIFYING COMPLETE — P${me.rank}` : me.curLap === null ? (me.inPit ? ' · PIT LANE' : ' · OUT LAP') : ` · LAP ${me.lap + 1}/2`;
+        if (racing) bar += me.finished ? ` · QUALIFYING COMPLETE — P${me.rank}` : me.curLap === null ? (me.inPit ? ' · PIT LANE' : ' · OUT LAP') : ` · LAP ${me.lap + 1}/${clientState.settings.qualiLaps ?? 2}`;
     } else if (clientState.status === 'RACE' || clientState.status === 'FINISHED') {
         const leader = Object.values(gs).find(p => p.rank === 1);
         const lap = racing ? me.lap : leader ? leader.lap : 0;
@@ -1871,7 +1893,7 @@ const camDir = new THREE.Vector3();
 let lastDrs = false, hudLit = -1, hudFlash = null, hudGear = '';
 function updateSound(dt) {
     const gs = clientState.gameState, me = gs[clientState.me], racing = !!me && !isSpectator();
-    const followId = racing ? clientState.me : spectateId;
+    const followId = racing && !watchingAfterFinish() ? clientState.me : spectateId; // dash and engine: the car on screen
     let hud = null, hudSpeed = 0, followVx = 0, followVy = 0;
     soundOthers.length = 0;
     for (const id in gs) {

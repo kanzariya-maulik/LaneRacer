@@ -138,7 +138,7 @@
                                     </label>
                                     <label>Qualifying
                                         <select id="setting-quali">
-                                            <option value="1" selected>On (out-lap + 2 laps)</option>
+                                            <option value="1" selected>On</option>
                                             <option value="0">Off</option>
                                         </select>
                                     </label>
@@ -147,6 +147,12 @@
                                             <option value="1" selected>On</option>
                                             <option value="0">Off (ghost cars)</option>
                                         </select>
+                                    </label>
+                                    <label class="quali-only">Out-laps
+                                        <input type="number" id="setting-outlaps" min="1" max="3" value="1" title="Untimed laps before timing starts (1 = pits to the line)">
+                                    </label>
+                                    <label class="quali-only">Timed laps
+                                        <input type="number" id="setting-qualilaps" min="1" max="10" value="2">
                                     </label>
                                 </div>
                                 <button id="btn-start" class="btn success">Start Race</button>
@@ -236,6 +242,10 @@
             <h1 id="countdown-text">3</h1>
         </div>
         
+        <div id="watch-overlay" class="hidden">
+            <h2>FINISHED · WATCHING <span id="watch-name"></span></h2>
+            <p>← → switch car · V your car</p>
+        </div>
         <div id="spectator-overlay" class="hidden">
             <h2>SPECTATING</h2>
             <p>Race in progress · ← → to switch car</p>

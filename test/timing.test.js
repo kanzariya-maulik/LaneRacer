@@ -106,3 +106,14 @@ test('resultCells: winner shows the final time, others the gap; penalty and plac
     assert.deepStrictEqual(T.resultCells({ position: 4, total: null, gap: null, penalty: 0, change: 0, dnf: true }, fmt),
         { time: 'DNF', pen: '', change: '', changeCls: '' });
 });
+
+test('watchTarget: after finishing, watch the best-placed car still running; keep a chosen car; none left = null', () => {
+    const fin = (...ids) => (id) => ids.includes(id);
+    // ids in rank order; me = 'a' (finished)
+    assert.strictEqual(T.watchTarget(['a', 'b', 'c'], 'a', fin('a'), null), 'b', 'the leader still on track');
+    assert.strictEqual(T.watchTarget(['a', 'b', 'c'], 'a', fin('a', 'b'), null), 'c', 'skips cars already finished');
+    assert.strictEqual(T.watchTarget(['a', 'b', 'c'], 'a', fin('a'), 'c'), 'c', 'keeps the car the player switched to');
+    assert.strictEqual(T.watchTarget(['a', 'b', 'c'], 'a', fin('a', 'b'), 'b'), 'b', 'a chosen car that finishes stays watched');
+    assert.strictEqual(T.watchTarget(['a', 'b'], 'a', fin('a', 'b'), null), null, 'everyone done: back to your own car');
+    assert.strictEqual(T.watchTarget(['a', 'b'], 'a', fin('a'), 'gone'), 'b', 'a car that left: pick again');
+});

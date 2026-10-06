@@ -4,8 +4,8 @@ const Ticker = require('../ticker');
 const { pointAt, edgeAt } = require('./Track');
 
 const TICK_RATE = 60;
-const QUALI_LAPS = 2;       // flying laps after the out-lap
-const QUALI_MAX_S = 360;    // quali ends at this session time even if someone never finishes
+const QUALI_LAPS = 2;       // timed laps after the out-lap, unless the host sets qualiLaps
+const QUALI_S_PER_LAP = 120; // quali ends this long per lap of the run (out-laps + timed) even if someone never finishes
 const LIMIT_WARNINGS = 2;    // race: violations before penalties start
 const LIMIT_PENALTY_S = 5;
 const JUMP_PENALTY_S = 10;    // moving before lights out
@@ -25,6 +25,10 @@ const r1 = (v) => Math.round(v * 10) / 10;
 
 class Game {
     // net: optional transport (src/webrtcManager.js) that sends game_state over the UDP DataChannel
+    // The host's qualifying run (lobby.sanitizeSettings): timed laps, and the session limit that grows with the whole run
+    qualiLaps() { return this.settings.qualiLaps ?? QUALI_LAPS; }
+    qualiMaxS() { return QUALI_S_PER_LAP * ((this.settings.outLaps ?? 1) + this.qualiLaps()); }
+
     constructor(io, players, track, settings, onFinish, mode = 'race', net = null) {
         this.io = io;
         this.net = net;
@@ -162,7 +166,7 @@ class Game {
 
     initPayload() {
         // Late joiners also need the quali clock and the session-best sectors (tower colours)
-        const session = this.mode === 'quali' ? { phase: 'QUALIFYING', endsInMs: Math.max(0, (QUALI_MAX_S - this.time) * 1000) } : null;
+        const session = this.mode === 'quali' ? { phase: 'QUALIFYING', endsInMs: Math.max(0, (this.qualiMaxS() - this.time) * 1000) } : null;
         return { players: this.players, track: this.track, mode: this.mode, index: this.index, session, bestSectors: this.bestSectors, bestSectorIds: this.bestSectorIds, fastestLap: this.fastestLap, paused: !!this.paused };
     }
 
@@ -220,7 +224,7 @@ class Game {
 
     start() {
         this.io.emit('game_init', this.initPayload());
-        if (this.mode === 'quali') this.io.emit('session', { phase: 'QUALIFYING', endsInMs: QUALI_MAX_S * 1000 });
+        if (this.mode === 'quali') this.io.emit('session', { phase: 'QUALIFYING', endsInMs: this.qualiMaxS() * 1000 });
         this.ticker = new Ticker(1000 / TICK_RATE, () => this.timedUpdate());
         this.ticker.start();
     }
@@ -391,7 +395,7 @@ class Game {
         const active = ids.filter(id => !this.players[id].finished).length;
         const over = this.mode === 'race'
             ? active === 0
-            : active === 0 || this.time >= QUALI_MAX_S;
+            : active === 0 || this.time >= this.qualiMaxS();
         if (over) {
             this.stop();
             if (this.mode === 'quali') {
@@ -548,7 +552,7 @@ class Game {
         if (p.lapStart !== null) {
             p.lap++;
             this.recordLap(p);
-            if (p.lap >= QUALI_LAPS) { // run complete: park the car
+            if (p.lap >= this.qualiLaps()) { // run complete: park the car
                 p.finished = true;
                 p.lapStart = null;
                 p.sectorStart = null;
@@ -556,8 +560,12 @@ class Game {
             }
             return; // recordLap already started the next flying lap at the line
         }
-        p.lapStart = p.inPit ? null : this.time; // out-lap: timing starts at the first crossing after pit exit
-        if (p.lapStart !== null) this.newLap(p);
+        // Out-laps: untimed crossings after pit exit (one in the pit lane doesn't count); timing starts at the last one
+        if (p.inPit) return;
+        p.outLaps = (p.outLaps || 0) + 1;
+        if (p.outLaps < (this.settings.outLaps ?? 1)) return;
+        p.lapStart = this.time;
+        this.newLap(p);
     }
 }
 

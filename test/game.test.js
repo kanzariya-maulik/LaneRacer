@@ -1151,3 +1151,28 @@ test('collisions off: race cars pass through each other and are sent as ghosts',
         assert.strictEqual(!!(pkt.c[0][6] & Game.FLAGS.ghost), !collisions, 'ghost flag');
     }
 });
+
+test('quali: host-set out-laps and timed laps; the session clock grows with them', () => {
+    const S = { maxLaps: 3, qualifying: true, outLaps: 2, qualiLaps: 3 };
+    const g = new Game(io, [lp('a')], monza, S, () => {}, 'quali');
+    const a = g.players.a;
+    crossLine(g, a, 10);                    // end of out-lap 1: still untimed
+    assert.strictEqual(a.lapStart, null, 'timing started after the first of two out-laps');
+    lap(g, a, 10, 95);                      // end of out-lap 2: timing starts
+    assert.strictEqual(a.lapStart, 105);
+    assert.strictEqual(a.lastLap, null, 'an out-lap was timed');
+    lap(g, a, 105, 90); lap(g, a, 195, 89);
+    assert.strictEqual(a.finished, false, 'parked before the third timed lap');
+    lap(g, a, 284, 88);
+    assert.strictEqual(a.finished, true);
+    assert.strictEqual(a.lap, 3);
+    close(a.bestLap, 88);
+    assert.strictEqual(g.initPayload().session.endsInMs, 120 * 5 * 1000 - 284 * 1000 - 88 * 1000, '2 minutes per lap of the run');
+
+    let results = null;
+    const g2 = new Game(io, [lp('a'), lp('b')], monza, S, (r) => { results = r; }, 'quali');
+    g2.time = 599; g2.update();
+    assert.strictEqual(results, null, 'ended before 5 laps × 2 min');
+    g2.time = 600; g2.update();
+    assert.ok(results);
+});

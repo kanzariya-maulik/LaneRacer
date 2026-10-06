@@ -18,6 +18,8 @@ const hostSettings = document.getElementById('host-settings');
 const setTrack = document.getElementById('setting-track');
 const setLaps = document.getElementById('setting-laps');
 const setQuali = document.getElementById('setting-quali');
+const setOutLaps = document.getElementById('setting-outlaps');
+const setQualiLaps = document.getElementById('setting-qualilaps');
 const setCollisions = document.getElementById('setting-collisions');
 const settingsView = document.getElementById('settings-view');
 const MAX_RACERS = 22; // src/lobby.js: grid slots per track
@@ -292,12 +294,16 @@ function emitSettings() {
         trackId: setTrack.value,
         maxLaps: parseInt(setLaps.value, 10),
         qualifying: setQuali.value === '1',
+        outLaps: parseInt(setOutLaps.value, 10),
+        qualiLaps: parseInt(setQualiLaps.value, 10),
         collisions: setCollisions.value === '1'
     });
 }
 setTrack.addEventListener('change', emitSettings);
 setLaps.addEventListener('change', emitSettings);
 setQuali.addEventListener('change', emitSettings);
+setOutLaps.addEventListener('change', emitSettings);
+setQualiLaps.addEventListener('change', emitSettings);
 setCollisions.addEventListener('change', emitSettings);
 
 chatForm.addEventListener('submit', (e) => {
@@ -402,19 +408,23 @@ window.updateSettingsUI = () => {
     setTrack.value = clientState.settings.trackId;
     setLaps.value = clientState.settings.maxLaps;
     setQuali.value = clientState.settings.qualifying ? '1' : '0';
+    setOutLaps.value = clientState.settings.outLaps ?? 1;
+    setQualiLaps.value = clientState.settings.qualiLaps ?? 2;
+    document.querySelectorAll('.quali-only').forEach((el) => el.classList.toggle('hidden', !clientState.settings.qualifying));
     setCollisions.value = clientState.settings.collisions === false ? '0' : '1';
 
     // Header chips and the read-only view non-hosts see
     const s = clientState.settings;
     const track = setTrack.selectedOptions[0]?.textContent || s.trackId;
-    const rows = [['Track', track], ['Laps', s.maxLaps], ['Qualifying', s.qualifying ? 'On' : 'Off'], ['Collisions', s.collisions === false ? 'Off' : 'On']];
+    const out = s.outLaps ?? 1, timed = s.qualiLaps ?? 2, quali = s.qualifying ? `${out} out + ${timed} timed` : 'Off';
+    const rows = [['Track', track], ['Laps', s.maxLaps], ['Qualifying', quali], ['Collisions', s.collisions === false ? 'Off' : 'On']];
     settingsView.replaceChildren(...rows.map(([k, v]) => {
         const d = document.createElement('div');
         d.append(Object.assign(document.createElement('dt'), { textContent: k }), Object.assign(document.createElement('dd'), { textContent: v }));
         return d;
     }));
     document.getElementById('session-summary').replaceChildren(...[track, `${s.maxLaps} ${s.maxLaps === 1 ? 'lap' : 'laps'}`,
-        `Quali ${s.qualifying ? 'on' : 'off'}`, `Collisions ${s.collisions === false ? 'off' : 'on'}`]
+        s.qualifying ? `Quali ${out}+${timed}` : 'Quali off', `Collisions ${s.collisions === false ? 'off' : 'on'}`]
         .map((text) => Object.assign(document.createElement('span'), { textContent: text })));
 };
 window.updateSettingsUI();
