@@ -371,5 +371,7 @@ socket.on('track_limits', (e) => {
     window.showBanner(e.kind === 'deleted' ? 'TRACK LIMITS — LAP DELETED'
         : e.kind === 'warning' ? `TRACK LIMITS — WARNING ${e.count}/2`
         : e.kind === 'jump' ? `JUMP START — +${e.penalty}s PENALTY`
+        : e.kind === 'collision' ? `+${e.add}s CAUSING A COLLISION (total +${e.penalty}s)`
+        : e.kind === 'hit' ? `HIT BY ${String(e.by).toUpperCase()} — PENALTY GIVEN`
         : `+5s PENALTY (total +${e.penalty}s)`);
 });

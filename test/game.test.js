@@ -1176,3 +1176,75 @@ test('quali: host-set out-laps and timed laps; the session clock grows with them
     g2.time = 600; g2.update();
     assert.ok(results);
 });
+
+// ---- Collision incidents: who hit whom, judged 2 s after first contact ----
+function incidentGame(settings = RACE, mode = 'race') {
+    const sent = [];
+    const g = new Game({ emit: (ev, d) => sent.push([ev, d]), volatile: { emit() {} } }, [lp('a'), lp('b', 'haas')], monza, settings, () => {}, mode);
+    if (mode === 'race') g.release();
+    return { g, a: g.players.a, b: g.players.b, sent };
+}
+// On the track at distance s (m) from the line, lat m to the driver's left, moving vFwd forward and vLat leftward (m/s)
+function placeAt(p, s, lat, vFwd, vLat = 0) {
+    const q = lapPos(s * monza.scale), sc = monza.scale, c = Math.cos(q.angle), si = Math.sin(q.angle);
+    Object.assign(p, { x: q.x - si * lat * sc, y: q.y + c * lat * sc, angle: q.angle, speed: vFwd * sc,
+        vx: (c * vFwd - si * vLat) * sc, vy: (si * vFwd + c * vLat) * sc });
+}
+const run = (g, seconds) => { for (let k = 0; k < Math.round(seconds * 60); k++) g.update(); };
+const said = (sent, re) => sent.some(([ev, d]) => ev === 'chat_msg' && re.test(d.msg));
+
+test('incident: rear-end — the car behind gets +5 s, the car hit gets nothing', () => {
+    const { g, a, b, sent } = incidentGame();
+    placeAt(a, 300, 0, 60); placeAt(b, 305, 0, 40);   // a 5 m behind, 20 m/s faster: into b's gearbox
+    run(g, 2.2);
+    assert.strictEqual(a.penalty, 5);
+    assert.strictEqual(b.penalty, 0);
+    assert.ok(said(sent, /A hit B, \+5s/), 'no chat verdict');
+    assert.ok(sent.some(([ev, d]) => ev === 'track_limits' && d.kind === 'collision' && d.id === 'a' && d.penalty === 5), 'no banner for the guilty driver');
+    assert.ok(sent.some(([ev, d]) => ev === 'track_limits' && d.kind === 'hit' && d.id === 'b' && d.by === 'A'), 'no banner for the driver hit');
+});
+
+test('incident: side swipe — the car that moved across is to blame, not the one driving straight', () => {
+    const { g, a, b } = incidentGame();
+    placeAt(a, 300, -1.9, 50, 6); placeAt(b, 300, 0, 50); // a level with b, 6 m/s sideways into it
+    run(g, 2.2);
+    assert.deepStrictEqual([a.penalty, b.penalty], [5, 0]);
+});
+
+test('incident: both moving into each other alike is a racing incident; light rubbing is nothing', () => {
+    let { g, a, b, sent } = incidentGame();
+    placeAt(a, 300, -1.9, 50, 5); placeAt(b, 300, 0, 50, -5);
+    run(g, 2.2);
+    assert.deepStrictEqual([a.penalty, b.penalty], [0, 0]);
+    assert.ok(said(sent, /racing incident/i));
+    ({ g, a, b, sent } = incidentGame());
+    placeAt(a, 300, -1.95, 50, 1.5); placeAt(b, 300, 0, 50);    // ~5 km/h sideways: wheel-to-wheel
+    run(g, 2.2);
+    assert.deepStrictEqual([a.penalty, b.penalty], [0, 0]);
+    assert.ok(!sent.some(([ev]) => ev === 'chat_msg'), 'light contact reported');
+});
+
+test('incident: pushing the other car off the track is +10 s, and the victim gets no track-limits strike for it', () => {
+    const { g, a, b, sent } = incidentGame();
+    placeAt(a, 300, -1.9, 50, 6); placeAt(b, 300, 0, 50);
+    g.update();                                        // contact
+    placeAt(b, 300, 30, 50);                             // b ends up well off the track
+    run(g, 2.2);
+    assert.strictEqual(a.penalty, 10);
+    assert.ok(said(sent, /A pushed B off track, \+10s/));
+    assert.strictEqual(b.limits, 0, 'victim punished for being pushed off');
+    assert.strictEqual(b.penalty, 0);
+});
+
+test('incident: long contact is one incident; quali ghosts and collisions-off races are never judged', () => {
+    let { g, a, b } = incidentGame();
+    for (let k = 0; k < 150; k++) { placeAt(a, 300, -1.9, 50, 6); placeAt(b, 300, 0, 50); g.update(); } // 2.5 s leaning on b
+    run(g, 2.2);
+    assert.strictEqual(a.penalty, 5, 'one incident, one penalty');
+    for (const [settings, mode] of [[{ ...RACE, collisions: false }, 'race'], [{ maxLaps: 3, qualifying: true }, 'quali']]) {
+        ({ g, a, b } = incidentGame(settings, mode));
+        placeAt(a, 300, 0, 60); placeAt(b, 305, 0, 40);
+        run(g, 2.2);
+        assert.deepStrictEqual([a.penalty, b.penalty], [0, 0], `${mode} judged`);
+    }
+});

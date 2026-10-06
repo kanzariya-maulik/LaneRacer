@@ -1,4 +1,5 @@
 const Physics = require('./Physics');
+const netlog = require('../netlog');
 const Drive = require('../../public/js/sim/drive.js');
 const Ticker = require('../ticker');
 const { pointAt, edgeAt } = require('./Track');
@@ -7,6 +8,12 @@ const TICK_RATE = 60;
 const QUALI_LAPS = 2;       // timed laps after the out-lap, unless the host sets qualiLaps
 const QUALI_S_PER_LAP = 120; // quali ends this long per lap of the run (out-laps + timed) even if someone never finishes
 const LIMIT_WARNINGS = 2;    // race: violations before penalties start
+// Car-to-car incidents (race, collisions on): who drove into whom, judged once the consequences are known
+const CONTACT_LIGHT_MS = 3;      // closing slower than this (~11 km/h): rubbing wheels, not an incident
+const CONTACT_BLAME = 2;         // at fault: into the other car at least this many times as fast as it came into you
+const CONTACT_GAP_S = 1;         // contact again within this: still the same coming-together
+const INCIDENT_JUDGE_S = 2;      // the victim is watched this long: pushed off or spun makes it worse
+const COLLISION_PENALTY_S = 5, COLLISION_OFF_PENALTY_S = 10;
 const LIMIT_PENALTY_S = 5;
 const JUMP_PENALTY_S = 10;    // moving before lights out
 const JUMP_MOVE_M = 0.5;      // further than this from the grid slot = moved
@@ -34,6 +41,8 @@ class Game {
         this.net = net;
         this.track = track;
         this.settings = settings;
+        this.contacts = new Map(); // car pair → last contact time (race incidents)
+        this.incidents = [];       // hits waiting for their verdict
         this.onFinish = onFinish;
         this.mode = mode;
         this.dt = 1 / TICK_RATE;
@@ -367,10 +376,15 @@ class Game {
                 for (let i = 0; i < ids.length; i++) {
                     for (let j = i + 1; j < ids.length; j++) {
                         const a = this.players[ids[i]], b = this.players[ids[j]];
-                        if (!a.finished && !b.finished) Physics.resolveCarCollision(a, b, this.track.scale);
+                        if (a.finished || b.finished) continue;
+                        const hit = Physics.carOverlap(a, b, this.track.scale);
+                        if (!hit) continue;
+                        this.noteContact(a, b, hit); // before the bump changes their speeds
+                        Physics.resolveCarCollision(a, b, this.track.scale);
                     }
                 }
             }
+            if (this.mode === 'race') this.judgeIncidents();
         }
 
         // A parked or disconnected-in-spirit car can't hold everyone on track forever
@@ -428,6 +442,52 @@ class Game {
         });
     }
 
+    // First contact between two cars: each one's own speed into the other (m/s, n points from b to a) says who drove
+    // into whom. Rear-end: the car behind. Side swipe: the car that moved across. Both alike: a racing incident
+    noteContact(a, b, { nx, ny }) {
+        const key = a.id < b.id ? `${a.id}|${b.id}` : `${b.id}|${a.id}`, last = this.contacts.get(key);
+        this.contacts.set(key, this.time);
+        if (last !== undefined && this.time - last <= CONTACT_GAP_S) return;
+        const sc = this.track.scale, aIn = -(a.vx * nx + a.vy * ny) / sc, bIn = (b.vx * nx + b.vy * ny) / sc;
+        if (aIn + bIn < CONTACT_LIGHT_MS) return;
+        const blame = (x, y) => x > 0 && x >= CONTACT_BLAME * Math.max(y, 0);
+        const [striker, victim] = blame(aIn, bIn) ? [a, b] : blame(bIn, aIn) ? [b, a] : [];
+        if (!striker) {
+            this.io.emit('chat_msg', { username: 'SYSTEM', color: '#f59e0b', msg: `${a.username} / ${b.username}: racing incident, no action` });
+            return;
+        }
+        this.incidents.push({ striker: striker.id, victim: victim.id, at: this.time, off: false });
+    }
+
+    // Facing more than 90° away from the way the track runs here
+    spun(p) {
+        const P = this.track.path, i = Physics.nearestOnTrack(p.x, p.y, this.track).i, q = P[(i + 1) % P.length];
+        const h = Math.atan2(q.y - P[i].y, q.x - P[i].x);
+        return Math.abs(Math.atan2(Math.sin(p.angle - h), Math.cos(p.angle - h))) > Math.PI / 2;
+    }
+
+    // Watch each victim for INCIDENT_JUDGE_S, then the verdict: +5 s for the hit, +10 s if it put them off or round
+    judgeIncidents() {
+        for (const inc of this.incidents) {
+            const v = this.players[inc.victim];
+            if (v && !inc.off && (v.offLimits || this.spun(v))) inc.off = true;
+        }
+        const due = this.incidents.filter((i) => this.time - i.at >= INCIDENT_JUDGE_S);
+        if (!due.length) return;
+        this.incidents = this.incidents.filter((i) => this.time - i.at < INCIDENT_JUDGE_S);
+        for (const inc of due) {
+            const s = this.players[inc.striker], v = this.players[inc.victim];
+            if (!s || !v) continue; // one of them left
+            const add = inc.off ? COLLISION_OFF_PENALTY_S : COLLISION_PENALTY_S;
+            s.penalty += add;
+            this.io.emit('track_limits', { id: s.id, kind: 'collision', add, penalty: s.penalty, victim: v.username });
+            this.io.emit('track_limits', { id: v.id, kind: 'hit', by: s.username });
+            const what = inc.off ? `pushed ${v.username} off track` : `hit ${v.username}`;
+            this.io.emit('chat_msg', { username: 'SYSTEM', color: '#ff0000', msg: `${s.username} ${what}, +${add}s (total +${s.penalty}s)` });
+            netlog.log(`[INCIDENT] ${s.username} (${s.id}) ${what} (${v.id}), +${add}s`);
+        }
+    }
+
     // All four wheels past the real white line (t.limit), once per excursion; pit lane, quali out-lap exempt, and so is
     // rejoining from the pit exit until the car is first back inside the line
     checkLimits(p, near) {
@@ -445,6 +505,7 @@ class Game {
             this.refreshBests(); // its sectors stop counting: purple goes back to the previous holder
             return;
         }
+        if (this.incidents.some((i) => i.victim === p.id)) return; // pushed off: the driver who hit them answers for it
         p.limits++;
         if (p.limits <= LIMIT_WARNINGS) {
             this.io.emit('track_limits', { id: p.id, kind: 'warning', count: p.limits });
