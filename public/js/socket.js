@@ -219,9 +219,11 @@ socket.on('lobby_state_sync', (state) => {
         clientState.gameState = null;
         clientState.trackData = null;
         clientState.session = null;
+        clientState.paused = false;
     }
     if (window.updateLobbyUI) window.updateLobbyUI();
     if (window.updateSettingsUI) window.updateSettingsUI();
+    window.renderSessionPanel?.(); // the host may have changed
 });
 
 socket.on('join_error', (reason) => {
@@ -262,7 +264,9 @@ socket.on('chat_msg', (data) => {
 // GAME SYNCS
 socket.on('status_change', (status) => {
     clientState.status = status;
+    if (status === 'LOBBY') clientState.paused = false;
     if (window.handleStatusChange) window.handleStatusChange(status);
+    window.renderSessionPanel?.();
 });
 
 
@@ -278,7 +282,16 @@ socket.on('game_init', (data) => {
     if (data.session) clientState.session = { phase: data.session.phase, endsAt: Date.now() + data.session.endsInMs };
     clientState.mySectors = [null, null, null];
     clientState.myBestSectors = [null, null, null];
+    clientState.paused = !!data.paused; // a late joiner can arrive mid-pause
     if (window.initGameVisuals) window.initGameVisuals();
+    if (clientState.paused) window.onPaused?.(true); else window.renderSessionPanel?.(); // a new session: no resume banner
+});
+
+// Host pause / resume
+socket.on('paused', ({ paused }) => {
+    if (clientState.paused === paused) return;
+    clientState.paused = paused;
+    window.onPaused?.(paused);
 });
 
 // This comes in 60 times a second

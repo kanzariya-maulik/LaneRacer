@@ -731,3 +731,30 @@ input:disabled { opacity: 0.7; }
     #minimap { width: 8.5em; height: 8.5em; }
     #leaderboard { width: 13em; }
 }
+
+/* Host session control + pause screen: the race classification card, smaller */
+#session-panel { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 9; }
+#session-panel.hidden { display: none; }
+.hc-card { width: min(440px, calc(100vw - 32px)); }
+.hc-icon { width: 14px; height: 16px; background: linear-gradient(90deg, currentColor 0 35%, transparent 35% 65%, currentColor 65%); }
+#hc-close { background: none; border: 0; color: #fff; font: 900 1rem sans-serif; cursor: pointer; padding: 0 0 0 6px; opacity: 0.85; }
+#hc-close:hover { opacity: 1; }
+.hc-note { padding: 18px 16px 4px; font-weight: 700; letter-spacing: 1px; color: #e2e8f0; }
+.hc-actions { display: flex; gap: 10px; padding: 16px; }
+.hc-actions .btn { flex: 1; width: auto; }
+.hc-actions .btn:disabled { opacity: 0.45; cursor: not-allowed; filter: none; }
+#hc-restart.armed { background: #f59e0b; color: #111; }
+.hc-cols { grid-template-columns: 1fr; }
+#hc-drivers { list-style: none; margin: 0; padding: 0 0 6px; }
+#hc-drivers li { display: grid; grid-template-columns: 5px 1fr auto; align-items: center; gap: 10px; height: 38px; padding: 0 16px; }
+#hc-drivers li:nth-child(even) { background: rgba(255,255,255,0.04); }
+#hc-drivers .rr-name { font-size: 0.85rem; }
+#hc-drivers .hc-empty { display: block; height: auto; padding: 10px 16px; color: #94a3b8; font-size: 0.8rem; }
+.kick-btn { background: transparent; border: 1px solid rgba(248, 113, 113, 0.6); color: #f87171; border-radius: 4px; padding: 4px 10px; font: 800 0.7rem sans-serif; letter-spacing: 1px; cursor: pointer; }
+.kick-btn:hover { background: rgba(248, 113, 113, 0.15); }
+.kick-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.player-item:has(.kick-btn) { grid-template-columns: 26px 4px 1fr auto auto; } /* host view: a fifth column for the kick button */
+.player-item .kick-btn { padding: 2px 8px; }
+.hud-host { border: 0; cursor: pointer; font: inherit; align-items: center; pointer-events: auto; }
+.hud-host:hover { filter: brightness(1.2); }
+.hud-host.hidden { display: none; }

@@ -163,7 +163,7 @@ class Game {
     initPayload() {
         // Late joiners also need the quali clock and the session-best sectors (tower colours)
         const session = this.mode === 'quali' ? { phase: 'QUALIFYING', endsInMs: Math.max(0, (QUALI_MAX_S - this.time) * 1000) } : null;
-        return { players: this.players, track: this.track, mode: this.mode, index: this.index, session, bestSectors: this.bestSectors, bestSectorIds: this.bestSectorIds, fastestLap: this.fastestLap };
+        return { players: this.players, track: this.track, mode: this.mode, index: this.index, session, bestSectors: this.bestSectors, bestSectorIds: this.bestSectorIds, fastestLap: this.fastestLap, paused: !!this.paused };
     }
 
     handleInput(id, input) {
@@ -232,6 +232,7 @@ class Game {
 
     // update() plus a tick-cost average and a once-a-second net_stats for the overlay
     timedUpdate() {
+        if (this.paused) return; // host pause: no tick at all, so cars, race clock, quali timer and finish window all hold
         const t0 = process.hrtime.bigint();
         this.update();
         const ms = Number(process.hrtime.bigint() - t0) / 1e6;

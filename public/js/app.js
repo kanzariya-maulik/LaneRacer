@@ -218,6 +218,14 @@ btnJoin.addEventListener('click', () => {
     setJoinedUI(true);
 });
 
+// Removed by the host: back to the join screen (and not auto-rejoined on a reconnect); joining again is allowed
+socket.on('kicked', () => {
+    lastJoin = null;
+    amReady = false;
+    setJoinedUI(false);
+    window.appendChat('SYSTEM', '#f43f5e', 'You were removed by the host. You can join again.');
+});
+
 // A reconnect (WiFi drop, sleep, server restart) is a new socket the server doesn't know: join again as the same driver
 socket.on('connect', () => {
     if (!lastJoin || !isJoined) return;
@@ -306,6 +314,12 @@ window.updateLobbyUI = () => {
         }
 
         li.append(num, colorIndicator, nameNode, statusNode);
+        if (amHost && id !== myId) { // the host can remove anyone else
+            const kick = Object.assign(document.createElement('button'), { className: 'kick-btn', textContent: '✕', title: `Remove ${player.username}` });
+            kick.setAttribute('aria-label', `Remove ${player.username}`);
+            kick.addEventListener('click', () => socket.emit('kick_player', id));
+            li.append(kick);
+        }
         playersList.appendChild(li);
     });
     // A few open grid slots so a quiet lobby still reads as a grid waiting to fill

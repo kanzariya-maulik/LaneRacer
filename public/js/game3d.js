@@ -190,6 +190,7 @@ function onKey(e, down) {
     if (down && key === 't' && !e.repeat && clientState.status !== 'LOBBY') toggleTower();
     if (down && key === 'r' && !e.repeat && clientState.status !== 'LOBBY') toggleLine();
     if (down && key === 'q' && !e.repeat && clientState.status !== 'LOBBY') toggleAssist();
+    if (down && key === 'escape' && !e.repeat) toggleHostPanel();
     if (down && key === 'm' && !e.repeat) window.showBanner?.(Sound.toggleMute() ? 'SOUND: MUTED' : 'SOUND: ON', true);
     if (down && e.key === 'F3') { e.preventDefault(); netstatsOn = !netstatsOn; netstatsEl.classList.toggle('hidden', !netstatsOn); }
     if (down && clientState.status !== 'LOBBY' && isSpectator()) {
@@ -1561,6 +1562,79 @@ window.showRaceResults = (res) => {
 
 $('rr-close').addEventListener('click', () => $('race-results').classList.add('hidden'));
 
+// Host session control: Esc or the HUD's HOST button opens it; a pause shows its card to everyone
+let hostPanel = false, restartArmedUntil = 0;
+const amHost = () => !!clientState.me && clientState.hostId === clientState.me;
+const inSession = () => ['QUALIFYING', 'COUNTDOWN', 'RACE'].includes(clientState.status);
+function renderSessionPanel() {
+    const paused = !!clientState.paused && inSession(), host = amHost() && inSession();
+    $('hud-host').classList.toggle('hidden', !host);
+    if (!host) hostPanel = false;
+    const show = paused || hostPanel;
+    $('session-panel').classList.toggle('hidden', !show);
+    if (!show) return;
+    $('hc-title').textContent = paused ? 'PAUSED' : 'SESSION CONTROL';
+    $('hc-note').textContent = !paused ? '' : host ? 'The session is paused for everyone.' : 'The host has paused the session.';
+    $('hc-note').classList.toggle('hidden', !paused);
+    $('hc-close').classList.toggle('hidden', paused || !host);
+    $('hc-host').classList.toggle('hidden', !host);
+    $('hc-foot').textContent = host ? 'Esc closes · restart and remove act for everyone' : 'Only the host can resume';
+    if (!host) return;
+    const pause = $('hc-pause'), armed = performance.now() < restartArmedUntil;
+    pause.textContent = paused ? 'Resume' : 'Pause';
+    pause.disabled = !['QUALIFYING', 'RACE'].includes(clientState.status); // not during the start lights
+    pause.title = pause.disabled ? 'Pausing is possible once the lights are out' : '';
+    $('hc-restart').textContent = armed ? 'Confirm restart' : 'Restart session';
+    $('hc-restart').classList.toggle('armed', armed);
+    const list = $('hc-drivers');
+    list.replaceChildren();
+    for (const [id, p] of Object.entries(clientState.players)) {
+        if (id === clientState.me) continue;
+        const li = document.createElement('li');
+        const team = Object.assign(document.createElement('span'), { className: 'rr-team' });
+        team.style.background = p.color;
+        const name = Object.assign(document.createElement('span'), { className: 'rr-name', textContent: p.username + (p.isSpectating ? ' · spectating' : '') });
+        const kick = Object.assign(document.createElement('button'), { className: 'kick-btn', textContent: 'KICK', title: `Remove ${p.username}` });
+        kick.addEventListener('click', () => socket.emit('kick_player', id));
+        li.append(team, name, kick);
+        list.append(li);
+    }
+    if (!list.children.length) list.append(Object.assign(document.createElement('li'), { className: 'hc-empty', textContent: 'No other drivers' }));
+}
+window.renderSessionPanel = renderSessionPanel;
+function toggleHostPanel() {
+    if (!amHost() || !inSession()) return;
+    hostPanel = !hostPanel;
+    renderSessionPanel();
+}
+$('hud-host').addEventListener('click', toggleHostPanel);
+$('hc-close').addEventListener('click', toggleHostPanel);
+$('hc-pause').addEventListener('click', () => socket.emit('pause_session', !clientState.paused));
+$('hc-restart').addEventListener('click', () => {
+    if (performance.now() < restartArmedUntil) { // second click: it throws the session away, so it takes two
+        restartArmedUntil = 0;
+        hostPanel = false;
+        socket.emit('restart_session');
+    } else {
+        restartArmedUntil = performance.now() + 4000;
+        setTimeout(renderSessionPanel, 4000);
+    }
+    renderSessionPanel();
+});
+// Pause: your car stops being predicted and driven, engines go quiet; resume relearns the server clock (it stood still)
+window.onPaused = (paused) => {
+    if (paused) {
+        for (const k in keys) keys[k] = false;
+        input = { throttle: 0, brake: 0, steer: 0, drs: false };
+    } else {
+        netBuf.reset();
+        clientState.netIn = [];
+        simAcc = 0;
+        if (inSession()) window.showBanner?.('RESUMED', true);
+    }
+    renderSessionPanel();
+};
+
 let flashTimer = null, bannerTimer = null;
 window.showSectorFlash = (n, time, delta, cls) => {
     const el = $('sector-flash');
@@ -1834,15 +1908,16 @@ function frame(now) {
     frameMs.push(dt * 1000);
     if (frameMs.length > 120) frameMs.shift();
     if (clientState.status === 'LOBBY') { Sound.update(silentFrame); return; } // engines and wind fade out in the lobby
-    pollInput(dt);
+    const paused = !!clientState.paused; // host pause: nothing is driven, cars hold where they are
+    if (!paused) pollInput(dt);
     if (!world || !clientState.gameState) { Sound.update(silentFrame); return; }
-    applyNet(now / 1000, dt);
+    if (!paused) applyNet(now / 1000, dt);
     updateCars(dt);
     updateWheelBatch();
     if (!window.lanraceDebug?.freeCam) updateCamera(dt);
     skyDome.position.copy(camera.position);
     skyDome.scale.setScalar(camera.far * 0.9);
-    updateSound(dt);
+    if (paused) Sound.update(silentFrame); else updateSound(dt);
     if (!compiling) renderer.render(scene, camera); // a draw before the shaders are ready compiles them there and then (a ~1.6 s freeze)
 
     if (now - lastHud > 66) { // HUD and minimap at 15 Hz, timing tower at 4 Hz

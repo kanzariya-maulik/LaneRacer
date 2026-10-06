@@ -37,6 +37,33 @@ function clearTimers() {
     timers.clear();
 }
 
+// Live sockets by id, so the host can tell a kicked player
+const sockets = {};
+
+// A player leaves the session (disconnect or kick): their car goes, and the host role passes on
+function removePlayer(io, id) {
+    if (!state.players[id]) return;
+    delete state.players[id];
+    if (gameInstance) gameInstance.removePlayer(id);
+    io.emit('player_left', id);
+
+    if (id === state.hostId) {
+        const remaining = Object.keys(state.players);
+        if (remaining.length > 0) {
+            state.hostId = remaining[0];
+            io.emit('lobby_state_sync', lobbySnapshot());
+        } else {
+            state.hostId = null;
+            clearTimers();
+            if (gameInstance) {
+                gameInstance.stop();
+                gameInstance = null;
+            }
+            state.status = 'LOBBY';
+        }
+    }
+}
+
 function lobbySnapshot() {
     return { players: state.players, hostId: state.hostId, status: state.status, settings: state.settings };
 }
@@ -53,6 +80,7 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
     net = transport;
     io.on('connection', (socket) => {
         console.log(`Player connected: ${socket.id}`);
+        sockets[socket.id] = socket;
         netlog.log(`[CONNECT] ${socket.id} | ${socket.handshake?.address || '?'} | ${socket.handshake?.headers?.['user-agent'] || '?'}`);
         let lastTelemetry = 0;
         // WebRTC signalling over Socket.IO; inputs arriving on the UDP DataChannel go to the game like socket inputs
@@ -86,6 +114,33 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
 
             // Late joiner: give them the running session so the spectator view has something to draw
             if (gameInstance && state.status !== 'LOBBY') socket.emit('game_init', gameInstance.initPayload());
+        });
+
+        // Host controls during a session: pause/resume (driving only, not the lights or results), restart, kick
+        const isHost = () => socket.id === state.hostId;
+        socket.on('pause_session', (on) => {
+            if (!isHost() || !gameInstance || !['QUALIFYING', 'RACE'].includes(state.status)) return;
+            gameInstance.paused = !!on;
+            io.emit('paused', { paused: gameInstance.paused });
+            netlog.log(`[SESSION] ${gameInstance.paused ? 'PAUSED' : 'RESUMED'} by host`);
+        });
+        socket.on('restart_session', () => {
+            if (!isHost() || !gameInstance || !['QUALIFYING', 'COUNTDOWN', 'RACE'].includes(state.status)) return;
+            const racers = Object.keys(gameInstance.players).map((id) => state.players[id]).filter(Boolean);
+            const quali = gameInstance.mode === 'quali';
+            clearTimers(); // the old session's lights must not fire into the new one
+            gameInstance.stop();
+            netlog.log('[SESSION] RESTART by host');
+            if (quali) startQuali(io, racers);
+            else startRace(io, racers);
+            io.emit('paused', { paused: false }); // after the new game_init, which already says not paused: no resume banner
+        });
+        socket.on('kick_player', (id) => {
+            if (!isHost() || id === socket.id || !state.players[id]) return;
+            netlog.log(`[KICK] ${state.players[id].username} (${id}) by host`);
+            sockets[id]?.emit('kicked');
+            removePlayer(io, id); // their connection stays open: they're back on the join screen and may join again
+            io.emit('lobby_state_sync', lobbySnapshot());
         });
 
         socket.on('chat_msg', (msg) => {
@@ -157,27 +212,8 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
             console.log(`Player disconnected: ${socket.id}`);
             netlog.log(`[DISCONNECT] ${state.players[socket.id]?.username ?? 'visitor'} (${socket.id})`);
             net.cleanup(socket.id);
-            if (!state.players[socket.id]) return;
-
-            delete state.players[socket.id];
-            if (gameInstance) gameInstance.removePlayer(socket.id);
-            io.emit('player_left', socket.id);
-
-            if (socket.id === state.hostId) {
-                const remaining = Object.keys(state.players);
-                if (remaining.length > 0) {
-                    state.hostId = remaining[0];
-                    io.emit('lobby_state_sync', lobbySnapshot());
-                } else {
-                    state.hostId = null;
-                    clearTimers();
-                    if (gameInstance) {
-                        gameInstance.stop();
-                        gameInstance = null;
-                    }
-                    state.status = 'LOBBY';
-                }
-            }
+            delete sockets[socket.id];
+            removePlayer(io, socket.id);
         });
     });
 }

@@ -202,3 +202,81 @@ test('assist is each player\'s own choice: picked at join, changed any time, app
     a.fire('disconnect');
     b.fire('disconnect');
 });
+
+// Race under way: a (host) and b on the grid, lights out
+function startRace(t, io) {
+    const a = join(io, 'a', 'ferrari', 0), b = join(io, 'b', 'haas');
+    a.fire('start_game');
+    advance(t, 8000);
+    assert.strictEqual(io.events('status_change').at(-1), 'RACE');
+    return { a, b, race: io.events('game_init').at(-1) };
+}
+
+test('host pause: cars and the race clock stop until resume; nobody else can pause, nor during the lights', (t) => {
+    t.mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
+    const io = fakeIo(), snaps = [];
+    io.volatile.emit = (ev, s) => { if (ev === 'game_state') snaps.push(s); };
+    setupSocketManager(io, noNet);
+    const a0 = join(io, 'a', 'ferrari', 0);
+    a0.fire('start_game');
+    a0.fire('pause_session', true);
+    assert.strictEqual(io.events('paused').length, 0, 'paused during the start lights');
+    a0.fire('disconnect');
+    advance(t, 31000); // back to the lobby
+
+    const { a, b, race } = startRace(t, io);
+    const drive = (ms) => { for (let k = 0; k < ms; k += 100) { a.fire('input', { throttle: 1, brake: 0, steer: 0 }); advance(t, 100); } };
+    drive(1000);
+    b.fire('pause_session', true);
+    assert.strictEqual(io.events('paused').length, 0, 'a non-host paused');
+    a.fire('pause_session', true);
+    assert.deepStrictEqual(io.events('paused').at(-1), { paused: true });
+    const x0 = race.players.a.x, g0 = snaps.at(-1).g;
+    drive(2000);
+    assert.strictEqual(race.players.a.x, x0, 'car moved while paused');
+    assert.strictEqual(snaps.at(-1).g, g0, 'race clock ran while paused');
+    a.fire('pause_session', false);
+    assert.deepStrictEqual(io.events('paused').at(-1), { paused: false });
+    drive(1000);
+    assert.notStrictEqual(race.players.a.x, x0);
+    assert.ok(Math.abs(snaps.at(-1).g - (g0 + 1)) < 0.05, `race clock carries on from the pause: ${snaps.at(-1).g} vs ${g0 + 1}`);
+    a.fire('disconnect'); b.fire('disconnect');
+});
+
+test('host restart: the race goes back to the grid and the lights run again; nobody else can restart', (t) => {
+    t.mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
+    const io = fakeIo();
+    setupSocketManager(io, noNet);
+    const { a, b } = startRace(t, io);
+    a.fire('pause_session', true);
+    b.fire('restart_session');
+    assert.strictEqual(io.events('status_change').at(-1), 'RACE', 'a non-host restarted');
+    const lights0 = io.events('lights').length;
+    a.fire('restart_session');
+    assert.strictEqual(io.events('status_change').at(-1), 'COUNTDOWN');
+    assert.deepStrictEqual(io.events('paused').at(-1), { paused: false }, 'a restart clears the pause');
+    const race = io.events('game_init').at(-1);
+    assert.strictEqual(race.mode, 'race');
+    assert.strictEqual(race.players.a.x, monza.startPositions[0].x);
+    advance(t, 8000);
+    assert.deepStrictEqual(io.events('lights').slice(lights0).map((l) => l.count), [1, 2, 3, 4, 5, 0], 'one fresh set of lights, no stale ones');
+    assert.strictEqual(io.events('status_change').at(-1), 'RACE');
+    a.fire('disconnect'); b.fire('disconnect');
+});
+
+test('host kick: the player is removed and told why, can join again; nobody else can kick, nor the host themselves', (t) => {
+    t.mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
+    const io = fakeIo();
+    setupSocketManager(io, noNet);
+    const { a, b } = startRace(t, io);
+    b.fire('kick_player', 'a');
+    a.fire('kick_player', 'a');
+    assert.deepStrictEqual(Object.keys(io.events('lobby_state_sync').at(-1).players).sort(), ['a', 'b']);
+    a.fire('kick_player', 'b');
+    assert.ok(b.sent.some(([ev]) => ev === 'kicked'), 'kicked player not told');
+    assert.ok(io.events('player_left').includes('b'));
+    assert.deepStrictEqual(Object.keys(io.events('lobby_state_sync').at(-1).players), ['a']);
+    b.fire('join_lobby', { username: 'B', teamId: 'haas' });
+    assert.ok(io.events('lobby_state_sync').at(-1).players.b.isSpectating, 'rejoins as a spectator mid-race');
+    a.fire('disconnect'); b.fire('disconnect');
+});

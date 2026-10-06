@@ -177,6 +177,7 @@
                 <div class="hud-stat"><span class="hs-label">POS</span><span class="hs-big" id="hud-rank">1</span><span class="hs-small">/<span id="hud-total">1</span></span></div>
                 <div class="hud-stat"><span class="hs-label">LAP</span><span class="hs-big" id="hud-lap">1</span><span class="hs-small" id="hud-laps"></span></div>
                 <div class="hud-stat"><span class="hs-label">PING</span><span class="ping-val" id="hud-ping">—</span><span class="hs-small">ms</span></div>
+                <button id="hud-host" class="hud-stat hud-host hidden" title="Session control (Esc)"><span class="hs-label">HOST</span><span class="hc-icon" aria-hidden="true"></span></button>
             </div>
             <!-- One dash card, bottom right: shift lights; gear | speed | DRS; lap time; last / best; sectors; fastest lap -->
             <div id="hud-bottom">
@@ -251,6 +252,23 @@
             <div class="rr-cols"><span>POS</span><span></span><span>DRIVER</span><span></span><span>LAPS</span><span>BEST LAP</span><span>PEN</span><span>TIME</span></div>
             <ol id="rr-list"></ol>
             <div class="rr-foot">Times include penalties · <span id="rr-count">back to lobby in 15 s</span></div>
+        </div>
+    </div>
+
+    <!-- Host session control (Esc / HOST button) and the pause screen everyone sees -->
+    <div id="session-panel" class="hidden">
+        <div class="rr-card hc-card" role="dialog" aria-labelledby="hc-title">
+            <div class="rr-head"><span class="hc-icon" aria-hidden="true"></span><span class="rr-title" id="hc-title">SESSION CONTROL</span><button id="hc-close" title="Close (Esc)">✕</button></div>
+            <p id="hc-note" class="hc-note"></p>
+            <div id="hc-host">
+                <div class="hc-actions">
+                    <button id="hc-pause" class="btn primary">Pause</button>
+                    <button id="hc-restart" class="btn small">Restart session</button>
+                </div>
+                <div class="rr-cols hc-cols"><span>DRIVERS</span></div>
+                <ol id="hc-drivers"></ol>
+            </div>
+            <div class="rr-foot" id="hc-foot">Only the host can pause, restart or remove drivers</div>
         </div>
     </div>
 
