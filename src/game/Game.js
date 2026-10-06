@@ -12,8 +12,8 @@ const JUMP_PENALTY_S = 10;    // moving before lights out
 const JUMP_MOVE_M = 0.5;      // further than this from the grid slot = moved
 const FINISH_WINDOW_S = 60;   // after the winner finishes, the rest have this long before they're classified DNF
 const INPUT_TIMEOUT_S = 0.3;  // no input for this long = controls released
-const INPUT_QUEUE_MAX = 12;   // inputs buffered per player; enough headroom for a 200 ms burst at 60 Hz
-const INPUT_REDUNDANCY = 6;   // the client resends this many past inputs per packet; re-align when further behind
+const INPUT_QUEUE_MAX = 4;    // inputs buffered per player; a burst beyond this drops its oldest
+const LAG_REALIGN_BATCHES = 30; // input packets in a row landing behind the server's slots (~0.5 s) = lasting lag: re-align
 const DRS_GAP_S = 1;          // race: within this of the car ahead at the detection point
 const SLIP_MAX = 0.2;         // drag cut right behind another car…
 const SLIP_MIN_M = 5, SLIP_RANGE_M = 40, SLIP_LAT_M = 3; // …fading out by 40 m behind, only roughly in line
@@ -140,7 +140,7 @@ class Game {
                 | (p.drsAvailable && FLAGS.drsAvailable) | (p.finished && FLAGS.finished)
                 | (p.lapValid && FLAGS.lapValid) | ((this.mode === 'quali' || this.settings.collisions === false) && FLAGS.ghost);
             c.push([this.index[id], r1(p.x), r1(p.y), +p.angle.toFixed(4), r1(p.speed), +p.steer.toFixed(3), flags,
-                    r1(p.vx), r1(p.vy), +(p.tow || 0).toFixed(2), p.applied ?? p.lastSeq]);
+                    r1(p.vx), r1(p.vy), +(p.tow || 0).toFixed(2), p.lastSeq]);
         }
         return { s: this.seq, t: +this.clock.toFixed(3), g: +this.time.toFixed(3), c };
     }
@@ -177,25 +177,22 @@ class Game {
     handleInputs(id, list) {
         const p = this.players[id];
         if (!p) return;
-        // Far behind the server's applied sequence (stalled tab, reconnect, or the seq counter wrapped):
-        // re-align so the car isn't starved forever. Use `applied` (last real input, not guessed slots) as the
-        // reference — guessed slots advance lastSeq without changing applied, so we don't spuriously re-align
-        // after a normal gap.
-        const maxSeq = list.length ? Math.max(...list.map((i) => i.seq)) : -1;
-        const refSeq = p.applied ?? p.lastSeq; // last slot where a real input was processed
-        if (maxSeq >= 0 && maxSeq < refSeq - INPUT_REDUNDANCY) {
-            // Client seq is way behind — re-align lastSeq to just before the first new input we haven't
-            // applied yet, but never go back past the last real input applied (to avoid re-applying old inputs).
-            const minSeq = Math.min(...list.map((i) => i.seq));
-            p.lastSeq = Math.max(refSeq, minSeq - 1);
-            p.applied = p.applied ?? p.lastSeq;
-            p.queue = [];
+        // Brand-new inputs that already sit behind the server's slots: the client lags them. Far behind (stalled tab,
+        // reconnect): re-align now. A little behind for a while (a lasting latency rise of even one tick): every input
+        // would land in an already-guessed slot and the car repeat a stale input forever, so re-align too. A brief jitter
+        // spike recovers by itself and is left alone. Resends/reordered packets carry nothing new and count for neither.
+        const fresh = list.filter((i) => i.seq > (p.maxSeen ?? -1));
+        if (fresh.length) {
+            const newest = Math.max(...fresh.map((i) => i.seq));
+            p.behind = newest <= p.lastSeq ? (p.behind || 0) + 1 : 0;
+            if (newest < p.lastSeq - INPUT_QUEUE_MAX || p.behind >= LAG_REALIGN_BATCHES) {
+                p.behind = 0;
+                p.lastSeq = Math.max(p.applied ?? -1, Math.min(...fresh.map((i) => i.seq)) - 1); // never re-apply a real input
+                p.queue = [];
+            }
+            p.maxSeen = newest;
         }
-        // Accept inputs that fell into the "guessed window" (applied < seq ≤ lastSeq): they haven't been
-        // applied as real inputs — only as guesses — so we can still process them.
-        // The top-of-queue boundary is based on `applied` when the queue is empty, so a gap after a stall
-        // doesn't permanently block resumption.
-        const top = p.queue.length ? p.queue[p.queue.length - 1].seq : (p.applied ?? -1);
+        const top = p.queue.length ? p.queue[p.queue.length - 1].seq : p.lastSeq;
         for (const i of list) if (i.seq > top && !p.queue.some((q) => q.seq === i.seq)) p.queue.push(i);
         p.queue.sort((a, b) => a.seq - b.seq);
         p.inputAt = this.clock;
@@ -336,19 +333,10 @@ class Game {
                 if (p.inputAt !== undefined && this.clock - p.inputAt > INPUT_TIMEOUT_S) p.input = { throttle: 0, brake: 0, steer: 0, drs: false };
                 // One input slot per tick. A missing input is guessed (last one repeated) in its own slot and its late copy
                 // dropped, so the server never runs an extra tick the client didn't: corrections stay input-sized, not a tick of travel
-                // Drain only up to `applied` — inputs in the guessed window (applied < seq ≤ lastSeq) are still real
-                // inputs that haven't been processed, so we must keep them available.
-                while (p.queue.length && p.queue[0].seq <= (p.applied ?? -1)) p.queue.shift();
+                while (p.queue.length && p.queue[0].seq <= p.lastSeq) p.queue.shift();
                 if (p.queue.length > INPUT_QUEUE_MAX) {
-                    // Queue overflowed: keep the newest INPUT_QUEUE_MAX items and align lastSeq to just before the
-                    // oldest kept item so the server processes them in order.
                     p.queue.splice(0, p.queue.length - INPUT_QUEUE_MAX);
-                    p.lastSeq = p.queue[0].seq - 1;
-                    p.applied = p.applied ?? p.lastSeq;
-                }
-                // If the front of the queue fell in the guessed window, snap lastSeq back to let it apply.
-                if (p.queue.length && p.queue[0].seq <= p.lastSeq) {
-                    p.lastSeq = p.queue[0].seq - 1;
+                    p.lastSeq = p.queue[0].seq - 1; // buffered too far ahead: skip to the newest four
                 }
                 if (p.queue.length && (p.lastSeq < 0 || p.queue[0].seq === p.lastSeq + 1)) {
                     p.input = p.queue.shift();

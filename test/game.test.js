@@ -973,21 +973,33 @@ test('input queue: one input per tick in order; a missing input is guessed in it
     assert.strictEqual(a.lastSeq, 4, 'input 4 missing: its slot runs on a repeat of input 3');
     assert.strictEqual(a.input.steer, 0.3);
     assert.strictEqual(a.starve, s0 + 1);
-    g.handleInputs('a', [inp(4, 0.9), inp(5, 0.5)]);                // 4 arrived after its slot was guessed: still applied (corrects the guess)
-    g.update();
-    assert.strictEqual(a.lastSeq, 4);                                // seq 4 applied, replacing the guess
-    assert.strictEqual(a.input.steer, 0.9);
+    g.handleInputs('a', [inp(4, 0.9), inp(5, 0.5)]);                // 4 arrives too late: its slot is gone
     g.update();
     assert.strictEqual(a.lastSeq, 5);
     assert.strictEqual(a.input.steer, 0.5);
     g.handleInputs('a', [6, 7, 8, 9, 10, 11, 12].map((s) => inp(s, 0)));
     g.update();
-    // Queue cap is 12: all 7 inputs fit without trimming, so update() applies seq 6 → lastSeq = 6
-    assert.strictEqual(a.lastSeq, 6, 'queue fits within cap: applies seq 6 normally');
-    g.handleInputs('a', [inp(4, 0.5)]);
-    // Sending a seq already past (4 < lastSeq 6) is silently discarded
+    assert.strictEqual(a.lastSeq, 9, 'queue capped at 4: skips ahead to the newest four');
+    g.handleInputs('a', [inp(6, 0.5)]);
     g.update();
-    assert.strictEqual(a.lastSeq, 7, 'an input older than one already applied is never applied');
+    assert.strictEqual(a.lastSeq, 10, 'an input older than one already applied is never applied');
+});
+
+test('input queue: a lasting latency rise (WiFi gets busier) never locks out the driver\'s controls', () => {
+    const g = new Game(io, [lp('a')], monza, RACE, () => {});
+    g.frozen = false;
+    const a = g.players.a, sent = [], wire = [];
+    let latency = 2;
+    for (let tick = 1; tick <= 240; tick++) {
+        if (tick === 60) latency = 4;                                 // ~33 ms more delay, from now on
+        const steer = tick >= 120 ? -1 : 0.2;                         // the driver turns hard left mid-lock
+        sent.push({ seq: tick, steer, throttle: 1, brake: 0, drs: false });
+        wire.push({ at: tick + latency, list: sent.slice(-6) });      // newest + 5 resends, like the client
+        for (const pkt of wire.filter((w) => w.at === tick)) g.handleInputs('a', pkt.list);
+        g.update();
+    }
+    assert.strictEqual(a.input.steer, -1, 'the server must be applying the driver\'s current input');
+    assert.ok(a.applied >= 240 - 4 - 4, `newest real input applied: ${a.applied}`);
 });
 
 test('input queue: a client far behind the server slots (tab stall, reconnect) is re-aligned, not ignored forever', () => {

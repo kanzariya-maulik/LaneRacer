@@ -159,7 +159,7 @@ function toggleAssist() {
     const cur = store.get('lanrace.assist') || '100,100';
     const cycle = { '100,100': '100,0', '100,0': '0,100', '0,100': '0,0', '0,0': '100,100',
                     'full': '100,0', 'off': '100,100' };
-    window.setAssist?.(cycle[cur] ?? '0,0');
+    window.setAssist?.(cycle[cur] ?? '0,0', true); // instant: the server must switch the same tick the predictor does
 }
 window.onAssistChange = (v) => {
     if (predictor) { predictor.assist = v; if (predictor.car) predictor.car.assist = v; }
