@@ -7,3 +7,6 @@ refs/
 scripts/build/
 
 .DS_Store
+
+# Network log (src/netlog.js)
+logs/

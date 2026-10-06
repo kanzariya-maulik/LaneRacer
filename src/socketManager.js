@@ -2,6 +2,7 @@ const Game = require('./game/Game');
 const Track = require('./game/Track');
 const lobby = require('./lobby');
 const { withNetSim } = require('./netsim');
+const netlog = require('./netlog');
 
 const TRACKS = Track.loadAll(); // throws at startup if track data is missing
 const RESULTS_MS = 8000;
@@ -43,6 +44,7 @@ function lobbySnapshot() {
 function setStatus(io, status) {
     state.status = status;
     io.emit('status_change', status);
+    netlog.log(`[SESSION] ${status} | track ${state.settings.trackId} | drivers ${Object.values(state.players).filter((p) => !p.isSpectating).map((p) => p.username).join(', ')}`);
 }
 
 let net = null; // WebRTC UDP transport (src/webrtcManager.js); tests pass a stub
@@ -51,6 +53,8 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
     net = transport;
     io.on('connection', (socket) => {
         console.log(`Player connected: ${socket.id}`);
+        netlog.log(`[CONNECT] ${socket.id} | ${socket.handshake?.address || '?'} | ${socket.handshake?.headers?.['user-agent'] || '?'}`);
+        let lastTelemetry = 0;
         // WebRTC signalling over Socket.IO; inputs arriving on the UDP DataChannel go to the game like socket inputs
         net.setupPeer(socket, (id, inputData) => {
             applyInputLater(id, inputData);
@@ -74,6 +78,7 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
                 isSpectating: state.status !== 'LOBBY'
             };
             if (isFirstPlayer) state.hostId = socket.id;
+            netlog.log(`[JOIN] ${state.players[socket.id].username} (${socket.id}) | team ${check.team.id}`);
 
             // Everyone (visitors included) needs the new counts and the current host
             io.emit('lobby_state_sync', lobbySnapshot());
@@ -137,8 +142,20 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
             applyInputLater(socket.id, inputData);
         });
 
+        // Every 2 s from each browser: its view of the link, logged with the server's view of this driver's inputs
+        socket.on('latency_telemetry', (data) => {
+            const player = state.players[socket.id], d = netlog.sanitizeTelemetry(data), now = Date.now();
+            if (!player || !d || now - lastTelemetry < 1000) return; // drivers only; a flooding client can't flood the log
+            lastTelemetry = now;
+            const car = gameInstance?.players[socket.id], f = (v, u = '') => (v === null ? '?' : `${Math.round(v * 10) / 10}${u}`);
+            netlog.log(`[NET] ${player.username} (${socket.id}) | ${d.link} ping ${f(d.rttMs, 'ms')} jitter ${f(d.jitterMs, 'ms')} ` +
+                `loss ${f(d.lossPct, '%')} delay ${f(d.delayMs, 'ms')} predErr ${f(d.predErrCm, 'cm')} fps ${f(d.fps)}` +
+                (car ? ` | late inputs ${car.starveLast ?? 0}/s re-syncs ${car.realigns || 0}` : ''));
+        });
+
         socket.on('disconnect', () => {
             console.log(`Player disconnected: ${socket.id}`);
+            netlog.log(`[DISCONNECT] ${state.players[socket.id]?.username ?? 'visitor'} (${socket.id})`);
             net.cleanup(socket.id);
             if (!state.players[socket.id]) return;
 

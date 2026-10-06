@@ -170,7 +170,29 @@ setInterval(() => {
         clientState.net.link = 'TCP';
         socket.emit('net_ping', t, (back) => { clientState.net.rttMs = performance.now() - back; });
     }
+    showPing(clientState.net.rttMs); // last second's reading
 }, 1000);
+
+// Ping on the HUD and in the lobby header, coloured for a LAN: green < 35 ms, amber < 80 ms, red beyond
+function showPing(rtt) {
+    const level = rtt === null ? '' : rtt < 35 ? 'good' : rtt < 80 ? 'fair' : 'bad';
+    for (const id of ['hud-ping', 'lobby-ping']) {
+        const el = document.getElementById(id);
+        if (!el) continue;
+        el.textContent = rtt === null ? '—' : Math.round(rtt);
+        el.dataset.level = level;
+    }
+}
+
+// Every 2 s: this browser's view of the link, for the server's network log (logs/latency.log)
+setInterval(() => {
+    if (!socket.connected) return;
+    const n = window.lanraceNet || {};
+    socket.emit('latency_telemetry', {
+        rttMs: clientState.net.rttMs, link: clientState.net.link, jitterMs: n.jitterMs, lossPct: n.lossPct,
+        delayMs: n.delayMs, predErrCm: n.predErrCm, fps: window.lanraceFps,
+    });
+}, 2000);
 socket.on('net_stats', (s) => { clientState.net.tickMs = s.tickMs; clientState.net.starve = s.starve || {}; });
 
 

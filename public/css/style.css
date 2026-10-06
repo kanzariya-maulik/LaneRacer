@@ -639,7 +639,12 @@ input:disabled { opacity: 0.7; }
 /* Top left: position and lap, one slim row */
 #hud-top { top: var(--pad); left: var(--pad); gap: 0.5em; }
 .hud-stat { display: flex; align-items: baseline; gap: 0.35em; padding: 0.35em 0.9em 0.4em; color: #fff; font-variant-numeric: tabular-nums; }
-.hs-label { font-size: 0.72em; font-weight: 800; letter-spacing: 0.15em; color: #94a3b8; }
+.ping-val { font-weight: 800; color: #94a3b8; }
+.ping-val[data-level="good"] { color: #22c55e; }
+.ping-val[data-level="fair"] { color: #f59e0b; }
+.ping-val[data-level="bad"] { color: #ef4444; }
+.lobby-ping { font-size: 0.8rem; letter-spacing: 0.1em; color: #64748b; font-variant-numeric: tabular-nums; }
+.hs-label {font-size: 0.72em; font-weight: 800; letter-spacing: 0.15em; color: #94a3b8; }
 .hs-big { font-size: 1.7em; font-weight: 900; line-height: 1; }
 .hs-small { font-size: 0.95em; font-weight: 700; color: #cbd5e1; }
 

@@ -187,6 +187,7 @@ class Game {
             p.behind = newest <= p.lastSeq ? (p.behind || 0) + 1 : 0;
             if (newest < p.lastSeq - INPUT_QUEUE_MAX || p.behind >= LAG_REALIGN_BATCHES) {
                 p.behind = 0;
+                p.realigns = (p.realigns || 0) + 1; // network log: each one is a visible correction for this driver
                 p.lastSeq = Math.max(p.applied ?? -1, Math.min(...fresh.map((i) => i.seq)) - 1); // never re-apply a real input
                 p.queue = [];
             }
@@ -237,7 +238,7 @@ class Game {
         this.tickMs = this.tickMs === undefined ? ms : this.tickMs + (ms - this.tickMs) * 0.05;
         if (this.seq % TICK_RATE === 0) {
             const starve = {};
-            for (const id in this.players) { starve[id] = this.players[id].starve; this.players[id].starve = 0; }
+            for (const id in this.players) { starve[id] = this.players[id].starveLast = this.players[id].starve; this.players[id].starve = 0; }
             this.io.emit('net_stats', { tickMs: +this.tickMs.toFixed(2), starve });
         }
     }

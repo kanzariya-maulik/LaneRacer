@@ -1869,6 +1869,7 @@ function frame(now) {
         fpsSince = now;
     } else if (now - fpsSince >= 1000) {
         const fps = (fpsFrames * 1000) / (now - fpsSince);
+        window.lanraceFps = fps; // network log telemetry (socket.js)
         const next = adaptStep(res, fps);
         if (next.ratio !== res.ratio) renderer.setPixelRatio(next.ratio);
         res = next;

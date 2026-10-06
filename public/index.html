@@ -16,6 +16,7 @@
             <header class="lobby-header">
                 <h1 class="glow-title">LAN RACE</h1>
                 <div id="session-summary" class="session-summary"></div>
+                <span class="lobby-ping">PING <span class="ping-val" id="lobby-ping">—</span> ms</span>
             </header>
 
             <div class="lobby-panels">
@@ -175,6 +176,7 @@
             <div id="hud-top">
                 <div class="hud-stat"><span class="hs-label">POS</span><span class="hs-big" id="hud-rank">1</span><span class="hs-small">/<span id="hud-total">1</span></span></div>
                 <div class="hud-stat"><span class="hs-label">LAP</span><span class="hs-big" id="hud-lap">1</span><span class="hs-small" id="hud-laps"></span></div>
+                <div class="hud-stat"><span class="hs-label">PING</span><span class="ping-val" id="hud-ping">—</span><span class="hs-small">ms</span></div>
             </div>
             <!-- One dash card, bottom right: shift lights; gear | speed | DRS; lap time; last / best; sectors; fastest lap -->
             <div id="hud-bottom">
