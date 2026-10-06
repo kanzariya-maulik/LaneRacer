@@ -195,6 +195,17 @@ input:disabled { opacity: 0.7; }
 .graphics-picker small { display: block; font-size: 0.7rem; color: #64748b; }
 #graphics-note { color: #94a3b8; }
 
+/* Assist sliders */
+.assist-sliders { padding: 2px 0 4px; }
+.assist-row { display: flex; justify-content: space-between; align-items: baseline; margin: 6px 0 2px; }
+.assist-label { font-size: 0.85rem; color: #cbd5e1; }
+.assist-val { font-size: 0.8rem; font-weight: 700; color: var(--f1-red); min-width: 38px; text-align: right; }
+.custom-slider { display: block; width: 100%; -webkit-appearance: none; appearance: none; height: 4px; border-radius: 2px; outline: none; cursor: pointer; margin: 0 0 6px;
+    background: linear-gradient(to right, var(--f1-red) 0%, var(--f1-red) var(--pct, 100%), #334155 var(--pct, 100%), #334155 100%); }
+.custom-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 2px solid var(--f1-red); cursor: pointer; }
+.custom-slider::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 2px solid var(--f1-red); cursor: pointer; }
+.assist-sliders small { display: block; font-size: 0.7rem; color: #64748b; margin-top: 2px; }
+
 /* Buttons */
 .btn {
     width: 100%;

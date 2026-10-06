@@ -189,16 +189,16 @@ test('assist is each player\'s own choice: picked at join, changed any time, app
     const b = io.connect('b');
     b.fire('join_lobby', { username: 'B', teamId: 'haas' });
     let lob = io.events('lobby_state_sync').at(-1);
-    assert.deepStrictEqual([lob.players.a.assist, lob.players.b.assist], ['off', 'full']);
+    assert.deepStrictEqual([lob.players.a.assist, lob.players.b.assist], [{ steer: 0, brake: 0 }, { steer: 1, brake: 1 }]);
     a.fire('update_settings', { trackId: 'monza', maxLaps: 1, qualifying: true });
     a.fire('toggle_ready', true); b.fire('toggle_ready', true);
     a.fire('start_game');
     const init = io.events('game_init').at(-1);
-    assert.strictEqual(init.players.a.assist, 'off');
+    assert.deepStrictEqual(init.players.a.assist, { steer: 0, brake: 0 });
     b.fire('set_assist', 'off');
-    assert.strictEqual(init.players.b.assist, 'off', 'running car switches');
+    assert.deepStrictEqual(init.players.b.assist, { steer: 0, brake: 0 }, 'running car switches');
     b.fire('set_assist', 'turbo');
-    assert.strictEqual(init.players.b.assist, 'full');
+    assert.deepStrictEqual(init.players.b.assist, { steer: 1, brake: 1 }); // unknown → full
     a.fire('disconnect');
     b.fire('disconnect');
 });

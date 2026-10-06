@@ -1,6 +1,6 @@
 // The car's own motion for one tick: assist, tyres, pit wall, barriers, pit lane limiter.
 // Shared: the server runs it for every car, the browser runs it to predict its own car.
-import { C, step } from './carphysics.js';
+import { C, step, parseAssist } from './carphysics.js';
 import Physics from './physics.js';
 import { brakeAssist } from './assist.js';
 import { slopeAt, roadAt } from './elevation.js';
@@ -68,7 +68,7 @@ export function driveCar(p, input, t, dt) {
     const road = slopeAt(t, p.x, p.y, p.angle, p.roadI); // hills: gravity, crests and compressions (flat without track z)
     p.grade = road.grade; p.vcurv = road.vcurv;
     if (road.i !== undefined) p.roadI = road.i;
-    const used = p.assist === 'full' && !p.inPit ? brakeAssist(p, input, t, before) : input;
+    const used = parseAssist(p.assist).brake > 0 && !p.inPit ? brakeAssist(p, input, t, before, parseAssist(p.assist).brake) : input;
     p.dragMul = (p.drs ? DRS_DRAG : 1) * (1 - (p.tow || 0));
     step(p, used, dt, scale, grass, p.assist);
 

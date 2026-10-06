@@ -41,6 +41,7 @@ lineSelect.addEventListener('change', () => {
 // Personal choices, remembered per browser: assist (sent to the server) and how other cars are drawn
 function remembered(id, key, fallback, onChange) {
     const sel = document.getElementById(id);
+    if (!sel) return null;
     try { sel.value = localStorage.getItem(key) || fallback; } catch (e) { /* storage blocked: default */ }
     if (!sel.value) sel.value = fallback;
     (window.lanraceMem ||= {})[key] = sel.value;
@@ -51,20 +52,93 @@ function remembered(id, key, fallback, onChange) {
     });
     return sel;
 }
-const assistSelect = remembered('assist-select', 'lanrace.assist', 'full', (v) => window.setAssist?.(v));
+
+let lastJoin = null; // declared before the assist restore below reads it (join / reconnect state)
+
+// ── Assist sliders ──────────────────────────────────────────────────────────
+const assistSteerSlider = document.getElementById('assist-steer-slider');
+const assistSteerVal    = document.getElementById('assist-steer-val');
+const assistBrakeSlider = document.getElementById('assist-brake-slider');
+const assistBrakeVal    = document.getElementById('assist-brake-val');
+
+function updateSliderTrack(slider) {
+    if (!slider) return;
+    const pct = ((slider.value - slider.min) / (slider.max - slider.min)) * 100;
+    slider.style.setProperty('--pct', pct + '%');
+}
+
+function getAssistString() {
+    const s = assistSteerSlider ? +assistSteerSlider.value : 100;
+    const b = assistBrakeSlider ? +assistBrakeSlider.value : 100;
+    return `${s},${b}`;
+}
+
+function applyAssistString(str, instantSave = false) {
+    // Accept both legacy 'full'/'off' and new '0,0'–'100,100' format
+    let s = 100, b = 100;
+    if (str === 'off') { s = 0; b = 0; }
+    else if (str === 'full') { s = 100; b = 100; }
+    else {
+        const parts = String(str).split(',');
+        if (parts.length === 2) {
+            const ps = parseFloat(parts[0]), pb = parseFloat(parts[1]);
+            if (Number.isFinite(ps) && Number.isFinite(pb)) { s = Math.round(ps); b = Math.round(pb); }
+        }
+    }
+    if (assistSteerSlider) { assistSteerSlider.value = s; updateSliderTrack(assistSteerSlider); }
+    if (assistSteerVal)    assistSteerVal.textContent = `${s}%`;
+    if (assistBrakeSlider) { assistBrakeSlider.value = b; updateSliderTrack(assistBrakeSlider); }
+    if (assistBrakeVal)    assistBrakeVal.textContent = `${b}%`;
+    const v = `${s},${b}`;
+    (window.lanraceMem ||= {})['lanrace.assist'] = v;
+    if (lastJoin) lastJoin.assist = v;
+    window.onAssistChange?.(v);
+    if (instantSave) {
+        try { localStorage.setItem('lanrace.assist', v); } catch (e) { /* blocked */ }
+        if (clientState.players?.[clientState.me]) socket.emit('set_assist', v);
+    } else {
+        debouncedSaveAssist(v);
+    }
+}
+
+function onAssistSliderInput() {
+    if (assistSteerSlider) { updateSliderTrack(assistSteerSlider); if (assistSteerVal) assistSteerVal.textContent = `${assistSteerSlider.value}%`; }
+    if (assistBrakeSlider) { updateSliderTrack(assistBrakeSlider); if (assistBrakeVal) assistBrakeVal.textContent = `${assistBrakeSlider.value}%`; }
+    applyAssistString(getAssistString(), false);
+}
+
+assistSteerSlider?.addEventListener('input', onAssistSliderInput);
+assistBrakeSlider?.addEventListener('input', onAssistSliderInput);
+
+let _saveAssistTimer = null;
+function debouncedSaveAssist(v) {
+    clearTimeout(_saveAssistTimer);
+    _saveAssistTimer = setTimeout(() => {
+        try { localStorage.setItem('lanrace.assist', v); } catch (e) { /* blocked */ }
+        if (clientState.players?.[clientState.me]) socket.emit('set_assist', v);
+    }, 300);
+}
+
+// Global entry point used by game3d.js (Q key / gamepad) and the auto-restore below
+window.setAssist = (v, instantSave = false) => { applyAssistString(v, instantSave); };
+
+// Restore saved assist on page load
+(function restoreAssist() {
+    try {
+        const saved = localStorage.getItem('lanrace.assist');
+        applyAssistString(saved || '100,100', true);
+    } catch (e) {
+        applyAssistString('100,100', true);
+    }
+})();
+
+// Other remembered selects
 remembered('others-select', 'lanrace.others', 'present');
 const volumeRange = document.getElementById('volume-range');
 try { volumeRange.value = localStorage.getItem('lanrace.volume') ?? 70; } catch (e) { /* default */ }
 volumeRange.addEventListener('input', () => window.lanraceAudio?.setVolume(volumeRange.value / 100));
 remembered('engine-select', 'lanrace.engine', 'all', (v) => window.lanraceAudio?.setMode(v));
-window.setAssist = (v) => { // lobby select and the in-race Q key both land here
-    assistSelect.value = v;
-    window.lanraceMem['lanrace.assist'] = v;
-    try { localStorage.setItem('lanrace.assist', v); } catch (e) { /* not remembered */ }
-    if (lastJoin) lastJoin.assist = v;
-    if (clientState.players[clientState.me]) socket.emit('set_assist', v); // joined (also after a reconnect)
-    window.onAssistChange?.(v);
-};
+remembered('engine-type-select', 'lanrace.engineType', 'v8', (v) => window.lanraceAudio?.setEngineType(v));
 
 let isJoined = false;
 let amReady = false;
@@ -138,14 +212,13 @@ inputUser.focus();
 btnJoin.addEventListener('click', () => {
     if (!selectedTeam) return window.appendChat('SYSTEM', '#f43f5e', 'Pick a team first.');
     const username = inputUser.value.trim() || `Player${Math.floor(Math.random() * 1000)}`;
-    lastJoin = { username, teamId: selectedTeam, assist: assistSelect.value };
+    lastJoin = { username, teamId: selectedTeam, assist: getAssistString() };
     window.lanraceAudio?.unlock(); // the click is the gesture browsers need to start sound
     socket.emit('join_lobby', lastJoin);
     setJoinedUI(true);
 });
 
 // A reconnect (WiFi drop, sleep, server restart) is a new socket the server doesn't know: join again as the same driver
-let lastJoin = null;
 socket.on('connect', () => {
     if (!lastJoin || !isJoined) return;
     amReady = false;

@@ -30,15 +30,37 @@ const C = {
     WALL_KEEP: 0.4,        // share of speed kept after hitting the barrier
 };
 
+// Parse an assist value into a normalised { steer: 0–1, brake: 0–1 } object.
+// Accepts: legacy 'off'/'full' strings, the new '0,0'–'100,100' string, or a pre-parsed object.
+function parseAssist(assist) {
+    if (assist && typeof assist === 'object') return assist;
+    if (assist === 'off') return { steer: 0, brake: 0 };
+    if (assist === 'full' || assist == null) return { steer: 1, brake: 1 };
+    // '50,75' format
+    const parts = String(assist).split(',');
+    if (parts.length === 2) {
+        const s = parseFloat(parts[0]) / 100, b = parseFloat(parts[1]) / 100;
+        if (Number.isFinite(s) && Number.isFinite(b)) {
+            const cl = (v) => Math.max(0, Math.min(1, v));
+            return { steer: cl(s), brake: cl(b) };
+        }
+    }
+    return { steer: 1, brake: 1 };
+}
+
 function step(car, input, dt, scale, offTrack = false, assist = 'off') {
     const mu = offTrack ? C.GRASS_MU : C.MU;
+    const { steer: assistSteer, brake: assistBrake } = parseAssist(assist);
+    // k is the speed-dependent blend (1 = full assist below ASSIST_FULL_KMH, 0 = none above ASSIST_OFF_KMH)
 
     let vx = car.vx / scale, vy = car.vy / scale;
     let fx = Math.cos(car.angle), fy = Math.sin(car.angle);
     let vf = vx * fx + vy * fy;
     const v = Math.hypot(vx, vy);
     const roll = C.ROLL_G * C.G + (offTrack ? C.GRASS_DRAG * v : 0);
-    const k = assist === 'off' ? 0 : Math.max(0, Math.min(1, (C.ASSIST_OFF_KMH - v * 3.6) / (C.ASSIST_OFF_KMH - C.ASSIST_FULL_KMH)));
+    const speedBlend = Math.max(0, Math.min(1, (C.ASSIST_OFF_KMH - v * 3.6) / (C.ASSIST_OFF_KMH - C.ASSIST_FULL_KMH)));
+    // k for steer assist, kb for brake assist — each scaled by the player's chosen strength
+    const k = assistSteer * speedBlend;
     const downforce = 0.5 * C.RHO * C.CLA * v * v;
     // Road shape (drive.js sets these from the track): a compression presses the car down, a crest makes it go light
     const grade = car.grade || 0, load = Math.max(0, 1 + ((car.vcurv || 0) * v * v) / C.G);
@@ -94,4 +116,4 @@ function step(car, input, dt, scale, offTrack = false, assist = 'off') {
     car.speed = vf * scale;
 }
 
-export { C, step };
+export { C, step, parseAssist };

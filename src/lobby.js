@@ -58,7 +58,24 @@ function sanitizeInputs(payload) {
         .map((i) => ({ seq: i.seq, ...sanitizeInput(i) }));
 }
 
-// Each player's own driving assist: 'full' (steering + braking help) or 'off'
-const sanitizeAssist = (a) => (a === 'off' ? 'off' : 'full');
+// Each player's own driving assist.
+// Accepts the legacy 'full'/'off' strings OR the new numeric 'steerPct,brakePct' format (0–100 each).
+// Normalised to an object { steer: 0–1, brake: 0–1 } used by carphysics / drive.
+function sanitizeAssist(a) {
+    if (typeof a === 'string') {
+        // Legacy: 'full' → 100% both, 'off' → 0% both
+        if (a === 'off') return { steer: 0, brake: 0 };
+        if (a === 'full') return { steer: 1, brake: 1 };
+        // New numeric format: 'steerPct,brakePct'
+        const parts = a.split(',');
+        if (parts.length === 2) {
+            const s = parseFloat(parts[0]), b = parseFloat(parts[1]);
+            if (Number.isFinite(s) && Number.isFinite(b)) {
+                return { steer: clamp(s / 100, 0, 1), brake: clamp(b / 100, 0, 1) };
+            }
+        }
+    }
+    return { steer: 1, brake: 1 }; // safe default: full assist
+}
 
 module.exports = { TEAMS, MAX_RACERS, sanitizeUsername, sanitizeChat, sanitizeSettings, sanitizeInput, sanitizeInputs, sanitizeAssist, canJoinTeam, pickRacers };

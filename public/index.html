@@ -56,13 +56,19 @@
                                 </select>
                                 <small>R / gamepad X during a race</small>
                             </label>
-                            <label class="graphics-picker">Assist
-                                <select id="assist-select">
-                                    <option value="full" selected>Full (steering + braking)</option>
-                                    <option value="off">Off</option>
-                                </select>
-                                <small>Q / gamepad View during a race</small>
-                            </label>
+                            <div class="graphics-picker assist-sliders">
+                                <div class="assist-row">
+                                    <span class="assist-label">Steering Assist</span>
+                                    <span id="assist-steer-val" class="assist-val">100%</span>
+                                </div>
+                                <input type="range" id="assist-steer-slider" min="0" max="100" value="100" class="custom-slider" aria-label="Steering assist">
+                                <div class="assist-row">
+                                    <span class="assist-label">Braking Assist</span>
+                                    <span id="assist-brake-val" class="assist-val">100%</span>
+                                </div>
+                                <input type="range" id="assist-brake-slider" min="0" max="100" value="100" class="custom-slider" aria-label="Braking assist">
+                                <small>Q cycles presets · gamepad View during a race</small>
+                            </div>
                             <label class="graphics-picker">Other cars
                                 <select id="others-select">
                                     <option value="present" selected>Where they really are</option>
@@ -80,6 +86,16 @@
                                     <option value="off">Off</option>
                                 </select>
                                 <small>M mutes during a race</small>
+                            </label>
+                            <label class="graphics-picker">Engine sound style
+                                <select id="engine-type-select">
+                                    <option value="v8" selected>F1 2.4L V8 (Classic Scream)</option>
+                                    <option value="v6">F1 1.6L V6 Turbo (Modern Growl)</option>
+                                    <option value="muscle">7.0L V8 Muscle (Deep Bass Rumble)</option>
+                                    <option value="screamer">F1 Classic Screamer (High-RPM Howl)</option>
+                                    <option value="rotary">4-Rotor Wankel (787B Shriek)</option>
+                                    <option value="boxer">Flat-6 GT3 (Throaty Boxer Rasp)</option>
+                                </select>
                             </label>
                         </div>
                     </details>

@@ -30,8 +30,9 @@ const BRAKE_MARGIN = 0.7;  // brake when a corner ahead needs this share of the 
 const LOOK_EXTRA_M = 30;
 const AIM = 0.95;          // aim a little under the limit: a margin for the driver's line
 
-// Full assist: lift and brake when a corner ahead can't be made at this speed; the driver still steers
-function brakeAssist(car, input, track, near) {
+// Full assist: lift and brake when a corner ahead can't be made at this speed; the driver still steers.
+// brakeStrength (0–1): scales how aggressively the assist brakes (1 = full, 0.5 = half-strength braking).
+function brakeAssist(car, input, track, near, brakeStrength = 1) {
     const { path, cum, safeSpeed, scale } = track;
     const v = car.speed / scale;
     if (v < 5 || input.brake >= 1) return input;
@@ -45,7 +46,12 @@ function brakeAssist(car, input, track, near) {
         const s = safeSpeed[j] * AIM;
         // Downforce fades as the car slows, so judge against the grip left at the corner speed
         // Downhill (grade < 0) gravity eats into the braking: brake earlier; uphill it helps
-        if (v > s && (v * v - s * s) / (2 * Math.max(d, 1)) > BRAKE_MARGIN * C.MU * (C.G + DOWN * s * s) + C.G * (car.grade || 0)) return { throttle: 0, brake: 1, steer: input.steer };
+        if (v > s && (v * v - s * s) / (2 * Math.max(d, 1)) > BRAKE_MARGIN * C.MU * (C.G + DOWN * s * s) + C.G * (car.grade || 0)) {
+            // Partial brake assist: blend between driver's input and full brake based on strength
+            const assistBrake = Math.max(input.brake, brakeStrength);
+            const assistThrottle = brakeStrength >= 1 ? 0 : input.throttle * (1 - brakeStrength);
+            return { throttle: assistThrottle, brake: assistBrake, steer: input.steer };
+        }
     }
     return input;
 }

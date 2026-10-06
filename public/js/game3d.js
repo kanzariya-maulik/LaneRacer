@@ -155,11 +155,28 @@ function toggleLine() {
 let padView = false;
 function toggleAssist() {
     if (isSpectator()) return;
-    window.setAssist?.(store.get('lanrace.assist') === 'off' ? 'full' : 'off');
+    // Cycle: Full (100,100) → Steer only (100,0) → Brake only (0,100) → Off (0,0) → Full
+    const cur = store.get('lanrace.assist') || '100,100';
+    const cycle = { '100,100': '100,0', '100,0': '0,100', '0,100': '0,0', '0,0': '100,100',
+                    'full': '100,0', 'off': '100,100' };
+    window.setAssist?.(cycle[cur] ?? '0,0');
 }
 window.onAssistChange = (v) => {
     if (predictor) { predictor.assist = v; if (predictor.car) predictor.car.assist = v; }
-    if (clientState.status !== 'LOBBY') window.showBanner?.(`ASSIST: ${v === 'off' ? 'OFF' : 'FULL'}`, true);
+    if (clientState.status !== 'LOBBY') {
+        // Build a short human-readable label for the banner
+        let label = 'ASSIST: ';
+        if (v === 'off' || v === '0,0') { label += 'OFF'; }
+        else if (v === 'full' || v === '100,100') { label += 'FULL'; }
+        else {
+            const parts = String(v).split(',');
+            const s = parseFloat(parts[0] ?? 100), b = parseFloat(parts[1] ?? 100);
+            if (Number.isFinite(s) && Number.isFinite(b)) {
+                label += `STEER ${Math.round(s)}%  BRAKE ${Math.round(b)}%`;
+            } else { label += v.toUpperCase(); }
+        }
+        window.showBanner?.(label, true);
+    }
 };
 
 function isSpectator() {

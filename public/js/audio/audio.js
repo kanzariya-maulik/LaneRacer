@@ -1,10 +1,11 @@
-// LanRace sound: the AudioContext, your car's V8, the 4 nearest other cars in 3D (HRTF + Doppler), one-shots, wind,
+// LanRace sound: the AudioContext, your car's engine synth, the 4 nearest other cars in 3D (HRTF + Doppler), one-shots, wind,
 // and the recording slot (public/sounds/manifest.json). Everything is driven by game3d.js through update()/event().
 import { pickVoices } from './voices.js';
 import { doppler, pickLoops, engineFx } from './mix.js';
-import { V8Synth } from './v8.js';
+import { V8Synth, ENGINE_PROFILES } from './v8.js';
 import * as S from './sfx.js';
 
+const VALID_PROFILES = Object.keys(ENGINE_PROFILES);
 const MAX_OTHERS = 4, MAX_DIST_M = 300, REF_M = 15, PICK_EVERY_S = 0.25;
 const OWN_GAIN = 0.55, OTHER_GAIN = 0.6;
 const store = {
@@ -16,6 +17,8 @@ let ctx = null, master = null, noise = null, wind = null, hasWorklet = false, st
 let slots = {}, muted = false, ownVoice = null, lastPick = -1, broken = false, engineKind = 'none';
 let volume = Math.min(1, Math.max(0, +(store.get('lanrace.volume') ?? 70) / 100));
 let mode = ['all', 'mine', 'off'].includes(store.get('lanrace.engine')) ? store.get('lanrace.engine') : 'all';
+// Restore saved engine type; default to the classic v8
+let engineType = VALID_PROFILES.includes(store.get('lanrace.engineType')) ? store.get('lanrace.engineType') : 'v8';
 const others = new Map();   // car id → voice
 const pool = [];            // free voices for other cars
 let picked = [];
@@ -29,7 +32,7 @@ export function init() {
         if (!ctx) return;
         if (document.hidden || muted) ctx.suspend(); else ctx.resume();
     });
-    window.lanraceAudio = { init, unlock, update, event, setVolume, setMode, toggleMute, debug };
+    window.lanraceAudio = { init, unlock, update, event, setVolume, setMode, setEngineType, toggleMute, debug };
 }
 
 // Browsers only start audio from a user gesture: the first click/key (Join counts) creates the context
@@ -85,8 +88,8 @@ async function loadSlots() {
     return out;
 }
 
-// One engine voice: recorded loops (slot) > V8 worklet > oscillator fallback; optional 3D panner
-function makeVoice(spatial) {
+// One engine voice: recorded loops (slot) > engine worklet > oscillator fallback; optional 3D panner
+function makeVoice(spatial, profile = engineType) {
     const out = ctx.createGain();
     out.gain.value = 0;
     let panner = null;
@@ -112,11 +115,12 @@ function makeVoice(spatial) {
                     p.src.playbackRate.setTargetAtTime(rpm / p.rpm, t, 0.01);
                 });
             },
+            setProfile() { /* recorded loops don't switch profiles */ },
             stop() { parts.forEach((p) => p.src.stop()); out.disconnect(); },
         };
     }
     if (hasWorklet) {
-        const node = new AudioWorkletNode(ctx, 'v8', { numberOfInputs: 0, outputChannelCount: [1] });
+        const node = new AudioWorkletNode(ctx, 'v8', { numberOfInputs: 0, outputChannelCount: [1], processorOptions: { profile } });
         node.connect(out);
         const P = { rpm: node.parameters.get('rpm'), load: node.parameters.get('load'), cut: node.parameters.get('cut'), stutter: node.parameters.get('stutter'), crackle: node.parameters.get('crackle') };
         return {
@@ -124,26 +128,28 @@ function makeVoice(spatial) {
             set(rpm, load, cut, stutter, crackle) {
                 P.rpm.value = rpm; P.load.value = load; P.cut.value = cut; P.stutter.value = stutter; P.crackle.value = crackle;
             },
+            setProfile(p) { node.port.postMessage({ profile: p }); },
             stop() { node.port.postMessage('stop'); node.disconnect(); out.disconnect(); },
         };
     }
-    if (ctx.createScriptProcessor) { // same V8 synth on the main thread (insecure origins have no AudioWorklet)
-        const node = ctx.createScriptProcessor(1024, 0, 1), synth = new V8Synth(ctx.sampleRate, (Math.random() * 4294967295) >>> 0);
+    if (ctx.createScriptProcessor) { // same synth on the main thread (insecure origins have no AudioWorklet)
+        const node = ctx.createScriptProcessor(1024, 0, 1), synth = new V8Synth(ctx.sampleRate, (Math.random() * 4294967295) >>> 0, profile);
         const target = { rpm: 4500, load: 0, cut: 0, stutter: 0, crackle: 0 }, p = { rpm: 4500, load: 0, cut: 0, stutter: 0, crackle: 0 };
         let snap = true;
         node.onaudioprocess = (e) => {
-            const out = e.outputBuffer.getChannelData(0);
-            for (let i = 0; i < out.length; i += 128) { // 128-sample sub-blocks, eased like the worklet
+            const outBuf = e.outputBuffer.getChannelData(0);
+            for (let i = 0; i < outBuf.length; i += 128) { // 128-sample sub-blocks, eased like the worklet
                 p.rpm = snap ? target.rpm : p.rpm + (target.rpm - p.rpm) * 0.35; snap = false;
                 p.load += (target.load - p.load) * 0.25;
                 p.cut = target.cut; p.stutter = target.stutter; p.crackle = target.crackle;
-                synth.render(out.subarray(i, i + 128), Math.min(128, out.length - i), p);
+                synth.render(outBuf.subarray(i, i + 128), Math.min(128, outBuf.length - i), p);
             }
         };
         node.connect(out);
         return {
             out, panner,
             set(rpm, load, cut, stutter, crackle) { target.rpm = rpm; target.load = load; target.cut = cut; target.stutter = stutter; target.crackle = crackle; },
+            setProfile(p) { synth.setProfile(p); },
             stop() { node.onaudioprocess = null; node.disconnect(); out.disconnect(); },
         };
     }
@@ -159,6 +165,7 @@ function makeVoice(spatial) {
             saw.frequency.setTargetAtTime(f, t, 0.01); sq.frequency.setTargetAtTime(f / 2, t, 0.01);
             mix.gain.setTargetAtTime(cut > 0.5 ? 0.01 : 0.1 + 0.2 * load, t, 0.01);
         },
+        setProfile() { /* oscillator fallback does not support profiles */ },
         stop() { saw.stop(); sq.stop(); out.disconnect(); },
     };
 }
@@ -193,7 +200,7 @@ function mixFrame(frame) {
     // Your car
     const o = frame.own;
     if (o && mode !== 'off') {
-        if (!ownVoice) ownVoice = makeVoice(false);
+        if (!ownVoice) ownVoice = makeVoice(false, engineType);
         let rpm = o.rpm, load = o.load;
         if (now < blipUntil) { rpm = Math.min(18000, rpm + 1500); load = 1; }
         const fx = engineFx(rpm, load, o.pit, o.limiter);
@@ -252,6 +259,24 @@ export function setMode(m) {
     store.set('lanrace.engine', m);
 }
 
+// Switch the engine sound profile on the fly (own car only; other cars always use 'v8' to stay cheap).
+// Takes effect immediately if a voice is already running, otherwise on the next voice creation.
+export function setEngineType(type) {
+    if (!VALID_PROFILES.includes(type)) return;
+    engineType = type;
+    store.set('lanrace.engineType', type);
+    // Hot-swap the profile on the running own-car voice; recreate if the voice type doesn't support it
+    if (ownVoice) {
+        if (typeof ownVoice.setProfile === 'function') {
+            ownVoice.setProfile(type);
+        } else {
+            // Recorded-loop voices don't support profiles — tear down and rebuild on next frame
+            ownVoice.stop();
+            ownVoice = null;
+        }
+    }
+}
+
 export function toggleMute() {
     muted = !muted;
     if (ctx) {
@@ -263,5 +288,5 @@ export function toggleMute() {
 
 export function debug() {
     const audible = (ownVoice && ownVoice.target > 0 ? 1 : 0) + [...others.values()].filter((v) => v.target > 0).length;
-    return { state: ctx ? ctx.state : 'none', worklet: hasWorklet, engine: engineKind, voices: (ownVoice ? 1 : 0) + others.size, audible, slots: Object.keys(slots), mode, volume, muted, broken };
+    return { state: ctx ? ctx.state : 'none', worklet: hasWorklet, engine: engineKind, engineType, voices: (ownVoice ? 1 : 0) + others.size, audible, slots: Object.keys(slots), mode, volume, muted, broken };
 }

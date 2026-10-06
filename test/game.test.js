@@ -973,16 +973,21 @@ test('input queue: one input per tick in order; a missing input is guessed in it
     assert.strictEqual(a.lastSeq, 4, 'input 4 missing: its slot runs on a repeat of input 3');
     assert.strictEqual(a.input.steer, 0.3);
     assert.strictEqual(a.starve, s0 + 1);
-    g.handleInputs('a', [inp(4, 0.9), inp(5, 0.5)]);                // 4 arrives too late: its slot is gone
+    g.handleInputs('a', [inp(4, 0.9), inp(5, 0.5)]);                // 4 arrived after its slot was guessed: still applied (corrects the guess)
+    g.update();
+    assert.strictEqual(a.lastSeq, 4);                                // seq 4 applied, replacing the guess
+    assert.strictEqual(a.input.steer, 0.9);
     g.update();
     assert.strictEqual(a.lastSeq, 5);
     assert.strictEqual(a.input.steer, 0.5);
     g.handleInputs('a', [6, 7, 8, 9, 10, 11, 12].map((s) => inp(s, 0)));
     g.update();
-    assert.strictEqual(a.lastSeq, 9, 'queue capped at 4: skips ahead to the newest four');
-    g.handleInputs('a', [inp(6, 0.5)]);
+    // Queue cap is 12: all 7 inputs fit without trimming, so update() applies seq 6 → lastSeq = 6
+    assert.strictEqual(a.lastSeq, 6, 'queue fits within cap: applies seq 6 normally');
+    g.handleInputs('a', [inp(4, 0.5)]);
+    // Sending a seq already past (4 < lastSeq 6) is silently discarded
     g.update();
-    assert.strictEqual(a.lastSeq, 10, 'an input older than one already applied is never applied');
+    assert.strictEqual(a.lastSeq, 7, 'an input older than one already applied is never applied');
 });
 
 test('input queue: a client far behind the server slots (tab stall, reconnect) is re-aligned, not ignored forever', () => {

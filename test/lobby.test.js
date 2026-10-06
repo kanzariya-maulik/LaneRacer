@@ -98,7 +98,9 @@ test('sanitizeSettings: collisions on/off (host), only real booleans', () => {
 });
 
 test('sanitizeAssist: full or off, anything else falls back to full', () => {
-    assert.strictEqual(lobby.sanitizeAssist('off'), 'off');
-    assert.strictEqual(lobby.sanitizeAssist('full'), 'full');
-    assert.strictEqual(lobby.sanitizeAssist('turbo'), 'full');
+    assert.deepStrictEqual(lobby.sanitizeAssist('off'),   { steer: 0, brake: 0 });
+    assert.deepStrictEqual(lobby.sanitizeAssist('full'),  { steer: 1, brake: 1 });
+    assert.deepStrictEqual(lobby.sanitizeAssist('turbo'), { steer: 1, brake: 1 }); // unknown → full
+    assert.deepStrictEqual(lobby.sanitizeAssist('75,50'), { steer: 0.75, brake: 0.5 });
+    assert.deepStrictEqual(lobby.sanitizeAssist('0,100'), { steer: 0, brake: 1 });
 });
