@@ -168,3 +168,23 @@ test('scenery is deterministic and scales with density', () => {
     assert.strictEqual(lo.grandstands.length, hi.grandstands.length, 'grandstands always placed');
     assert.notStrictEqual(S.seedOf('monza'), S.seedOf('spa'));
 });
+
+// game3d.js sets a car's wheel on the drawn terrain only past the verge: onVerge must agree with where the verge ends
+test('onVerge: true out to the verge edge, false past it', () => {
+    for (const id of ['monza', 'suzuka', 'interlagos']) {
+        const t = tracks[id], P = t.path, n = P.length, vr = { 1: S.vergeReach(t, 1), [-1]: S.vergeReach(t, -1) };
+        let inside = 0, outside = 0;
+        for (let i = 0; i < n; i += 7) for (const dir of [1, -1]) {
+            const a = P[(i - 1 + n) % n], b = P[(i + 1) % n], h = Math.atan2(b.y - a.y, b.x - a.x);
+            const at = (o) => ({ x: P[i].x - Math.sin(h) * dir * o, y: P[i].y + Math.cos(h) * dir * o });
+            const r = vr[dir][i], q1 = at(r * 0.9), q2 = at(r + 3 * t.scale);
+            assert.ok(S.onVerge(t, vr, q1.x, q1.y), `${id} point ${i}: inside the verge`);
+            inside++;
+            const near = Physics.nearestOnTrack(q2.x, q2.y, t);
+            if (Math.abs(near.i - i) > 2) continue; // another stretch of road is nearer: its own verge decides
+            assert.ok(!S.onVerge(t, vr, q2.x, q2.y), `${id} point ${i} side ${dir}: past the verge`);
+            outside++;
+        }
+        assert.ok(inside > 50 && outside > 50, `${id}: ${inside} / ${outside} samples`);
+    }
+});

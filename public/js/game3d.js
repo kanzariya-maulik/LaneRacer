@@ -5,7 +5,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { keyboardStep, gamepadInput, liftOffBrake } from './input.js';
 import { parseAssist } from './sim/carphysics.js';
 import { LEVELS, ratioRange, resolveLevel, autoPick, adaptStep, snapLight, frameCapped } from './quality.js';
-import { placeScenery, seedOf, vergeReach, terrainHeights, terrainGround, skirtDepth, gridSampler, carveReach, SKIRT_M } from './scenery.js';
+import { placeScenery, seedOf, vergeReach, terrainHeights, terrainGround, skirtDepth, gridSampler, carveReach, onVerge, onPit, SKIRT_M } from './scenery.js';
 import { heightAt, pathHeights } from './sim/elevation.js';
 import { themeOf, LANDS, SKIES } from './themes.js';
 import { SnapshotBuffer, RenderClock, sample, samplePresent, decodeFlags } from './netsync.js';
@@ -334,6 +334,8 @@ function pitY(x, y) {
 }
 // Terrain: under the lowest road within the barriers (never over the lower road at a bridge)
 let groundFn = null; // this track's ground height (m), set when the world is built (scenery.js terrainGround)
+// The drawn terrain grid's height (m) and the verge reach it was built with: a wheel past the verge stands on it
+let terrainAt = null, vergeR = null;
 const groundY = (x, y) => (groundFn ? groundFn(x, y) * scale * ELEVATION_SCALE : 0) - TERRAIN_SINK_M * scale;
 // Height of every point of a polyline: the centreline uses its own z, anything else (pit lane, walls) looks it up
 const heightCache = new WeakMap();
@@ -1059,6 +1061,8 @@ function buildWorld(t) {
         return g;
     };
     const coarse = t.z ? terrainHeights(t, x0, y0, gw, gh, GROUND_COARSE, groundFn, TERRAIN_SINK_M, carve) : null;
+    terrainAt = coarse && gridSampler(coarse, x0, y0, gw, gh, GROUND_COARSE);
+    vergeR = vr;
     const ground = new THREE.Mesh(groundGeo(GROUND_COARSE, coarse), new THREE.MeshStandardMaterial({ map: grassTexture(gw, gh, land), roughness: 1 }));
     ground.receiveShadow = true;
     world.add(ground);
@@ -1107,6 +1111,7 @@ function buildWorld(t) {
             if (ground.parent !== world) return; // the world was rebuilt meanwhile
             const old = ground.geometry;
             ground.geometry = groundGeo(fine, H);
+            terrainAt = gridSampler(H, x0, y0, gw, gh, fine); // the cars follow the grid that's drawn
             old.dispose();
             buildGroundWalls(H, fine);
         });
@@ -1349,7 +1354,11 @@ function updateCars(dt) {
             car.roadI = heightAt(elev, s.x, s.y, s.angle, car.roadI).i; // its own road, followed frame to frame (bridge levels)
             const at = (a, l) => { // l > 0: driver's right; in the pit lane, on the pit lane's own surface
                 const x = s.x + fx * a - fy * l, y = s.y + fy * a + fx * l;
-                return s.inPit ? pitY(x, y) : roadY(x, y, s.angle, car.roadI);
+                if (s.inPit) return pitY(x, y);
+                // Past the verge (a grass bank down to a lower road, beside hairpins and crossings) the drawn ground is the
+                // terrain grid, which can sit metres below the road: stand on it, not in the air at road height
+                if (terrainAt && !onPit(elev, x, y, 2 * scale) && !onVerge(elev, vergeR, x, y)) return terrainAt(x, y) * scale * ELEVATION_SCALE - ROAD_DRAW_Y;
+                return roadY(x, y, s.angle, car.roadI);
             };
             const fl = at(ax, -tw), fr = at(ax, tw), rl = at(-ax, -tw), rr = at(-ax, tw);
             r.position.y = (fl + fr + rl + rr) / 4 + ROAD_DRAW_Y; // tyres on the drawn asphalt, not 10 cm into it

@@ -124,7 +124,7 @@ function otherRoad(t, x, y, i) {
 // Is (x, y) on the pit lane's asphalt, or within extra (world units) of it (bounding box first: most points are nowhere
 // near)
 const pitBoxes = new WeakMap(), PIT_BOX_PAD_M = 3;
-function onPit(t, x, y, extra = 0) {
+export function onPit(t, x, y, extra = 0) {
     const pit = t.pit;
     if (!pit) return false;
     const P = pit.path, r = pit.width / 2 + PIT_BOX_PAD_M * t.scale;
@@ -217,10 +217,24 @@ export function gridSampler(H, x0, y0, w, h, segs) {
 // Ground height (m) at (x, y): a road's own height out to its verge edge, then a straight grass bank across to the next
 // road's verge edge (two roads at different heights: no cliff, no floating road). reach: { 1: vergeReach(t, 1),
 // [-1]: vergeReach(t, -1) }
+// Which side of the road (x, y) is on at point j, in vergeReach's dir convention
+function sideOf(P, j, x, y) {
+    const h = heading(P, j);
+    return -Math.sin(h) * (x - P[j].x) + Math.cos(h) * (y - P[j].y) > 0 ? 1 : -1;
+}
+
+// On the asphalt or its verge (drawn at road height)? Past it the drawn ground is the terrain grid, which can bank down
+// to a lower road (game3d.js puts a car's wheel there on the terrain, not in the air at road height)
+export function onVerge(t, reach, x, y) {
+    if (!t.z) return true;
+    const { d, j, k } = nearestSeg(t, x, y), r = reach[sideOf(t.path, j, x, y)], n = t.path.length;
+    return d <= r[j] + (r[(j + 1) % n] - r[j]) * k;
+}
+
 export function terrainGround(t, reach) {
     const P = t.path, n = P.length;
     const lerp = (a, j, k) => a[j] + (a[(j + 1) % n] - a[j]) * k;
-    const side = (j, x, y) => { const h = heading(P, j), d = { x: x - P[j].x, y: y - P[j].y }; return -Math.sin(h) * d.x + Math.cos(h) * d.y > 0 ? 1 : -1; };
+    const side = (j, x, y) => sideOf(P, j, x, y);
     return (x, y) => {
         if (!t.z) return 0;
         const { d: d1, j: j1, k: k1 } = nearestSeg(t, x, y);
