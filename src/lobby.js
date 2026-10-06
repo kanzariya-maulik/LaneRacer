@@ -36,10 +36,11 @@ function sanitizeInput(input) {
     return { throttle: i.up ? 1 : 0, brake: i.down ? 1 : 0, steer: (i.right ? 1 : 0) - (i.left ? 1 : 0), drs: false };
 }
 
-function canJoinTeam(players, teamId) {
+// selfId: a player switching team doesn't count against a team they're already in
+function canJoinTeam(players, teamId, selfId) {
     const team = TEAMS.find(t => t.id === teamId);
     if (!team) return { ok: false, reason: 'Unknown team' };
-    const taken = Object.values(players).filter(p => p.teamId === teamId).length;
+    const taken = Object.values(players).filter(p => p.teamId === teamId && p.id !== selfId).length;
     if (taken >= team.maxPlayers) return { ok: false, reason: `${team.name} is full` };
     return { ok: true, team };
 }

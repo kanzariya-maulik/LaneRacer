@@ -49,8 +49,8 @@ body {
 #lobby-screen * { scrollbar-width: thin; scrollbar-color: #334155 transparent; }
 
 .lobby-container {
-    width: min(1280px, calc(100% - 32px));
-    height: min(820px, calc(100vh - 32px));
+    width: min(2400px, calc(100% - 32px)); /* the whole screen, short of a 4K stretch */
+    height: calc(100vh - 32px);
     display: flex;
     flex-direction: column;
     gap: 14px;
@@ -79,7 +79,7 @@ body {
     flex: 1;
     min-height: 0;
     display: grid;
-    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr); /* your car | the grid | the session */
     gap: 16px;
 }
 .side { display: flex; flex-direction: column; gap: 16px; min-height: 0; }
@@ -105,8 +105,7 @@ body {
 
 .profile-panel { overflow-y: auto; }
 .profile-panel > * { flex-shrink: 0; } /* open settings scroll the panel instead of squashing the hero */
-.players-panel { flex: 0 1 auto; max-height: 40%; }
-.players-panel #players-list { overflow-y: auto; }
+.players-panel #players-list { flex: 1; min-height: 0; overflow-y: auto; }
 .race-panel { flex: none; }
 .chat-panel { flex: 1; min-height: 220px; }
 
@@ -141,7 +140,7 @@ input:disabled { opacity: 0.7; }
     border-left: 5px solid var(--team);
     transition: background 0.3s, border-color 0.3s;
 }
-#hero-car { width: min(100%, 440px); aspect-ratio: 8 / 3; object-fit: contain; justify-self: center; filter: drop-shadow(0 10px 12px rgba(0,0,0,0.55)); }
+#hero-car { width: min(100%, 560px); aspect-ratio: 8 / 3; object-fit: contain; justify-self: center; filter: drop-shadow(0 10px 12px rgba(0,0,0,0.55)); }
 .hero-info { display: flex; flex-direction: column; }
 .hero-team { font-size: 1.6rem; font-weight: 900; font-style: italic; text-transform: uppercase; letter-spacing: 1px; line-height: 1.1; }
 .hero-sub { font-size: 0.85rem; color: #cbd5e1; letter-spacing: 2px; text-transform: uppercase; }
@@ -152,31 +151,32 @@ input:disabled { opacity: 0.7; }
 /* Team tiles */
 #team-grid {
     display: grid;
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-    gap: 8px;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 6px;
     margin-bottom: 16px;
 }
 .team-card {
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 2px;
-    padding: 6px 6px 7px;
+    display: grid;
+    grid-template-columns: 4px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    height: 36px;
+    padding: 0 10px 0 8px;
     border-radius: 6px;
-    border: 2px solid transparent;
-    border-top: 3px solid var(--team);
+    border: 1px solid var(--glass);
     background: rgba(0,0,0,0.35);
     color: var(--text);
     font: inherit;
     text-align: left;
     cursor: pointer;
-    transition: transform 0.1s, border-color 0.1s, background 0.15s;
+    transition: border-color 0.15s, background 0.15s;
 }
-.team-card:hover:not(:disabled) { background: rgba(255,255,255,0.07); }
-.team-card img { width: 100%; aspect-ratio: 8 / 3; object-fit: contain; }
-.team-card .team-name { font-weight: 700; font-size: 0.72rem; line-height: 1.15; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.team-card .team-count { font-size: 0.68rem; color: #94a3b8; font-variant-numeric: tabular-nums; }
-.team-card.selected { border-color: #fff; border-top-color: var(--team); background: color-mix(in srgb, var(--team) 25%, rgba(0,0,0,0.35)); transform: translateY(-2px); }
+.team-swatch { width: 4px; height: 20px; border-radius: 2px; background: var(--team); }
+.team-card:hover:not(:disabled) { background: rgba(255,255,255,0.07); border-color: color-mix(in srgb, var(--team) 60%, transparent); }
+.team-card .team-name { font-weight: 700; font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.team-card .team-count { font-size: 0.72rem; font-weight: 700; color: #94a3b8; font-variant-numeric: tabular-nums; }
+.team-card.selected { border-color: var(--team); background: color-mix(in srgb, var(--team) 28%, rgba(0,0,0,0.35)); }
+.team-card.selected .team-count { color: #e2e8f0; }
 .team-card.full { opacity: 0.35; cursor: not-allowed; }
 .team-card:disabled { cursor: default; }
 .team-card:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
@@ -286,14 +286,25 @@ input:disabled { opacity: 0.7; }
 #chat-form { display: flex; gap: 10px; }
 #chat-form input { margin-bottom: 0; }
 
+/* Mid-size screens: the grid and the session share the right-hand column */
+@media (max-width: 1280px) {
+    .lobby-panels { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+    .profile-panel { grid-row: span 2; }
+    .players-panel { min-height: 0; }
+    .side { grid-column: 2; }
+    .chat-panel { min-height: 180px; }
+}
 @media (max-width: 900px) {
+    .lobby-panels { grid-template-rows: none; }
+    .profile-panel { grid-row: auto; }
+    .side { grid-column: auto; }
     #lobby-screen { align-items: flex-start; }
     .lobby-container { height: auto; padding: 16px 0; }
     .lobby-panels { grid-template-columns: minmax(0, 1fr); }
     .profile-panel { overflow: visible; }
     .players-panel { max-height: none; }
     .chat-panel { min-height: 280px; }
-    #team-grid { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
+    #team-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
     .glow-title { font-size: 2rem; }
 }
 @media (max-width: 480px) {

@@ -116,6 +116,20 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
             if (gameInstance && state.status !== 'LOBBY') socket.emit('game_init', gameInstance.initPayload());
         });
 
+        // Change name and/or team after joining: lobby only (mid-session the car and livery are in use)
+        socket.on('update_profile', (data) => {
+            const player = state.players[socket.id];
+            if (!player || state.status !== 'LOBBY' || !data || typeof data !== 'object') return;
+            if (typeof data.teamId === 'string' && data.teamId !== player.teamId) {
+                const check = lobby.canJoinTeam(state.players, data.teamId, socket.id);
+                if (!check.ok) return socket.emit('profile_error', check.reason);
+                player.teamId = check.team.id;
+                player.color = check.team.chatColor;
+            }
+            if (typeof data.username === 'string' && data.username.trim()) player.username = lobby.sanitizeUsername(data.username);
+            io.emit('lobby_state_sync', lobbySnapshot());
+        });
+
         // Host controls during a session: pause/resume (driving only, not the lights or results), restart, kick
         const isHost = () => socket.id === state.hostId;
         socket.on('pause_session', (on) => {

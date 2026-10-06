@@ -280,3 +280,27 @@ test('host kick: the player is removed and told why, can join again; nobody else
     assert.ok(io.events('lobby_state_sync').at(-1).players.b.isSpectating, 'rejoins as a spectator mid-race');
     a.fire('disconnect'); b.fire('disconnect');
 });
+
+test('update_profile: rename and switch team in the lobby; a full team or a running session refuses', (t) => {
+    t.mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
+    const io = fakeIo();
+    setupSocketManager(io, noNet);
+    const a = join(io, 'a', 'ferrari', 0), b = join(io, 'b', 'haas'), c = join(io, 'c', 'haas');
+    const me = () => io.events('lobby_state_sync').at(-1).players.a;
+    a.fire('update_profile', { username: '  Max  ' });
+    assert.strictEqual(me().username, 'Max');
+    a.fire('update_profile', { teamId: 'mclaren' });
+    assert.strictEqual(me().teamId, 'mclaren');
+    assert.strictEqual(me().color, require('../src/lobby').TEAMS.find((x) => x.id === 'mclaren').chatColor);
+    a.fire('update_profile', { teamId: 'mclaren' });                     // own seat doesn't count against the team
+    assert.strictEqual(me().teamId, 'mclaren');
+    a.fire('update_profile', { teamId: 'haas' });                        // b and c fill both Haas seats
+    assert.strictEqual(me().teamId, 'mclaren');
+    assert.ok(a.sent.some(([ev, d]) => ev === 'profile_error' && /full/.test(d)), 'not told the team is full');
+    a.fire('update_profile', { teamId: 'nope', username: 42 });
+    assert.deepStrictEqual([me().teamId, me().username], ['mclaren', 'Max'], 'bad input changed the profile');
+    a.fire('start_game');                                                 // COUNTDOWN
+    a.fire('update_profile', { username: 'Late', teamId: 'ferrari' });
+    assert.deepStrictEqual([me().username, me().teamId], ['Max', 'mclaren'], 'profile changed mid-session');
+    a.fire('disconnect'); b.fire('disconnect'); c.fire('disconnect');
+});

@@ -153,7 +153,31 @@ function teamCounts() {
     return counts;
 }
 
+// Name and team stay editable after joining, but only in the lobby (mid-session the car and livery are in use)
+const canEditProfile = () => !isJoined || clientState.status === 'LOBBY';
+
+// The server's copy of me wins: keep the picker, the name field and a reconnect's rejoin in step with it
+function syncProfile() {
+    const me = isJoined && clientState.players[clientState.me];
+    if (!me) return;
+    selectedTeam = me.teamId;
+    if (lastJoin) Object.assign(lastJoin, { username: me.username, teamId: me.teamId });
+    if (document.activeElement !== inputUser) inputUser.value = me.username;
+}
+
+// Joined: the Join button becomes Save, shown only while the typed name differs from the current one
+function renderNameField() {
+    const me = isJoined && clientState.players[clientState.me];
+    inputUser.disabled = !canEditProfile();
+    btnJoin.textContent = isJoined ? 'Save' : 'Join ▶';
+    btnJoin.classList.toggle('hidden', isJoined && (!me || !canEditProfile() || inputUser.value.trim() === me.username || !inputUser.value.trim()));
+}
+inputUser.addEventListener('input', renderNameField);
+inputUser.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !btnJoin.classList.contains('hidden')) btnJoin.click(); });
+
 function renderTeamGrid() {
+    syncProfile();
+    renderNameField();
     const counts = teamCounts();
     // Start on the first team with a free seat so the hero shows a car; any card click changes it before joining
     if (!isJoined && !teams.some((t) => t.id === selectedTeam && (counts[t.id] || 0) < t.maxPlayers)) {
@@ -166,23 +190,28 @@ function renderTeamGrid() {
         const card = document.createElement('button');
         card.type = 'button';
         card.className = 'team-card' + (t.id === selectedTeam ? ' selected' : '') + (full ? ' full' : '');
-        card.disabled = isJoined || (full && t.id !== selectedTeam);
+        card.disabled = !canEditProfile() || (full && t.id !== selectedTeam);
         card.setAttribute('aria-pressed', t.id === selectedTeam);
         card.title = t.name;
         card.style.setProperty('--team', t.chatColor);
 
-        const img = document.createElement('img');
-        img.src = `liveries/${t.id}-thumb.png`;
-        img.alt = '';
+        const swatch = document.createElement('span');
+        swatch.className = 'team-swatch';
         const name = document.createElement('span');
         name.className = 'team-name';
         name.textContent = t.name;
         const count = document.createElement('span');
         count.className = 'team-count';
-        count.textContent = `${t.car} · ${n}/${t.maxPlayers}`;
+        count.textContent = `${n}/${t.maxPlayers}`;
+        count.setAttribute('aria-label', `${n} of ${t.maxPlayers} seats taken`);
 
-        card.append(img, name, count);
-        card.addEventListener('click', () => { selectedTeam = t.id; renderTeamGrid(); });
+        card.append(swatch, name, count);
+        card.addEventListener('click', () => {
+            if (t.id === selectedTeam) return;
+            if (isJoined) return socket.emit('update_profile', { teamId: t.id }); // switches once the server says the seat is free
+            selectedTeam = t.id;
+            renderTeamGrid();
+        });
         teamGrid.appendChild(card);
     }
     renderHero();
@@ -201,15 +230,20 @@ function renderHero() {
 
 function setJoinedUI(joined) {
     isJoined = joined;
-    inputUser.disabled = joined;
-    btnJoin.classList.toggle('hidden', joined);
     controlsPanel.classList.toggle('hidden', !joined);
     renderTeamGrid();
 }
 
 inputUser.focus();
+// Wide, tall screens have room for My settings next to the teams: start it open there
+if (matchMedia('(min-width: 1281px) and (min-height: 900px)').matches) document.querySelector('.my-settings').open = true;
 
 btnJoin.addEventListener('click', () => {
+    if (isJoined) { // Save: a new name for the driver already on the grid
+        socket.emit('update_profile', { username: inputUser.value });
+        inputUser.blur();
+        return;
+    }
     if (!selectedTeam) return window.appendChat('SYSTEM', '#f43f5e', 'Pick a team first.');
     const username = inputUser.value.trim() || `Player${Math.floor(Math.random() * 1000)}`;
     lastJoin = { username, teamId: selectedTeam, assist: getAssistString() };
@@ -233,6 +267,8 @@ socket.on('connect', () => {
     btnReady.innerText = 'Ready Up';
     socket.emit('join_lobby', lastJoin);
 });
+
+socket.on('profile_error', (reason) => window.appendChat('SYSTEM', '#f43f5e', reason));
 
 window.handleJoinError = (reason) => {
     setJoinedUI(false);
@@ -323,7 +359,7 @@ window.updateLobbyUI = () => {
         playersList.appendChild(li);
     });
     // A few open grid slots so a quiet lobby still reads as a grid waiting to fill
-    for (let i = entries.length; i < Math.min(MAX_RACERS, Math.max(4, entries.length + 1)); i++) {
+    for (let i = entries.length; i < Math.min(MAX_RACERS, Math.max(12, entries.length + 1)); i++) {
         const li = document.createElement('li');
         li.className = 'player-item open';
         const num = Object.assign(document.createElement('span'), { className: 'player-num', textContent: String(i + 1).padStart(2, '0') });
@@ -398,6 +434,7 @@ window.appendChat = (username, color, msg) => {
 };
 
 window.handleStatusChange = (status) => {
+    renderTeamGrid(); // name and team lock for the session, unlock back in the lobby
     const cdOverlay = document.getElementById('countdown-overlay');
     const spOverlay = document.getElementById('spectator-overlay');
     const results = document.getElementById('quali-results');
