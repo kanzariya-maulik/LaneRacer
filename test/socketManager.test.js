@@ -318,3 +318,13 @@ test('update_profile: rename and switch team in the lobby; a full team or a runn
     assert.deepStrictEqual([me().username, me().teamId], ['Max', 'mclaren'], 'profile changed mid-session');
     a.fire('disconnect'); b.fire('disconnect'); c.fire('disconnect');
 });
+
+test('every connection is told the server boot id, the same for all, so a tab from before a restart reloads', () => {
+    const io = fakeIo();
+    setupSocketManager(io, noNet);
+    const a = io.connect('a'), b = io.connect('b');
+    const boot = (s) => s.sent.find(([ev]) => ev === 'boot')?.[1];
+    assert.ok(typeof boot(a) === 'string' && boot(a).length > 0, 'no boot id');
+    assert.strictEqual(boot(b), boot(a));
+    a.fire('disconnect'); b.fire('disconnect');
+});

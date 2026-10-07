@@ -203,6 +203,13 @@ function onFastPacket(pkt) {
     if (clientState.netIn.length > 120) clientState.netIn.shift(); // background tab: keep only the last 2 s
 }
 
+// Reconnected to a restarted server (maybe updated): load its code instead of running the old page against it
+let bootId = null;
+socket.on('boot', (id) => {
+    if (bootId && bootId !== id) location.reload();
+    bootId = id;
+});
+
 socket.on('connect', () => {
     clientState.me = socket.id;
     setupWebRTC(); // negotiate UDP right away so it's open before the race

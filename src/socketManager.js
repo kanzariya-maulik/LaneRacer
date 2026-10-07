@@ -27,6 +27,8 @@ function applyInput(id, inputData) {
 const applyInputLater = withNetSim(applyInput); // NET_SIM: fake WiFi on incoming inputs too
 
 // Every session timer goes through later() so an empty server can cancel them all at once
+// This server run; a tab connected to an earlier run reloads, so nobody keeps old code after an update and restart
+const BOOT_ID = Date.now().toString(36);
 const RESUME_S = 3; // host resume: count down this long before the cars are let go
 const timers = new Set();
 function later(fn, ms) {
@@ -88,6 +90,7 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
         net.setupPeer(socket, (id, inputData) => {
             applyInputLater(id, inputData);
         });
+        socket.emit('boot', BOOT_ID);
         // Visitors see live team counts before they join
         socket.emit('lobby_state_sync', lobbySnapshot());
 
