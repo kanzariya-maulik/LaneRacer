@@ -99,6 +99,11 @@ test('sanitizeSettings: collisions on/off (host), only real booleans', () => {
     assert.strictEqual(lobby.sanitizeSettings(DEFAULTS, { contactPenalties: 0 }, TRACK_IDS).contactPenalties, DEFAULTS.contactPenalties);
 });
 
+test('sanitizeSettings: day or night, nothing else', () => {
+    assert.strictEqual(lobby.sanitizeSettings(DEFAULTS, { timeOfDay: 'night' }, TRACK_IDS).timeOfDay, 'night');
+    assert.strictEqual(lobby.sanitizeSettings({ ...DEFAULTS, timeOfDay: 'night' }, { timeOfDay: 'dusk' }, TRACK_IDS).timeOfDay, 'night');
+});
+
 test('sanitizeAssist: full or off, anything else falls back to full', () => {
     assert.deepStrictEqual(lobby.sanitizeAssist('off'),   { steer: 0, brake: 0 });
     assert.deepStrictEqual(lobby.sanitizeAssist('full'),  { steer: 1, brake: 1 });

@@ -11,7 +11,7 @@ for (const id of Track.TRACK_IDS) {
     test(`${id}: scenery stays clear of the track and pit lane`, () => {
         const t = tracks[id], out = S.placeScenery(t, 1, S.seedOf(id));
         const clear = t.width / 2 + t.wallOffset + 3 * t.scale; // past the barrier
-        for (const o of [...out.grandstands, ...out.trees, ...out.billboards, ...out.buildings, ...out.posts, ...out.boards, ...(out.landmark ? [out.landmark] : [])]) {
+        for (const o of [...out.grandstands, ...out.trees, ...out.billboards, ...out.buildings, ...out.posts, ...out.floodlights, ...out.boards, ...(out.landmark ? [out.landmark] : [])]) {
             assert.ok(Physics.nearestOnTrack(o.x, o.y, t).dist > clear, `${id}: object on or near the track at ${o.x},${o.y}`);
             if (t.pit) assert.ok(Physics.nearestOnPath(o.x, o.y, t.pit.path, false).dist > t.pit.width / 2 + 6 * t.scale, `${id}: object in the pit lane`);
         }
@@ -27,6 +27,9 @@ for (const id of Track.TRACK_IDS) {
             assert.ok(Physics.nearestOnTrack(x, y, t).dist > clear, `${id}: building reaches the track at ${x},${y}`);
         }
         assert.ok(out.grandstands.length >= 2, 'grandstands at the main straight and slow corners');
+        // Night: light towers lining the lap, so no stretch of road is left dark
+        const lapM = t.cum[t.path.length] / t.scale;
+        assert.ok(out.floodlights.length >= lapM / 120, `${id}: ${out.floodlights.length} light towers for ${Math.round(lapM)} m`);
         assert.ok(out.trees.length > 50 && out.billboards.length > 3);
         assert.ok(out.slowCorners.length >= 2);
     });
@@ -187,4 +190,17 @@ test('onVerge: true out to the verge edge, false past it', () => {
         }
         assert.ok(inside > 50 && outside > 50, `${id}: ${inside} / ${outside} samples`);
     }
+});
+
+test('every circuit has a night: sky darker than its day, light towers to race by, a star field by its real light pollution', async () => {
+    const { THEMES, SKIES, NIGHTS, nightOf } = await import('../public/js/themes.js');
+    const lum = (hex) => { const n = parseInt(hex.slice(1), 16); return 0.2126 * (n >> 16) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255); };
+    for (const id of Track.TRACK_IDS) {
+        const day = SKIES[THEMES[id].sky], night = nightOf(id);
+        assert.ok(NIGHTS[id], `${id}: no night of its own`);
+        assert.ok(lum(night.top) < lum(day.top) / 3 && lum(night.horizon) < lum(day.horizon) / 2, `${id}: night sky not dark`);
+        assert.ok(night.stars >= 0 && night.stars <= 1 && night.power > 0, id);
+    }
+    // Dark countryside shows far more stars than a megacity
+    assert.ok(NIGHTS.spa.stars > NIGHTS.interlagos.stars && NIGHTS.spielberg.stars > NIGHTS.monaco.stars);
 });

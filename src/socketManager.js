@@ -12,7 +12,7 @@ const state = {
     status: 'LOBBY', // LOBBY, QUALIFYING, QUALI_RESULTS, COUNTDOWN, RACE, FINISHED
     players: {},
     hostId: null,
-    settings: { trackId: 'monza', maxLaps: 3, qualifying: true, collisions: true, contactPenalties: true, outLaps: 1, qualiLaps: 2 }
+    settings: { trackId: 'monza', maxLaps: 3, qualifying: true, collisions: true, contactPenalties: true, timeOfDay: 'day', outLaps: 1, qualiLaps: 2 }
 };
 
 let gameInstance = null;

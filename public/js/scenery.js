@@ -391,6 +391,17 @@ export function placeScenery(t, density, seed, theme = themeOf(t.id)) {
         if (ok(q.x, q.y)) posts.push({ x: q.x, y: q.y, angle: h });
     }
 
+    // Floodlight towers (drawn at night) behind the barrier every ~60 m, alternating sides, as round Sakhir
+    const floodlights = [];
+    for (let s = 30 * sc, k = 0; t.cum && s < t.cum[n]; s += 60 * sc, k++) {
+        if (t.tunnels?.some(([a, b]) => s >= a && s <= b)) continue; // Monaco's tunnel has its own lamps
+        const i = Math.max(0, t.cum.findIndex((c) => c >= s)) % n, side = k % 2 ? 1 : -1, h = heading(P, i);
+        for (const out of [3, 8, 14]) { // just behind the barrier, or a little further back where that's taken
+            const q = offset(P[i], h, side * (clear + out * sc));
+            if (ok(q.x, q.y)) { floodlights.push({ x: q.x, y: q.y, angle: h, side }); break; }
+        }
+    }
+
     // 300 / 200 / 100 m boards before the slow corners, on the outside
     const boards = [];
     if (t.cum) for (const c of slowCorners) {
@@ -423,5 +434,5 @@ export function placeScenery(t, density, seed, theme = themeOf(t.id)) {
         if (ok(q.x, q.y)) billboards.push({ x: q.x, y: q.y, angle: h, side, text: TEXTS[k % TEXTS.length] });
     }
 
-    return { grandstands, trees, billboards, slowCorners, buildings, posts, boards, landmark };
+    return { grandstands, trees, billboards, slowCorners, buildings, posts, floodlights, boards, landmark };
 }

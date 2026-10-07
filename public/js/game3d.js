@@ -7,7 +7,7 @@ import { parseAssist } from './sim/carphysics.js';
 import { LEVELS, ratioRange, resolveLevel, autoPick, adaptStep, snapLight, frameCapped } from './quality.js';
 import { placeScenery, seedOf, vergeReach, terrainHeights, terrainGround, skirtDepth, gridSampler, carveReach, onVerge, onPit, SKIRT_M } from './scenery.js';
 import { heightAt, pathHeights } from './sim/elevation.js';
-import { themeOf, LANDS, SKIES } from './themes.js';
+import { themeOf, LANDS, SKIES, nightOf } from './themes.js';
 import { SnapshotBuffer, RenderClock, sample, samplePresent, decodeFlags } from './netsync.js';
 import { Predictor, STEP_S } from './predict.js';
 import { Gearbox, shiftLights } from './audio/gearbox.js';
@@ -73,6 +73,23 @@ const skyDome = (() => {
     scene.add(m);
     return m;
 })();
+// Night: stars on the dome, as many as the place's light pollution leaves (themes.js NIGHTS stars)
+const STARS = 2000;
+const stars = (() => {
+    let seed = 7; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    const pos = new Float32Array(STARS * 3);
+    for (let i = 0; i < STARS; i++) {
+        const y = 0.06 + 0.94 * rnd(), a = rnd() * Math.PI * 2, r = Math.sqrt(1 - y * y) * 0.98; // above the horizon haze
+        pos.set([Math.cos(a) * r, y * 0.98, Math.sin(a) * r], i * 3);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    const p = new THREE.Points(g, new THREE.PointsMaterial({ color: 0xffffff, size: 1.6, sizeAttenuation: false, fog: false, depthWrite: false, transparent: true, opacity: 0.85 }));
+    p.frustumCulled = false;
+    p.visible = false;
+    skyDome.add(p);
+    return p;
+})();
 function applySky(sky) {
     const top = new THREE.Color(sky.top), hor = new THREE.Color(sky.horizon), c = new THREE.Color(), p = skyDome.geometry.attributes.position, col = skyDome.geometry.attributes.color;
     for (let i = 0; i < p.count; i++) { c.copy(hor).lerp(top, Math.min(1, Math.max(0, p.getY(i)) ** 0.6)); col.setXYZ(i, c.r, c.g, c.b); }
@@ -83,6 +100,9 @@ function applySky(sky) {
     sun.intensity = sky.power;
     hemi.intensity = sky.hemi;
     hemi.color.copy(top).lerp(new THREE.Color(0xffffff), 0.5);
+    stars.visible = !!sky.stars;
+    stars.geometry.setDrawRange(0, Math.round(STARS * (sky.stars || 0)));
+    if (scene.fog) scene.fog.near = sky.stars !== undefined ? 1500 : 3000; // night: the land fades into the dark sooner
     const el = (sky.elevation * Math.PI) / 180, az = (sky.azimuth * Math.PI) / 180, r = 1900;
     Object.assign(SUN_OFF, { x: r * Math.cos(el) * Math.sin(az), y: r * Math.sin(el), z: r * Math.cos(el) * Math.cos(az) });
 }
@@ -695,12 +715,22 @@ const canvasTex = (w, h, paint, repeat = false) => {
     if (repeat) tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
     return tex;
 };
-let windowsTex = null, crowdTex = null;
+let windowsTex = null, crowdTex = null, night = false;
 const windowsTexture = () => (windowsTex ||= canvasTex(64, 128, (g) => {
     g.fillStyle = '#ffffff'; g.fillRect(0, 0, 64, 128);
     g.fillStyle = '#5d6a78';
     for (let y = 6; y < 124; y += 12) for (let x = 5; x < 60; x += 12) g.fillRect(x, y, 7, 7);
 }));
+// Night: the same window grid as windowsTexture, a share of them lit warm (an emissive map: lit windows glow, the rest dark)
+const litWindowsTexture = (share) => canvasTex(64, 128, (g) => {
+    let seed = 11; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    g.fillStyle = '#000000'; g.fillRect(0, 0, 64, 128);
+    for (let y = 6; y < 124; y += 12) for (let x = 5; x < 60; x += 12) {
+        if (rnd() >= share) continue;
+        g.fillStyle = ['#ffd9a0', '#ffe9c4', '#cfe0ff'][Math.floor(rnd() * 3)];
+        g.fillRect(x, y, 7, 7);
+    }
+});
 const crowdTexture = () => (crowdTex ||= canvasTex(256, 64, (g) => {
     g.fillStyle = '#2a2f38'; g.fillRect(0, 0, 256, 64);
     const cols = ['#e63946', '#f1faee', '#ffd166', '#118ab2', '#ef476f', '#06d6a0', '#ff8c42', '#ffffff'];
@@ -747,8 +777,8 @@ function buildScenery(t, scen, theme) {
         x: b.x, y: groundY(b.x, b.y) + ((b.h - 6) / 2) * scale, z: b.y, angle: -b.angle, sx: b.w * scale, sy: (b.h + 6) * scale, sz: b.d * scale,
         color: (town ? PALETTES.town : PALETTES.sky)[Math.floor(b.tone * 7) % 7],
     }));
-    const win = windowsTexture();
-    add(new THREE.BoxGeometry(1, 1, 1), mat(0xffffff, { map: win, roughness: 0.8 }), blocks);
+    const win = windowsTexture(), lit = night ? { emissive: 0xffffff, emissiveMap: litWindowsTexture(nightOf(t.id).windows) } : {};
+    add(new THREE.BoxGeometry(1, 1, 1), mat(0xffffff, { map: win, roughness: 0.8, ...lit }), blocks);
 
     // Grandstands: the stand, and its seat deck full of people
     const stands = [], seats = [];
@@ -768,6 +798,13 @@ function buildScenery(t, scen, theme) {
     // Marshal posts: small orange huts behind the barrier
     add(new THREE.BoxGeometry(2.2 * scale, 2.6 * scale, 2.2 * scale), mat(0xf08a24), scen.posts.map((p) => ({ x: p.x, y: 1.3 * scale + groundY(p.x, p.y), z: p.y, angle: -p.angle })));
 
+    // Night: floodlight towers behind the barrier, their lamp banks glowing (unlit material, seen from afar, not fogged)
+    if (night && scen.floodlights.length) {
+        const at = (f, up, toward) => ({ x: f.x + Math.sin(f.angle) * f.side * toward, y: up + groundY(f.x, f.y), z: f.y - Math.cos(f.angle) * f.side * toward, angle: -f.angle });
+        add(new THREE.CylinderGeometry(0.3 * scale, 0.45 * scale, 24 * scale, seg(5, 8)), mat(0x7d838a), scen.floodlights.map((f) => at(f, 12 * scale, 0)));
+        add(new THREE.BoxGeometry(5 * scale, 1.6 * scale, 0.7 * scale), new THREE.MeshBasicMaterial({ color: 0xf2f5ff, fog: false }), scen.floodlights.map((f) => at(f, 24 * scale, 1.2 * scale)));
+    }
+
     if (scen.landmark) g.add(buildLandmark(scen.landmark));
 
     // Far off: mountains ringing the horizon (Spa, Spielberg, Monaco), the sea under it all (coast and river circuits)
@@ -778,7 +815,7 @@ function buildScenery(t, scen, theme) {
         for (let k = 0; k < 28; k++) {
             // the whole base 600 m+ past the track's extent, so no slope reaches it; within the fog's reach so they show
             const a = (k / 28) * Math.PI * 2, hgt = (220 + ((k * 53) % 9) * 45) * scale, r = R - 5000 + 600 * scale + hgt * 1.2 + ((k * 37) % 10) * 60 * scale;
-            peaks.push({ x: cx + Math.cos(a) * r, y: low + hgt / 2, z: cz + Math.sin(a) * r, sx: hgt * 1.2, sy: hgt, sz: hgt * 1.2, angle: a, color: ['#6f8a6a', '#7a8f7c', '#8796a0'][k % 3] });
+            peaks.push({ x: cx + Math.cos(a) * r, y: low + hgt / 2, z: cz + Math.sin(a) * r, sx: hgt * 1.2, sy: hgt, sz: hgt * 1.2, angle: a, color: (night ? ['#141b26', '#18202b', '#1c2430'] : ['#6f8a6a', '#7a8f7c', '#8796a0'])[k % 3] }); // night: silhouettes
         }
         add(new THREE.ConeGeometry(1, 1, seg(6, 16)), mat(0xffffff), peaks);
     }
@@ -1005,13 +1042,14 @@ function smoothPath(path, scale, cum) {
 function buildWorld(t) {
     applyLevel(resolveLevel(store.get('lanrace.quality') || 'auto', store.get('lanrace.quality.auto')));
     const theme = themeOf(t.id), land = LANDS[theme.land]; // the place: sky, light, land, trees, city (themes.js)
-    applySky(SKIES[theme.sky]);
+    night = clientState.settings.timeOfDay === 'night';
+    applySky(night ? nightOf(t.id) : SKIES[theme.sky]);
     hemi.groundColor.set(land.bounce);
     elev = t; // road heights for everything built below, the cars and the camera
     scale = t.scale;
     // Quali → race on the same track: keep the world (rebuilding recompiles every shader and stalls the lights);
     // only the cars and the racing line are per session
-    if (world && world.userData.trackId === t.id && world.userData.level === level) {
+    if (world && world.userData.trackId === t.id && world.userData.level === level && world.userData.night === night) {
         for (const id in cars) {
             cars[id].root.traverse((o) => { // per-car material clones and name-tag textures (liveries are shared)
                 if (!o.material) return;
@@ -1033,6 +1071,7 @@ function buildWorld(t) {
             if (o.isInstancedMesh) o.dispose();
             for (const m of [].concat(o.material || [])) {
                 if (m.map && !keep.has(m.map) && !m.map.isDataTexture) m.map.dispose(); // liveries (data textures) are cached
+                m.emissiveMap?.dispose(); // night windows
                 m.dispose();
             }
         });
@@ -1042,7 +1081,7 @@ function buildWorld(t) {
 
     scale = t.scale;
     world = new THREE.Group();
-    world.userData = { trackId: t.id, level };
+    world.userData = { trackId: t.id, level, night };
     scene.add(world);
 
     const path = t.path, half = t.width / 2, n = path.length;
@@ -1081,7 +1120,8 @@ function buildWorld(t) {
     const coarse = t.z ? terrainHeights(t, x0, y0, gw, gh, GROUND_COARSE, groundFn, TERRAIN_SINK_M, carve) : null;
     terrainAt = coarse && gridSampler(coarse, x0, y0, gw, gh, GROUND_COARSE);
     vergeR = vr;
-    const ground = new THREE.Mesh(groundGeo(GROUND_COARSE, coarse), new THREE.MeshStandardMaterial({ map: grassTexture(gw, gh, land), roughness: 1 }));
+    // Night: the land beyond the floodlit verges falls away into the dark
+    const ground = new THREE.Mesh(groundGeo(GROUND_COARSE, coarse), new THREE.MeshStandardMaterial({ map: grassTexture(gw, gh, land), roughness: 1, color: night ? 0x3a4250 : 0xffffff }));
     ground.receiveShadow = true;
     world.add(ground);
     // Walls that meet the drawn ground (verge skirts, barriers): built for the coarse ground, again for the fine one
@@ -1321,7 +1361,7 @@ function makeCar(id) {
             }
             if (Q.envMap) {
                 o.material.envMap = envTexture();
-                o.material.envMapIntensity = 0.3;
+                o.material.envMapIntensity = night ? 0.12 : 0.3; // the studio reflection would glow at night
                 if (o.material.name === 'livery') { o.material.metalness = 0.1; o.material.roughness = 0.35; }
             }
         });

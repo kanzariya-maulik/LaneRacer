@@ -23,6 +23,7 @@ function sanitizeSettings(current, incoming, trackIds) {
     if (typeof incoming.qualifying === 'boolean') next.qualifying = incoming.qualifying;
     if (typeof incoming.collisions === 'boolean') next.collisions = incoming.collisions;
     if (typeof incoming.contactPenalties === 'boolean') next.contactPenalties = incoming.contactPenalties;
+    if (incoming.timeOfDay === 'day' || incoming.timeOfDay === 'night') next.timeOfDay = incoming.timeOfDay;
     // Qualifying run: untimed out-laps (1 = the drive from the pits to the line), then timed laps
     if (Number.isFinite(incoming.outLaps)) next.outLaps = clamp(Math.round(incoming.outLaps), 1, 3);
     if (Number.isFinite(incoming.qualiLaps)) next.qualiLaps = clamp(Math.round(incoming.qualiLaps), 1, 10);
