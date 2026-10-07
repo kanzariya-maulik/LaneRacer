@@ -395,7 +395,10 @@ class Game {
                 if (!p.finished) Object.assign(p, { finished: true, dnf: true, finishTime: null, vx: 0, vy: 0, speed: 0 });
             }
         }
-        if (this.mode === 'race' && !this.classified && ids.length && ids.every(id => this.players[id]?.finished)) this.classify();
+        if (this.mode === 'race' && !this.classified && ids.length && ids.every(id => this.players[id]?.finished)) {
+            this.judgeIncidents(true); // a hit on the last lap still counts
+            this.classify();
+        }
         this.updateRanks();
 
         this.seq++;
@@ -454,10 +457,11 @@ class Game {
         const blame = (x, y) => x > 0 && x >= CONTACT_BLAME * Math.max(y, 0);
         const [striker, victim] = blame(aIn, bIn) ? [a, b] : blame(bIn, aIn) ? [b, a] : [];
         if (!striker) {
-            this.io.emit('chat_msg', { username: 'SYSTEM', color: '#f59e0b', msg: `${a.username} / ${b.username}: racing incident, no action` });
+            if (this.settings.contactPenalties !== false) this.io.emit('chat_msg', { username: 'SYSTEM', color: '#f59e0b', msg: `${a.username} / ${b.username}: racing incident, no action` });
             return;
         }
-        this.incidents.push({ striker: striker.id, victim: victim.id, at: this.time, off: false });
+        // Already off or spun before the hit: the hit didn't do that, so no +10 s for it
+        this.incidents.push({ striker: striker.id, victim: victim.id, at: this.time, off: false, before: victim.offLimits || this.spun(victim) });
     }
 
     // Facing more than 90° away from the way the track runs here
@@ -467,15 +471,18 @@ class Game {
         return Math.abs(Math.atan2(Math.sin(p.angle - h), Math.cos(p.angle - h))) > Math.PI / 2;
     }
 
-    // Watch each victim for INCIDENT_JUDGE_S, then the verdict: +5 s for the hit, +10 s if it put them off or round
-    judgeIncidents() {
+    // Watch each victim for INCIDENT_JUDGE_S, then the verdict: +5 s for the hit, +10 s if it put them off or round.
+    // now: judge everything pending at once (the race is over). Contact penalties off: incidents are still tracked so
+    // a pushed-off victim gets no track-limits strike, but nobody is penalised
+    judgeIncidents(now = false) {
         for (const inc of this.incidents) {
             const v = this.players[inc.victim];
-            if (v && !inc.off && (v.offLimits || this.spun(v))) inc.off = true;
+            if (v && !inc.off && !inc.before && (v.offLimits || this.spun(v))) inc.off = true;
         }
-        const due = this.incidents.filter((i) => this.time - i.at >= INCIDENT_JUDGE_S);
+        const due = now ? this.incidents : this.incidents.filter((i) => this.time - i.at >= INCIDENT_JUDGE_S);
         if (!due.length) return;
-        this.incidents = this.incidents.filter((i) => this.time - i.at < INCIDENT_JUDGE_S);
+        this.incidents = now ? [] : this.incidents.filter((i) => this.time - i.at < INCIDENT_JUDGE_S);
+        if (this.settings.contactPenalties === false) return;
         for (const inc of due) {
             const s = this.players[inc.striker], v = this.players[inc.victim];
             if (!s || !v) continue; // one of them left

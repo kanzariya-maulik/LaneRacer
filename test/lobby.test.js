@@ -95,6 +95,8 @@ test('sanitizeInputs: batches of sequenced inputs, clamped; legacy single inputs
 test('sanitizeSettings: collisions on/off (host), only real booleans', () => {
     assert.strictEqual(lobby.sanitizeSettings(DEFAULTS, { collisions: false }, TRACK_IDS).collisions, false);
     assert.strictEqual(lobby.sanitizeSettings({ ...DEFAULTS, collisions: false }, { collisions: 'yes' }, TRACK_IDS).collisions, false);
+    assert.strictEqual(lobby.sanitizeSettings(DEFAULTS, { contactPenalties: false }, TRACK_IDS).contactPenalties, false);
+    assert.strictEqual(lobby.sanitizeSettings(DEFAULTS, { contactPenalties: 0 }, TRACK_IDS).contactPenalties, DEFAULTS.contactPenalties);
 });
 
 test('sanitizeAssist: full or off, anything else falls back to full', () => {

@@ -1249,6 +1249,35 @@ test('incident: long contact is one incident; quali ghosts and collisions-off ra
     }
 });
 
+test('incident: contact penalties off — cars still bump, nobody is penalised, a pushed-off victim still gets no strike', () => {
+    const { g, a, b, sent } = incidentGame({ ...RACE, contactPenalties: false });
+    placeAt(a, 300, -1.9, 50, 6); placeAt(b, 300, 0, 50);
+    const bx = b.x;
+    g.update();
+    assert.notStrictEqual(b.x, bx, 'contact physics off');
+    placeAt(b, 300, 30, 50);
+    run(g, 2.2);
+    assert.deepStrictEqual([a.penalty, b.penalty, b.limits], [0, 0, 0]);
+    assert.ok(!sent.some(([ev]) => ev === 'chat_msg'), 'verdict announced with penalties off');
+});
+
+test('incident: hitting a car that was already off track or spun is +5 s, not +10 s', () => {
+    const { g, a, b } = incidentGame();
+    placeAt(a, 300, 0, 30); placeAt(b, 305, 0, 0);
+    b.angle += Math.PI;                                   // already spun, stopped on track before the hit
+    run(g, 2.2);
+    assert.strictEqual(a.penalty, 5);
+});
+
+test('incident: a hit still pending when the race ends is counted in the result', () => {
+    const { g, a, b } = incidentGame();
+    placeAt(a, 300, 0, 60); placeAt(b, 305, 0, 40);
+    g.update();                                           // contact, verdict 2 s away
+    Object.assign(a, { finished: true, finishTime: 100 }); Object.assign(b, { finished: true, finishTime: 101 });
+    g.update();
+    assert.strictEqual(a.penalty, 5);
+});
+
 test('lap: a car passing a checkpoint wide of its circle still gets the lap; a cut far down the road does not', () => {
     const total = monza.cum[monza.path.length], sc = monza.scale, r = monza.checkpoints[0].radius / sc;
     const drive = (cut) => {

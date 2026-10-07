@@ -21,6 +21,7 @@ const setQuali = document.getElementById('setting-quali');
 const setOutLaps = document.getElementById('setting-outlaps');
 const setQualiLaps = document.getElementById('setting-qualilaps');
 const setCollisions = document.getElementById('setting-collisions');
+const setPenalties = document.getElementById('setting-penalties');
 const settingsView = document.getElementById('settings-view');
 const MAX_RACERS = 22; // src/lobby.js: grid slots per track
 const graphicsSelect = document.getElementById('graphics-select');
@@ -296,7 +297,8 @@ function emitSettings() {
         qualifying: setQuali.value === '1',
         outLaps: parseInt(setOutLaps.value, 10),
         qualiLaps: parseInt(setQualiLaps.value, 10),
-        collisions: setCollisions.value === '1'
+        collisions: setCollisions.value === '1',
+        contactPenalties: setPenalties.value === '1'
     });
 }
 setTrack.addEventListener('change', emitSettings);
@@ -305,6 +307,7 @@ setQuali.addEventListener('change', emitSettings);
 setOutLaps.addEventListener('change', emitSettings);
 setQualiLaps.addEventListener('change', emitSettings);
 setCollisions.addEventListener('change', emitSettings);
+setPenalties.addEventListener('change', emitSettings);
 
 chatForm.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -412,12 +415,14 @@ window.updateSettingsUI = () => {
     setQualiLaps.value = clientState.settings.qualiLaps ?? 2;
     document.querySelectorAll('.quali-only').forEach((el) => el.classList.toggle('hidden', !clientState.settings.qualifying));
     setCollisions.value = clientState.settings.collisions === false ? '0' : '1';
+    setPenalties.value = clientState.settings.contactPenalties === false ? '0' : '1';
+    document.querySelectorAll('.collisions-only').forEach((el) => el.classList.toggle('hidden', clientState.settings.collisions === false));
 
     // Header chips and the read-only view non-hosts see
     const s = clientState.settings;
     const track = setTrack.selectedOptions[0]?.textContent || s.trackId;
     const out = s.outLaps ?? 1, timed = s.qualiLaps ?? 2, quali = s.qualifying ? `${out} out + ${timed} timed` : 'Off';
-    const rows = [['Track', track], ['Laps', s.maxLaps], ['Qualifying', quali], ['Collisions', s.collisions === false ? 'Off' : 'On']];
+    const rows = [['Track', track], ['Laps', s.maxLaps], ['Qualifying', quali], ['Collisions', s.collisions === false ? 'Off' : s.contactPenalties === false ? 'On, no penalties' : 'On, penalties']];
     settingsView.replaceChildren(...rows.map(([k, v]) => {
         const d = document.createElement('div');
         d.append(Object.assign(document.createElement('dt'), { textContent: k }), Object.assign(document.createElement('dd'), { textContent: v }));
