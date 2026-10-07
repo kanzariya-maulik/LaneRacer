@@ -1248,3 +1248,21 @@ test('incident: long contact is one incident; quali ghosts and collisions-off ra
         assert.deepStrictEqual([a.penalty, b.penalty], [0, 0], `${mode} judged`);
     }
 });
+
+test('lap: a car passing a checkpoint wide of its circle still gets the lap; a cut far down the road does not', () => {
+    const total = monza.cum[monza.path.length], sc = monza.scale, r = monza.checkpoints[0].radius / sc;
+    const drive = (cut) => {
+        const g = new Game(io, [lp('a')], monza, { ...RACE, maxLaps: 1 }, () => {});
+        g.release();
+        const p = g.players.a, wide = monza.checkpoints[5].s;
+        for (let s = 10 * sc; s <= total + 10 * sc && !p.finished; s += 2 * sc) {
+            if (cut && Math.abs(s - wide) < 100 * sc) continue;               // never on the road near cp5
+            const q = lapPos(s), off = Math.abs(s - wide) < 40 * sc ? (r + 5) * sc : 0; // wide of cp5's circle
+            Object.assign(p, { x: q.x - Math.sin(q.angle) * off, y: q.y + Math.cos(q.angle) * off, lapS: s % total });
+            g.checkLapProgress(p);
+        }
+        return p.finished;
+    };
+    assert.ok(drive(false), 'wide car missed the checkpoint: one extra lap');
+    assert.ok(!drive(true), 'a cut past the checkpoint counted');
+});

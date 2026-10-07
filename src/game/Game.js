@@ -7,6 +7,7 @@ const { pointAt, edgeAt } = require('./Track');
 const TICK_RATE = 60;
 const QUALI_LAPS = 2;       // timed laps after the out-lap, unless the host sets qualiLaps
 const QUALI_S_PER_LAP = 120; // quali ends this long per lap of the run (out-laps + timed) even if someone never finishes
+const CP_GATE_M = 30;        // a checkpoint also counts this far past it along the lap: wide of its circle (open grass), not a cut
 const LIMIT_WARNINGS = 2;    // race: violations before penalties start
 // Car-to-car incidents (race, collisions on): who drove into whom, judged once the consequences are known
 const CONTACT_LIGHT_MS = 3;      // closing slower than this (~11 km/h): rubbing wheels, not an incident
@@ -584,8 +585,10 @@ class Game {
         const cps = this.track.checkpoints;
         const target = (p.checkpoint + 1) % cps.length;
         const cp = cps[target];
-        const pos = this.trackPos(p);
-        if (Math.hypot(pos.x - cp.x, pos.y - cp.y) >= cp.radius) return;
+        const pos = this.trackPos(p), total = this.track.cum[this.track.path.length];
+        // Missing one would cost a whole extra lap (strict order), so a car just past it along the lap counts too
+        const past = !p.inPit && p.lapS != null && (((p.lapS - cp.s) % total) + total) % total < CP_GATE_M * this.track.scale;
+        if (!past && Math.hypot(pos.x - cp.x, pos.y - cp.y) >= cp.radius) return;
 
         p.checkpoint = target;
         p.progress++;

@@ -217,7 +217,7 @@ function build(raw, circuit = {}) {
         sectorCps.push(checkpoints.length);
         for (let j = 0; j < count; j++) {
             const p = pointAt(pts, cum, startS + bounds[k] + (j * len) / count);
-            checkpoints.push({ x: p.x, y: p.y, radius: width / 2 + wallOffset });
+            checkpoints.push({ x: p.x, y: p.y, radius: width / 2 + wallOffset, s: bounds[k] + (j * len) / count }); // s: lap distance
         }
     }
 
