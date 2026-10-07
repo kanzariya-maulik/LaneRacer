@@ -9,7 +9,7 @@ export const WALL_OFFSET = 80;     // world units past the track edge, unless th
 export const PIT_RUNOFF_M = 2;     // barrier this far outside the pit lane edge
 export const KERB_M = 1.5;         // kerbs past the track edge drive like asphalt
 export const PIT_LIMIT_KMH = 80;    // unless the circuit sets its own (circuits.json pitLimitKmh: Zandvoort 60)
-export const DRS_DRAG = 0.78;      // drag with the flap open (~+29 km/h top speed)
+export const DRS_DRAG = 0.72;      // drag with the flap open (~+39 km/h top speed)
 const BRIDGE_ROAD = 6;             // points either side of a bridge wall's own road that it applies to
 
 // Is (x, y) within reach of the pit lane (its bounding box, grown by the barrier distance)? Cached per pit lane
