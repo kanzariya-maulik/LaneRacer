@@ -57,7 +57,7 @@ class Game {
         this.doneSectors = [null, null, null]; // bests from completed valid laps only (kept if the driver leaves)
         this.doneSectorIds = [null, null, null];
         this.fastestLap = null;                // { id, time, lap }: purple lap, valid laps only
-        this.lastDetect = [];                  // per DRS zone: time the last car crossed its detection point
+        this.lastDetect = [];                  // per DRS zone: the last car across its detection point { id, at }
 
         const cpCount = track.checkpoints.length;
         this.players = {};
@@ -269,9 +269,10 @@ class Game {
         const inZone = (z) => (z.startS <= z.endS ? curS >= z.startS && curS < z.endS : curS >= z.startS || curS < z.endS);
         let available = false;
         t.drsZones.forEach((z, k) => {
-            if (race && passed(z.detectS)) {
-                p.drsEligible[k] = this.time - (this.lastDetect[k] ?? -Infinity) <= DRS_GAP_S;
-                this.lastDetect[k] = this.time;
+            if (race && !p.inPit && passed(z.detectS)) { // pit lane: not racing, gives and gets nothing
+                const last = this.lastDetect[k];  // re-crossing after a spin: not within 1 s of yourself
+                p.drsEligible[k] = !!last && last.id !== p.id && this.time - last.at <= DRS_GAP_S;
+                this.lastDetect[k] = { id: p.id, at: this.time };
             }
             if (inZone(z) && !p.inPit && (!race || (p.lap >= 1 && p.drsEligible[k]))) available = true;
         });

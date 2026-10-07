@@ -1295,3 +1295,17 @@ test('lap: a car passing a checkpoint wide of its circle still gets the lap; a c
     assert.ok(drive(false), 'wide car missed the checkpoint: one extra lap');
     assert.ok(!drive(true), 'a cut past the checkpoint counted');
 });
+
+test('DRS: a car is never within 1 s of itself, and a car in the pit lane gives nobody DRS', () => {
+    const g = new Game(io, [lp('a'), lp('b', 'haas')], monza, RACE, () => {});
+    g.release();
+    const { a, b } = g.players, d = Z().detectS, sc = monza.scale;
+    a.lap = b.lap = 1;
+    g.time = 100; g.updateDrs(a, d - sc, d + sc);
+    g.time = 100.3; g.updateDrs(a, d + sc, d - sc);  // rolls back over the line (spin)
+    g.time = 100.6; g.updateDrs(a, d - sc, d + sc);  // and across it again
+    assert.ok(!a.drsEligible[0], 'DRS from its own crossing');
+    g.time = 200; a.inPit = true; g.updateDrs(a, d - sc, d + sc);
+    g.time = 200.5; g.updateDrs(b, d - sc, d + sc);
+    assert.ok(!b.drsEligible[0], 'DRS from a car in the pit lane');
+});
