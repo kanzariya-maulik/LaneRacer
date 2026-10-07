@@ -27,6 +27,7 @@ function applyInput(id, inputData) {
 const applyInputLater = withNetSim(applyInput); // NET_SIM: fake WiFi on incoming inputs too
 
 // Every session timer goes through later() so an empty server can cancel them all at once
+const RESUME_S = 3; // host resume: count down this long before the cars are let go
 const timers = new Set();
 function later(fn, ms) {
     const t = setTimeout(() => { timers.delete(t); fn(); }, ms);
@@ -132,11 +133,28 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
 
         // Host controls during a session: pause/resume (driving only, not the lights or results), restart, kick
         const isHost = () => socket.id === state.hostId;
+        // Resume: a RESUME_S count for everyone first (cars held), so nobody is caught off guard; pausing again calls it off
         socket.on('pause_session', (on) => {
-            if (!isHost() || !gameInstance || !['QUALIFYING', 'RACE'].includes(state.status)) return;
-            gameInstance.paused = !!on;
-            io.emit('paused', { paused: gameInstance.paused });
-            netlog.log(`[SESSION] ${gameInstance.paused ? 'PAUSED' : 'RESUMED'} by host`);
+            const g = gameInstance;
+            if (!isHost() || !g || !['QUALIFYING', 'RACE'].includes(state.status)) return;
+            if (on) {
+                g.resuming = 0;
+                g.paused = true;
+                io.emit('paused', { paused: true });
+                netlog.log('[SESSION] PAUSED by host');
+                return;
+            }
+            if (!g.paused || g.resuming) return;
+            const id = g.resuming = (g.resumeSeq || 0) + 1;
+            g.resumeSeq = id;
+            io.emit('resuming', { seconds: RESUME_S });
+            later(() => {
+                if (gameInstance !== g || g.resuming !== id) return; // restarted, or paused again during the count
+                g.resuming = 0;
+                g.paused = false;
+                io.emit('paused', { paused: false });
+                netlog.log('[SESSION] RESUMED by host');
+            }, RESUME_S * 1000);
         });
         socket.on('restart_session', () => {
             if (!isHost() || !gameInstance || !['QUALIFYING', 'COUNTDOWN', 'RACE'].includes(state.status)) return;

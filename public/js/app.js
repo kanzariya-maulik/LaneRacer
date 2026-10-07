@@ -481,7 +481,8 @@ window.handleStatusChange = (status) => {
         lights.classList.remove('hidden');
         lights.querySelectorAll('.light').forEach(l => l.classList.remove('on'));
     } else if (status === 'FINISHED' && !clientState.raceResults) { // the classification replaces the FINISH! banner
-        cdOverlay.classList.remove('hidden');
+        cdOverlay.classList.remove('hidden', 'resume', 'go', 'tick'); // not the resume count's look
+        document.getElementById('countdown-label').classList.add('hidden');
         document.getElementById('countdown-text').innerText = 'FINISH!';
     }
 };

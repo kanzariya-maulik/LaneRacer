@@ -257,7 +257,7 @@ function simStep(sample = true) {
     if (sample) {
         const pad = gamepadInput((navigator.getGamepads ? [...navigator.getGamepads()] : []).find(Boolean));
         const car = predictor?.car, lift = car ? liftOffBrake(parseAssist(predictor.assist).brake, (car.speed || 0) / predictor.track.scale) : 0;
-        input = pad || touchInput || keyboardStep(input, keys, STEP_S, lift);
+        input = hostPanel ? { throttle: 0, brake: 0, steer: 0, drs: false } : pad || touchInput || keyboardStep(input, keys, STEP_S, lift); // menu open: hands off
     }
     const stamped = { seq: ++inputSeq, steer: input.steer, throttle: input.throttle, brake: input.brake, drs: !!input.drs };
     if (predictor && predictor.car) predictor.step(stamped);
@@ -1634,7 +1634,7 @@ let hostPanel = false, restartArmedUntil = 0;
 const amHost = () => !!clientState.me && clientState.hostId === clientState.me;
 const inSession = () => ['QUALIFYING', 'COUNTDOWN', 'RACE'].includes(clientState.status);
 function renderSessionPanel() {
-    const paused = !!clientState.paused && inSession(), host = amHost() && inSession();
+    const paused = !!clientState.paused && !clientState.resuming && inSession(), host = amHost() && inSession(); // the count hides it
     $('hud-host').classList.toggle('hidden', !host);
     if (!host) hostPanel = false;
     const show = paused || hostPanel;
@@ -1643,9 +1643,9 @@ function renderSessionPanel() {
     $('hc-title').textContent = paused ? 'PAUSED' : 'SESSION CONTROL';
     $('hc-note').textContent = !paused ? '' : host ? 'The session is paused for everyone.' : 'The host has paused the session.';
     $('hc-note').classList.toggle('hidden', !paused);
-    $('hc-close').classList.toggle('hidden', paused || !host);
+    $('hc-close').classList.toggle('hidden', !host);
     $('hc-host').classList.toggle('hidden', !host);
-    $('hc-foot').textContent = host ? 'Esc closes · restart and remove act for everyone' : 'Only the host can resume';
+    $('hc-foot').textContent = host ? 'Esc resumes and closes · restart and remove act for everyone' : 'Only the host can resume';
     if (!host) return;
     const pause = $('hc-pause'), armed = performance.now() < restartArmedUntil;
     pause.textContent = paused ? 'Resume' : 'Pause';
@@ -1669,14 +1669,24 @@ function renderSessionPanel() {
     if (!list.children.length) list.append(Object.assign(document.createElement('li'), { className: 'hc-empty', textContent: 'No other drivers' }));
 }
 window.renderSessionPanel = renderSessionPanel;
+// Opening it pauses the session for everyone (once the lights are out); closing it (Esc, ✕, Resume) resumes
+const canPause = () => ['QUALIFYING', 'RACE'].includes(clientState.status);
 function toggleHostPanel() {
     if (!amHost() || !inSession()) return;
-    hostPanel = !hostPanel;
+    const held = clientState.paused && !clientState.resuming;
+    hostPanel = !(hostPanel || held);
+    if (hostPanel) {
+        releaseKeys();
+        if (canPause() && !held) socket.emit('pause_session', true); // also calls off a resume count under way
+    } else if (held) socket.emit('pause_session', false); // the server counts everyone in, then resumes
     renderSessionPanel();
 }
 $('hud-host').addEventListener('click', toggleHostPanel);
 $('hc-close').addEventListener('click', toggleHostPanel);
-$('hc-pause').addEventListener('click', () => socket.emit('pause_session', !clientState.paused));
+$('hc-pause').addEventListener('click', () => {
+    if (clientState.paused) toggleHostPanel(); // Resume: back to racing, menu closed
+    else socket.emit('pause_session', true);
+});
 $('hc-restart').addEventListener('click', () => {
     if (performance.now() < restartArmedUntil) { // second click: it throws the session away, so it takes two
         restartArmedUntil = 0;
@@ -1697,9 +1707,32 @@ window.onPaused = (paused) => {
         netBuf.reset();
         clientState.netIn = [];
         simAcc = 0;
-        if (inSession()) window.showBanner?.('RESUMED', true);
     }
+    resumeCount(paused || !inSession() ? null : 'GO');
     renderSessionPanel();
+};
+// The host's resume: GET READY 3 · 2 · 1 for everyone (beeps like the start lights; hold your throttle), GO as the cars
+// are let go. Keys pressed during the count are kept, so you can be on the throttle at GO
+let countTimer = null;
+function resumeCount(show) {
+    clearTimeout(countTimer);
+    const el = $('countdown-overlay'), txt = $('countdown-text'), label = $('countdown-label');
+    if (show === null) { el.classList.add('hidden'); label.classList.add('hidden'); el.classList.remove('resume', 'go'); return; }
+    const go = show === 'GO';
+    Sound.event(go ? 'lights_out' : 'beep');
+    txt.textContent = show;
+    label.classList.toggle('hidden', go);
+    el.classList.remove('hidden', 'tick');
+    el.classList.add('resume');
+    el.classList.toggle('go', go);
+    void el.offsetWidth; // restart the pop for every number
+    el.classList.add('tick');
+    countTimer = go ? setTimeout(() => resumeCount(null), 900) : show > 1 ? setTimeout(() => resumeCount(show - 1), 1000) : null;
+}
+window.onResuming = (seconds) => {
+    hostPanel = false;
+    renderSessionPanel();
+    resumeCount(seconds);
 };
 
 let flashTimer = null, bannerTimer = null;
@@ -1784,7 +1817,7 @@ function updateHUD(withTower = true) {
     const sess = clientState.session;
     let bar = '';
     if (clientState.status === 'QUALIFYING' && sess) {
-        bar = `QUALIFYING ${fmtClock(sess.endsAt - Date.now())}`;
+        bar = `QUALIFYING ${fmtClock(sess.endsAt - (clientState.pausedAt ?? Date.now()))}`; // frozen while paused
         if (racing) bar += me.finished ? ` · QUALIFYING COMPLETE — P${me.rank}` : me.curLap === null ? (me.inPit ? ' · PIT LANE' : ' · OUT LAP') : ` · LAP ${me.lap + 1}/${clientState.settings.qualiLaps ?? 2}`;
     } else if (clientState.status === 'RACE' || clientState.status === 'FINISHED') {
         const leader = Object.values(gs).find(p => p.rank === 1);

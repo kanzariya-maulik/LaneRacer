@@ -219,7 +219,7 @@ socket.on('lobby_state_sync', (state) => {
         clientState.gameState = null;
         clientState.trackData = null;
         clientState.session = null;
-        clientState.paused = false;
+        clientState.paused = clientState.resuming = false;
     }
     if (window.updateLobbyUI) window.updateLobbyUI();
     if (window.updateSettingsUI) window.updateSettingsUI();
@@ -264,7 +264,7 @@ socket.on('chat_msg', (data) => {
 // GAME SYNCS
 socket.on('status_change', (status) => {
     clientState.status = status;
-    if (status === 'LOBBY') clientState.paused = false;
+    if (status === 'LOBBY') clientState.paused = clientState.resuming = false;
     if (window.handleStatusChange) window.handleStatusChange(status);
     window.renderSessionPanel?.();
 });
@@ -283,15 +283,30 @@ socket.on('game_init', (data) => {
     clientState.mySectors = [null, null, null];
     clientState.myBestSectors = [null, null, null];
     clientState.paused = !!data.paused; // a late joiner can arrive mid-pause
+    clientState.resuming = false;
+    clientState.pausedAt = clientState.paused ? Date.now() : null;
     if (window.initGameVisuals) window.initGameVisuals();
     if (clientState.paused) window.onPaused?.(true); else window.renderSessionPanel?.(); // a new session: no resume banner
 });
 
 // Host pause / resume
 socket.on('paused', ({ paused }) => {
-    if (clientState.paused === paused) return;
+    const counting = clientState.resuming; // paused again during the resume count: still paused, but the count stops
+    clientState.resuming = false;
+    if (clientState.paused === paused && !counting) return;
     clientState.paused = paused;
+    // The session clock stands still while paused (the server's does): push its end back by the time we stood
+    if (paused) clientState.pausedAt ??= Date.now();
+    else if (clientState.pausedAt) {
+        if (clientState.session?.endsAt) clientState.session.endsAt += Date.now() - clientState.pausedAt;
+        clientState.pausedAt = null;
+    }
     window.onPaused?.(paused);
+});
+// The host resumed: everyone counts down together, cars still held, then 'paused' false lets them go
+socket.on('resuming', ({ seconds }) => {
+    clientState.resuming = true;
+    window.onResuming?.(seconds);
 });
 
 // This comes in 60 times a second

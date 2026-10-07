@@ -771,3 +771,20 @@ input:disabled { opacity: 0.7; }
 .hud-host { border: 0; cursor: pointer; font: inherit; align-items: center; pointer-events: auto; }
 .hud-host:hover { filter: brightness(1.2); }
 .hud-host.hidden { display: none; }
+
+/* Host resume count: GET READY 3 · 2 · 1, then GO; the track stays visible behind it */
+#countdown-overlay.resume { background: radial-gradient(ellipse at center, rgba(0,0,0,0.55), rgba(0,0,0,0.2) 70%); z-index: 10; }
+#countdown-label {
+    margin: 0 0 0.2em; color: #fff; font-weight: 800; font-size: clamp(1rem, 2.4vw, 1.6rem); letter-spacing: 0.5em;
+    padding: 0.35em 0.6em 0.35em 1.1em; background: #e10600; transform: skewX(-12deg);
+}
+#countdown-overlay.resume #countdown-text {
+    font-size: clamp(7rem, 22vw, 15rem); line-height: 1; font-style: italic; font-variant-numeric: tabular-nums;
+    text-shadow: 0 0 40px rgba(225, 6, 0, 0.75), 0 6px 0 rgba(0,0,0,0.35);
+}
+#countdown-overlay.go #countdown-text { color: #22e06a; text-shadow: 0 0 50px rgba(34, 224, 106, 0.8), 0 6px 0 rgba(0,0,0,0.35); }
+#countdown-overlay.tick #countdown-text { animation: count-pop 0.9s cubic-bezier(0.2, 0.9, 0.3, 1.2) both; }
+@keyframes count-pop { 0% { transform: scale(1.6); opacity: 0; } 25% { transform: scale(1); opacity: 1; } 85% { opacity: 1; } 100% { transform: scale(0.92); opacity: 0.2; } }
+#countdown-overlay.go.tick #countdown-text { animation-name: count-go; }
+@keyframes count-go { 0% { transform: scale(0.6); opacity: 0; } 30% { transform: scale(1.1); opacity: 1; } 100% { transform: scale(1.4); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { #countdown-overlay.tick #countdown-text { animation: none; } }

@@ -235,7 +235,21 @@ test('host pause: cars and the race clock stop until resume; nobody else can pau
     drive(2000);
     assert.strictEqual(race.players.a.x, x0, 'car moved while paused');
     assert.strictEqual(snaps.at(-1).g, g0, 'race clock ran while paused');
+    // Resume: a 3 s count for everyone first, cars still held; pausing again during it calls it off
     a.fire('pause_session', false);
+    assert.deepStrictEqual(io.events('resuming').at(-1), { seconds: 3 });
+    drive(1500);
+    assert.strictEqual(race.players.a.x, x0, 'car moved during the resume count');
+    a.fire('pause_session', true);
+    drive(3000);
+    assert.deepStrictEqual(io.events('paused').at(-1), { paused: true }, 'a cancelled count still resumed');
+    assert.strictEqual(race.players.a.x, x0);
+    a.fire('pause_session', false);
+    a.fire('pause_session', false); // a second click doesn't start a second count
+    assert.strictEqual(io.events('resuming').length, 2);
+    advance(t, 2900);
+    assert.deepStrictEqual(io.events('paused').at(-1), { paused: true }, 'resumed before the count ended');
+    advance(t, 100);
     assert.deepStrictEqual(io.events('paused').at(-1), { paused: false });
     drive(1000);
     assert.notStrictEqual(race.players.a.x, x0);
