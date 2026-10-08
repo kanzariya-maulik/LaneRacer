@@ -40,6 +40,55 @@ function distTo(path, x, y, closed = true) {
     return best;
 }
 
+// game3d.js: the drawn road follows a smooth curve through the track's points (they're ~10 m apart: corners drawn straight between
+// them look faceted): a Catmull-Rom spline sampled every ~2.5 m. Physics keeps the points; at the tightest hairpin the two
+// differ by under a metre, inside the run-off the ground is pressed to. up(): any per-point array onto the curve (numbers
+// interpolated, flags held across their segment)
+export const RENDER_STEP_M = 2.5;
+export function smoothPath(path, scale, cum) {
+    const n = path.length, K = Math.max(1, Math.round(cum[n] / n / scale / RENDER_STEP_M)), P = (i) => path[((i % n) + n) % n], out = [];
+    for (let i = 0; i < n; i++) {
+        const a = P(i - 1), b = P(i), c = P(i + 1), d = P(i + 2);
+        for (let j = 0; j < K; j++) {
+            const s = j / K, s2 = s * s, s3 = s2 * s;
+            const f = (u0, u1, u2, u3) => 0.5 * (2 * u1 + (u2 - u0) * s + (2 * u0 - 5 * u1 + 4 * u2 - u3) * s2 + (3 * u1 - u0 - 3 * u2 + u3) * s3);
+            out.push({ x: f(a.x, b.x, c.x, d.x), y: f(a.y, b.y, c.y, d.y) });
+        }
+    }
+    const up = (arr) => arr.flatMap((v, i) => Array.from({ length: K }, (_, j) => (typeof v === 'number' ? v + ((arr[(i + 1) % n] - v) * j) / K : v)));
+    return { rp: out, up, K };
+}
+
+// Offset line E of path (game3d.js offsetPoints) with its loops cut out: a loop = a stretch running backwards against the
+// path (folded), between two segments of the line that cross within UNTANGLE_SPAN points; a crossing of two far-apart
+// stretches (another leg of the track) is left alone
+const UNTANGLE_SPAN = 160; // points: a U-turn's legs (Monaco's Fairmont) only part far enough to cross ~150 m along
+export function untangle(path, E) {
+    const n = E.length, at = (k) => E[k % n], back = (k) => {
+        const a = at(k), b = at(k + 1), p = path[k % n], q = path[(k + 1) % n];
+        return (b.x - a.x) * (q.x - p.x) + (b.y - a.y) * (q.y - p.y) < 0;
+    };
+    for (let i = 0; i < n; i++) {
+        if (!back(i + 1)) continue; // only from just before a fold: most points cost one test
+        let found = null;
+        for (let s = i; s > i - UNTANGLE_SPAN && !found; s--) { // the crossing: a segment before the fold with one after it
+            const a = at(s + n), b = at(s + n + 1);
+            for (let j = i + 2; j < s + UNTANGLE_SPAN && !found; j++) {
+                const c = at(j + n), d = at(j + n + 1), r = (b.x - a.x) * (d.y - c.y) - (b.y - a.y) * (d.x - c.x);
+                if (!r) continue;
+                const u = ((c.x - a.x) * (d.y - c.y) - (c.y - a.y) * (d.x - c.x)) / r, v = ((c.x - a.x) * (b.y - a.y) - (c.y - a.y) * (b.x - a.x)) / r;
+                if (u >= 0 && u <= 1 && v >= 0 && v <= 1) found = { s, j, x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u };
+            }
+        }
+        if (!found) continue;
+        for (let k = found.s + 1; k <= found.j; k++) E[(k + n) % n] = { x: found.x, y: found.y };
+        i = Math.max(i, found.j);
+    }
+    // what's left steps back without crossing itself (a Z, a few cm, beside a cut): held where the line had got to
+    for (let k = 0; k < n; k++) if (back(k)) E[(k + 1) % n] = { ...at(k) };
+    return E;
+}
+
 export const safeDist = (t) => t.width / 2 + (t.wallOffset ?? WALL_OFFSET) + 3 * t.scale;
 
 // Spatial index of the centreline, so the ~100,000 nearest-road questions behind the terrain read a handful of segments

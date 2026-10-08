@@ -204,3 +204,47 @@ test('every circuit has a night: sky darker than its day, light towers to race b
     // Dark countryside shows far more stars than a megacity
     assert.ok(NIGHTS.spa.stars > NIGHTS.interlagos.stars && NIGHTS.spielberg.stars > NIGHTS.monaco.stars);
 });
+
+// Offset lines as game3d.js offsetPoints draws them (each point square to its neighbours' chord), loops cut out
+const offsetLine = (P, o) => S.untangle(P, P.map((p, i) => {
+    const n = P.length, a = P[(i - 1 + n) % n], b = P[(i + 1) % n], l = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+    return { x: p.x - ((b.y - a.y) / l) * o, y: p.y + ((b.x - a.x) / l) * o };
+}));
+const folds = (P, E) => E.filter((e, k) => {
+    const n = E.length, f = E[(k + 1) % n], p = P[k], q = P[(k + 1) % n];
+    return (f.x - e.x) * (q.x - p.x) + (f.y - e.y) * (q.y - p.y) < -1e-9;
+}).length;
+
+test('untangle: the inside of a U-turn tighter than the offset ends where the two legs\' lines cross', () => {
+    // legs 10 apart joined by a half circle (radius 5), offset 8 to the inside: the lines meet where the legs are 16 apart
+    const P = [];
+    for (let x = -200; x < 0; x += 2) P.push({ x, y: -5 });
+    for (let k = 0; k < 16; k++) { const a = -Math.PI / 2 + (k / 16) * Math.PI; P.push({ x: 5 * Math.cos(a), y: 5 * Math.sin(a) }); }
+    for (let x = 0; x > -200; x -= 2) P.push({ x, y: 5 + 30 * Math.max(0, -x - 100) / 100 }); // the exit leg spreads out
+    const raw = P.map((p, i) => { const n = P.length, a = P[(i - 1 + n) % n], b = P[(i + 1) % n], l = Math.hypot(b.x - a.x, b.y - a.y); return { x: p.x - ((b.y - a.y) / l) * 8, y: p.y + ((b.x - a.x) / l) * 8 }; });
+    assert.ok(folds(P, raw) > 0, 'the plain offset folds');
+    const E = offsetLine(P, 8);
+    assert.strictEqual(folds(P, E.slice(0, -2)), 0); // (the loop's own closing segment aside)
+    for (const e of E.slice(5, -5)) assert.ok(Physics.nearestOnPath(e.x, e.y, P).dist > 8 * 0.98, `inside the road at ${e.x},${e.y}`);
+});
+
+for (const id of Track.TRACK_IDS) {
+    test(`${id}: drawn road edges and barrier lines lie off their own road, nowhere folded back across it`, () => {
+        const t = tracks[id], { rp } = S.smoothPath(t.path, t.scale, t.cum), m = rp.length, half = t.width / 2;
+        // distance to the drawn road within ±40 m of point k (a nearby leg, Monaco's Fairmont, can overlap it)
+        const own = (e, k) => {
+            let best = Infinity;
+            for (let d = -16; d <= 16; d++) {
+                const a = rp[(k + d + m) % m], b = rp[(k + d + 1 + m) % m], ex = b.x - a.x, ey = b.y - a.y, l2 = ex * ex + ey * ey;
+                const u = l2 ? Math.max(0, Math.min(1, ((e.x - a.x) * ex + (e.y - a.y) * ey) / l2)) : 0;
+                best = Math.min(best, Math.hypot(e.x - a.x - u * ex, e.y - a.y - u * ey));
+            }
+            return best;
+        };
+        for (const o of [half, half + t.wallOffset]) for (const side of [1, -1]) {
+            const E = offsetLine(rp, side * o);
+            assert.strictEqual(folds(rp, E), 0, `${(o / t.scale).toFixed(1)} m line folds`);
+            E.forEach((e, k) => assert.ok(own(e, k) > o * 0.95, `${(o / t.scale).toFixed(1)} m line inside its road at ${e.x.toFixed(0)},${e.y.toFixed(0)}`));
+        }
+    });
+}

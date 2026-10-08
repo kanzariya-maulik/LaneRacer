@@ -11,6 +11,14 @@ const circuits = JSON.parse(fs.readFileSync(path.join(DATA, 'circuits.json'), 'u
 const CAR_RADIUS = 18; // Physics.checkCarCollision
 
 const tracks = Track.loadAll();
+// Where the survey (the track's own points, before Track.js smooths them) puts a spot `m` metres from point 0: the
+// smoothed track keeps it there, give or take how far the smoothing moved the road (FAIR_MOVE_M)
+const FAIR_MOVE_M = 2;
+const surveyAt = (id, m) => {
+    const raw = JSON.parse(fs.readFileSync(path.join(DATA, `${id}.json`), 'utf8')), P = raw.path, cum = [0];
+    for (let i = 1; i <= P.length; i++) cum.push(cum[i - 1] + Math.hypot(P[i % P.length].x - P[i - 1].x, P[i % P.length].y - P[i - 1].y));
+    return Track.pointAt(P, cum, m * raw.scale);
+};
 
 test('loads all thirteen circuits', () => {
     assert.deepStrictEqual(Object.keys(tracks).sort(), ['cota', 'hungaroring', 'imola', 'interlagos', 'monaco', 'montreal', 'monza', 'sakhir', 'silverstone', 'spa', 'spielberg', 'suzuka', 'zandvoort']);
@@ -38,9 +46,9 @@ for (const id of Track.TRACK_IDS) {
     test(`${id}: sector lines are checkpoints at sector2M / sector3M`, () => {
         const c = circuits[id];
         for (const [k, m] of [[1, c.sector2M], [2, c.sector3M]]) {
-            const p = Track.pointAt(t.path, t.cum, (c.startLineM + m) * t.scale);
-            const cp = t.checkpoints[t.sectorCps[k]];
-            assert.ok(Math.hypot(cp.x - p.x, cp.y - p.y) < 1e-6, `sector ${k + 1} line misplaced`);
+            const p = surveyAt(id, c.startLineM + m), cp = t.checkpoints[t.sectorCps[k]];
+            assert.ok(Math.hypot(cp.x - p.x, cp.y - p.y) < FAIR_MOVE_M * t.scale, `sector ${k + 1} line misplaced`);
+            assert.ok(Physics.nearestOnTrack(cp.x, cp.y, t).dist < 1e-6, `sector ${k + 1} line off the centreline`);
         }
     });
 
@@ -58,9 +66,9 @@ for (const id of Track.TRACK_IDS) {
     });
 
     test(`${id}: start line at circuits.json startLineM`, () => {
-        const p = Track.pointAt(t.path, t.cum, circuits[id].startLineM * t.scale);
-        assert.strictEqual(t.start.x, p.x);
-        assert.strictEqual(t.start.y, p.y);
+        const p = surveyAt(id, circuits[id].startLineM), q = Track.pointAt(t.path, t.cum, t.startS);
+        assert.ok(Math.hypot(t.start.x - p.x, t.start.y - p.y) < FAIR_MOVE_M * t.scale, 'start line moved');
+        assert.deepStrictEqual(t.start, q);
     });
 
     test(`${id}: grid behind the start line, pole on the ${circuits[id].poleSide}, alternating`, () => {
@@ -72,7 +80,8 @@ for (const id of Track.TRACK_IDS) {
         };
         t.startPositions.forEach((s, i) => assert.strictEqual(sideOf(s), i % 2 === 0 ? pole : other, `slot ${i}`));
         const s0 = t.startPositions[0], c = circuits[id];
-        const line = Track.pointAt(t.path, t.cum, (c.startLineM + (c.gridLineM || 0)) * t.scale); // grid line, if separate
+        const line = t.gridLine || t.start; // grid line, if separate
+        assert.ok(Math.hypot(line.x - surveyAt(id, c.startLineM + (c.gridLineM || 0)).x, line.y - surveyAt(id, c.startLineM + (c.gridLineM || 0)).y) < FAIR_MOVE_M * t.scale, 'grid line moved');
         const ahead = Math.cos(line.angle) * (s0.x - line.x) + Math.sin(line.angle) * (s0.y - line.y);
         assert.ok(ahead < -7 * t.scale && ahead > -9 * t.scale, `pole is ${(-ahead / t.scale).toFixed(1)} m behind the line`);
     });
@@ -206,7 +215,7 @@ test('a track without a pit lane still builds', () => {
     const pts = Array.from({ length: 100 }, (_, i) => ({ x: Math.cos(i / 50 * Math.PI) * 3000, y: Math.sin(i / 50 * Math.PI) * 3000 }));
     const t = Track.build({ id: 'ring', name: 'Ring', scale: 6, width: 80, path: pts });
     assert.strictEqual(t.pit, null);
-    assert.strictEqual(t.start.x, pts[0].x);
+    assert.ok(Math.hypot(t.start.x - pts[0].x, t.start.y - pts[0].y) < 0.5 * t.scale); // smoothing leaves a circle be
     assert.strictEqual(t.startPositions.length, 22);
     assert.deepStrictEqual(t.sectorCps.length, 3);
 });

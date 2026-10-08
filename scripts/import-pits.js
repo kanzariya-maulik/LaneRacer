@@ -2,7 +2,8 @@
 // Pit lanes © OpenStreetMap contributors (ODbL), aligned onto the TUMFTM centrelines by robust ICP.
 const fs = require('fs');
 const path = require('path');
-const { SCALE, BASE, SOURCES, only } = require('./import-tracks');
+const { SCALE, WIDTH_MULT, BASE, SOURCES, only } = require('./import-tracks');
+const { fair } = require('../src/game/Track');
 const { densify, resample, align, nearestIndex } = require('./geo');
 const { fitF1 } = require('./import-elevation');
 
@@ -11,9 +12,8 @@ const { fitF1 } = require('./import-elevation');
 const osmUrl = (bbox, ids = []) => { const [w, s, e, n] = bbox.split(','); return 'https://maps.mail.ru/osm/tools/overpass/api/interpreter?data=' + encodeURIComponent(`[out:xml];(way[highway=raceway](${s},${w},${n},${e});${ids.length ? `way(id:${ids.join(',')});` : ''});(._;>;);out;`); };
 const CACHE = path.join(__dirname, 'build', 'osm');
 const OUT_DIR = path.join(__dirname, '..', 'data', 'tracks');
-const PIT_WIDTH_M = 10; // 12 m would overlap the 1.5×-widened track at Sakhir/Suzuka
+const PIT_WIDTH_M = 10; // 12 m would overlap the widened track at Sakhir/Suzuka
 const STEP_M = 5;
-const WIDTH_MULT = 1.5; // import-tracks: the road is drawn 1.5x the real width
 const MAX_FIT_M = 5;
 const ATTRIBUTION = 'Pit lane © OpenStreetMap contributors (ODbL)';
 // bbox, OSM pit way(s), ICP seed [theta, tx, ty] (TUMFTM metres → local OSM metres; found by a rotation search when missing),
@@ -141,7 +141,7 @@ async function importPit(src) {
     const track = JSON.parse(fs.readFileSync(file, 'utf8'));
     pit = await fitToCars(src, pit, P, track.width / SCALE / WIDTH_MULT / 2);
     pit = smoothLane(pit);
-    pit = clearOfRoad(pit, P, track.width / SCALE / 2); // last: room for the pit wall beside the drawn (1.5x) road
+    pit = clearOfRoad(pit, P, track.width / SCALE / 2); // last: room for the pit wall beside the drawn (widened) road
     track.pit = {
         path: pit.map(([x, y]) => ({ x: +(x * SCALE).toFixed(1), y: +(-y * SCALE).toFixed(1) })),
         width: PIT_WIDTH_M * SCALE,
@@ -153,13 +153,15 @@ async function importPit(src) {
     console.log(`${src.id}: fit ${fit.median.toFixed(2)} m, pit ${pit.length} points`);
 }
 
-// The road is drawn 1.5x the real width, so beside a tight pit straight (COTA, Zandvoort) it would cover the pit lane's
-// inner edge and leave no room for the pit wall. Where the lane runs beside the track (not where it merges), move it out
-// to drawn edge + wall clearance + half its width, tapering at ≤ 2.5 % so the lane stays smooth. P: TUMFTM centreline (m)
+// The road is drawn WIDTH_MULT x the real width, so beside a tight pit straight (COTA, Zandvoort) it would cover the pit
+// lane's inner edge and leave no room for the pit wall. Where the lane runs beside the track (not where it merges), move it
+// out to drawn edge + wall clearance + half its width, tapering at ≤ 2.5 % so the lane stays smooth. P: TUMFTM centreline
+// (m), smoothed as the game draws it (Track.js fair)
 const PIT_CLEAR_M = 1;    // drawn track edge → pit lane edge
 const PUSH_TAPER = 0.025; // m of push per m along the lane
 const MERGE_M = 80;        // the lane's ends, where it runs into the track
 function clearOfRoad(pit, P, drawnHalf) {
+    P = fair(P.map(([x, y]) => ({ x, y })), 1).map(({ x, y }) => [x, y]);
     const need = drawnHalf + PIT_CLEAR_M + PIT_WIDTH_M / 2;
     const near = pit.map(([x, y]) => {
         let best = null;
@@ -256,4 +258,4 @@ async function main() {
 
 if (require.main === module) main().catch((e) => { console.error(e); process.exit(1); });
 
-module.exports = { parseOsm, cached, osmUrl, CACHE, PITS };
+module.exports = { parseOsm, cached, osmUrl, CACHE, PITS, clearOfRoad };

@@ -5,7 +5,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { keyboardStep, gamepadInput, liftOffBrake } from './input.js';
 import { parseAssist } from './sim/carphysics.js';
 import { LEVELS, ratioRange, resolveLevel, autoPick, adaptStep, snapLight, frameCapped } from './quality.js';
-import { placeScenery, seedOf, vergeReach, terrainHeights, terrainGround, skirtDepth, gridSampler, carveReach, onVerge, onPit, SKIRT_M } from './scenery.js';
+import { placeScenery, seedOf, vergeReach, terrainHeights, terrainGround, skirtDepth, gridSampler, carveReach, onVerge, onPit, untangle, smoothPath, RENDER_STEP_M, SKIRT_M } from './scenery.js';
 import { heightAt, pathHeights } from './sim/elevation.js';
 import { themeOf, LANDS, SKIES, nightOf } from './themes.js';
 import { SnapshotBuffer, RenderClock, sample, samplePresent, decodeFlags } from './netsync.js';
@@ -402,17 +402,20 @@ function getBounds(path) {
     return b;
 }
 
-// Offset every path point sideways (positive = left of travel in screen space); offset: one number or one per point
+// Offset every path point sideways (positive = left of travel in screen space); offset: one number or one per point.
+// On the inside of a bend tighter than the offset (Monaco's hairpins at the road edge, any hairpin at the barrier line)
+// the offset line folds back on itself in a loop; the real edge there is where the loop crosses itself, so the loop's
+// points all go to that crossing (untangle): nothing drawn from them lies across the road
 function offsetPoints(path, offset) {
     const n = path.length;
-    return path.map((p, i) => {
+    return untangle(path, path.map((p, i) => {
         const prev = path[(i - 1 + n) % n], next = path[(i + 1) % n];
         let dx = next.x - prev.x, dy = next.y - prev.y;
         const len = Math.hypot(dx, dy) || 1;
         dx /= len; dy /= len;
         const o = typeof offset === 'number' ? offset : offset[i];
         return { x: p.x - dy * o, y: p.y + dx * o };
-    });
+    }));
 }
 
 function distToPath(p, path, closed = true) {
@@ -1020,24 +1023,6 @@ function colourLine() {
     line.baseDone = !racing;
 }
 
-// The drawn road follows a smooth curve through the track's points (they're ~10 m apart: corners drawn straight between
-// them look faceted): a Catmull-Rom spline sampled every ~2.5 m. Physics keeps the points; at the tightest hairpin the two
-// differ by under a metre, inside the run-off the ground is pressed to. up(): any per-point array onto the curve (numbers
-// interpolated, flags held across their segment)
-const RENDER_STEP_M = 2.5;
-function smoothPath(path, scale, cum) {
-    const n = path.length, K = Math.max(1, Math.round(cum[n] / n / scale / RENDER_STEP_M)), P = (i) => path[((i % n) + n) % n], out = [];
-    for (let i = 0; i < n; i++) {
-        const a = P(i - 1), b = P(i), c = P(i + 1), d = P(i + 2);
-        for (let j = 0; j < K; j++) {
-            const s = j / K, s2 = s * s, s3 = s2 * s;
-            const f = (u0, u1, u2, u3) => 0.5 * (2 * u1 + (u2 - u0) * s + (2 * u0 - 5 * u1 + 4 * u2 - u3) * s2 + (3 * u1 - u0 - 3 * u2 + u3) * s3);
-            out.push({ x: f(a.x, b.x, c.x, d.x), y: f(a.y, b.y, c.y, d.y) });
-        }
-    }
-    const up = (arr) => arr.flatMap((v, i) => Array.from({ length: K }, (_, j) => (typeof v === 'number' ? v + ((arr[(i + 1) % n] - v) * j) / K : v)));
-    return { rp: out, up, K };
-}
 
 function buildWorld(t) {
     applyLevel(resolveLevel(store.get('lanrace.quality') || 'auto', store.get('lanrace.quality.auto')));
@@ -1091,6 +1076,22 @@ function buildWorld(t) {
     bounds = getBounds(path);
     const all = () => true;
     const alternate = (h1, h2) => { const a = new THREE.Color(h1), b = new THREE.Color(h2); return (i) => (i % 2 ? a : b); };
+    // How far the asphalt reaches per smooth-curve point and side (dir as offsetPoints: +1 / -1): half the road, or as far
+    // as a median (Track.js buildMedians: Monaco's Fairmont hairpin, two legs side by side at different heights), where
+    // each road ends; no verge or gravel past it either
+    const roadTo = { 1: rp.map(() => half), [-1]: rp.map(() => half) };
+    for (const md of t.medians || []) for (const dir of [1, -1]) rp.forEach((p, k) => {
+        const a = rp[(k - 1 + m) % m], b = rp[(k + 1) % m], l = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+        const dx = (-(b.y - a.y) / l) * dir, dy = ((b.x - a.x) / l) * dir; // sideways, as offsetPoints
+        for (let i = 0; i + 1 < md.length; i++) {
+            const c = md[i], ex = md[i + 1].x - c.x, ey = md[i + 1].y - c.y, r = dx * ey - dy * ex;
+            if (!r) continue;
+            const s = ((c.x - p.x) * ey - (c.y - p.y) * ex) / r, v = ((c.x - p.x) * dy - (c.y - p.y) * dx) / r;
+            if (s > 0 && v >= 0 && v <= 1) roadTo[dir][k] = Math.min(roadTo[dir][k], s);
+        }
+    });
+    const clipped = (dir, k) => roadTo[dir][k] < half; // a median beside this point
+    const signed = (dir, A) => A.map((v) => dir * v);
 
     // Grass verge at road height from the track edge towards the barrier, so the road never sits on a step; it stops
     // short wherever another part of the track is nearer (hairpins, Suzuka's bridge) and leaves room for a grass bank down
@@ -1173,11 +1174,11 @@ function buildWorld(t) {
             old.dispose();
             buildGroundWalls(H, fine);
         });
-        for (const dir of [1, -1]) world.add(strip(rp, dir > 0 ? half : rreach[-1], dir > 0 ? rreach[1] : -half, 0.3, all, solid(land.verge)));
+        for (const dir of [1, -1]) world.add(strip(rp, signed(dir, roadTo[dir]), rreach[dir], 0.3, (k) => !clipped(dir, k) && !clipped(dir, (k + 1) % m), solid(land.verge)));
     }
-    world.add(strip(rp, -half, half, 0.6, all, solid('#4a505a'), { map: asphaltTexture(), repeatM: 8 }));
-    // White lines on the REAL track edge (t.limit: track limits are judged there); beyond them the road carries on as
-    // asphalt run-off to the drawn edge (the game's road is 1.5x the real width)
+    world.add(strip(rp, signed(-1, roadTo[-1]), roadTo[1], 0.6, all, solid('#4a505a'), { map: asphaltTexture(), repeatM: 8 }));
+    // White lines on the track limits (t.edgeR / edgeL: judged there); beyond them the road carries on as asphalt run-off
+    // to the drawn edge (Track.js: the road 2x the real width, the lines 4/3)
     const R = t.edgeR || path.map(() => half - 0.5 * scale), L = t.edgeL || R, lineW = 0.3 * scale; // per point (+ = driver's right)
     const rR = up(R), rL = up(L);
     const add = (e, d) => e.map((v) => v + d), neg = (e, d = 0) => e.map((v) => -(v + d));
@@ -1188,9 +1189,10 @@ function buildWorld(t) {
     // smooth-curve step, as real kerbs)
     const turny = path.map((_, i) => turnAngle(path, i) > KERB_TURN);
     const curvy = turny.map((_, i) => [-2, -1, 0, 1, 2].some((d) => turny[(i + d + n) % n])), rc = up(curvy);
-    const kerbW = 1.5 * scale;
-    world.add(strip(rp, rR, add(rR, kerbW), 0.7, (i) => rc[i], alternate('#d62828', '#f2f2f2'), { layer: 1 }));
-    world.add(strip(rp, neg(rL, kerbW), neg(rL), 0.7, (i) => rc[i], alternate('#d62828', '#f2f2f2'), { layer: 1 }));
+    // 1.5 m wide, ending at the road's edge where the white line runs closer to it than that (never out on the grass)
+    const kerbW = 1.5 * scale, kR = rR.map((v, k) => Math.min(v + kerbW, roadTo[1][k])), kL = rL.map((v, k) => Math.min(v + kerbW, roadTo[-1][k]));
+    world.add(strip(rp, rR, kR, 0.7, (i) => rc[i], alternate('#d62828', '#f2f2f2'), { layer: 1 }));
+    world.add(strip(rp, neg(kL), neg(rL), 0.7, (i) => rc[i], alternate('#d62828', '#f2f2f2'), { layer: 1 }));
 
     const scen = placeScenery(t, Q.scenery, seedOf(t.id));
     const onSlow = (side) => {
@@ -1202,8 +1204,8 @@ function buildWorld(t) {
     // Gravel traps on the outside of slow corners, between the kerb and the barrier (visual only)
     for (const dir of [1, -1]) {
         const edge = rreach[dir].map((r) => r - dir * scale); // a metre inside the verge's reach
-        const from = dir > 0 ? half : edge, to = dir > 0 ? edge : -half; // from the end of the asphalt run-off
-        world.add(strip(rp, from, to, 0.4, (i) => rslow[dir][i], solid('#cdb98f')));
+        // from the end of the asphalt run-off
+        world.add(strip(rp, signed(dir, roadTo[dir]), edge, 0.4, (i) => rslow[dir][i] && !clipped(dir, i) && !clipped(dir, (i + 1) % m), solid('#cdb98f')));
     }
     // Rubbered-in racing line through slow corners: inside at the apex, drifting out on exit (Medium/High)
     if (Q.tyreMarks) {
@@ -1216,8 +1218,8 @@ function buildWorld(t) {
         }
     }
     // Thin dark outer edge on the kerbs so they read at speed
-    world.add(strip(rp, add(rR, kerbW - 0.2 * scale), add(rR, kerbW), 0.72, (i) => rc[i], solid('#5a1414'), { layer: 2 }));
-    world.add(strip(rp, neg(rL, kerbW), neg(rL, kerbW - 0.2 * scale), 0.72, (i) => rc[i], solid('#5a1414'), { layer: 2 }));
+    world.add(strip(rp, add(kR, -0.2 * scale), kR, 0.72, (i) => rc[i], solid('#5a1414'), { layer: 2 }));
+    world.add(strip(rp, neg(kL), neg(kL, -0.2 * scale), 0.72, (i) => rc[i], solid('#5a1414'), { layer: 2 }));
     buildRacingLine(t);
 
     // Barriers exactly where the physics wall is; skipped where another part of the track is closer. 1 m tall, or where
@@ -1259,6 +1261,15 @@ function buildWorld(t) {
         }
     });
     buildGroundWalls(coarse, GROUND_COARSE);
+    // Medians: concrete from the lower road up to the higher one (a retaining wall where they differ), the red and white
+    // barrier and its catch fence on top, as the run-off barriers
+    for (const md of t.medians || []) {
+        const H = heights(md), S = scale * ELEVATION_SCALE, keep = (i) => i < md.length - 1;
+        const lo = md.map((q, i) => q.lo * S - H[i] - 0.3 * scale), hi = md.map((q, i) => q.hi * S - H[i] + ROAD_DRAW_Y);
+        world.add(wall(md, 0, hi.map((v, i) => v - lo[i]), keep, solid('#a29d92'), lo));
+        world.add(wall(md, 0, 1 * scale, keep, (i) => redWhite(Math.floor(i / 2)), hi));
+        if (Q.scenery >= 0.5) world.add(wall(md, 0, 3 * scale, keep, fence, hi.map((v) => v + 1 * scale), { opacity: 0.22 }));
+    }
 
     if (t.tunnels && t.tunnels.length) world.add(buildTunnels(t, path, half));
 

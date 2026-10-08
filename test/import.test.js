@@ -17,6 +17,6 @@ test('convert scales, flips y, keeps every 2nd point, uses median width', () => 
     assert.strictEqual(t.name, 'Test');
     assert.strictEqual(t.scale, 6);
     assert.deepStrictEqual(t.path, [{ x: 0, y: 0 }, { x: 12, y: -12 }]);
-    // widths sorted [8, 10, 10, 12] → median index 2 → 10 m × 1.5 × 6
-    assert.strictEqual(t.width, 90);
+    // widths sorted [8, 10, 10, 12] → median index 2 → 10 m × 2 × 6
+    assert.strictEqual(t.width, 120);
 });

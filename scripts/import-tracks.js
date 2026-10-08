@@ -6,7 +6,7 @@ const { osmCentreline } = require('./osm-centreline');
 const path = require('path');
 
 const SCALE = 6;        // game units per metre — car model, physics and HUD assume this
-const WIDTH_MULT = 1.5; // real widths feel too tight with arcade steering
+const WIDTH_MULT = 2;   // real widths feel too tight for a full grid side by side (src/game/Track.js: the same)
 const STEP = 2;         // dataset is ~5 m/point; keep every 2nd → ~10 m
 
 const BASE = 'https://raw.githubusercontent.com/TUMFTM/racetrack-database/master/tracks/';
@@ -74,4 +74,4 @@ async function main() {
 
 if (require.main === module) main().catch((e) => { console.error(e); process.exit(1); });
 
-module.exports = { convert, SCALE, BASE, SOURCES, only };
+module.exports = { convert, SCALE, WIDTH_MULT, BASE, SOURCES, only };

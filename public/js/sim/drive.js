@@ -80,7 +80,7 @@ export function driveCar(p, input, t, dt) {
         bounce(p, hit.nx, hit.ny);
     }
     // …and the pit entry barrier stops the whole car body, not just its centre
-    // ponytail: the pit wall stays centre-only — on the 1.5×-wide tracks it sits ~0.6 m past the line, inside the kerb
+    // ponytail: the pit wall stays centre-only — on the widened tracks it stands at least 1 m past the white line
     const o = pit && Physics.wallOverlap(p, pit.closeWall, scale);
     if (o) { p.x += o.nx * o.depth; p.y += o.ny * o.depth; bounce(p, o.nx, o.ny); }
 
@@ -95,6 +95,14 @@ export function driveCar(p, input, t, dt) {
             const ov = Physics.wallOverlap(p, seg, scale);
             if (ov) { p.x += ov.nx * ov.depth; p.y += ov.ny * ov.depth; bounce(p, ov.nx, ov.ny); }
         }
+    }
+
+    // Barriers between two legs of the track running side by side (Track.js buildMedians: Monaco's Fairmont hairpin)
+    for (const m of t.medians || []) {
+        const cross = Physics.crossWall(x0, y0, p.x, p.y, m);
+        if (cross) { p.x = x0 + cross.nx * 0.5; p.y = y0 + cross.ny * 0.5; bounce(p, cross.nx, cross.ny); }
+        const ov = Physics.wallOverlap(p, m, scale);
+        if (ov) { p.x += ov.nx * ov.depth; p.y += ov.ny * ov.depth; bounce(p, ov.nx, ov.ny); }
     }
 
     // Barrier: outside both the track's run-off and the pit lane's
