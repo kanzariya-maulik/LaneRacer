@@ -38,6 +38,7 @@ export const NIGHTS = {
     hungaroring: night('#0a0e1b', '#2b2730', 0.35, 0.5),                       // Budapest's glow to the south-west
     monaco:      night('#0e1222', '#3e2f2a', 0.1, 0.85, { hemi: 0.6 }),        // the harbour city lit all around the streets
     imola:       night('#090d1a', '#25242c', 0.45, 0.55),                      // town and the Santerno valley
+    buddh:       night('#13111a', '#4a3324', 0.05, 0.6, { hemi: 0.55 }),       // Greater Noida, Delhi's orange glow to the north-west
 };
 export const nightOf = (id) => NIGHTS[id] || night('#090d1a', '#25242c', 0.4, 0.5);
 
@@ -56,6 +57,7 @@ export const THEMES = {
     hungaroring: { land: 'dry',    sky: 'clear',    trees: { broad: 0.8, pine: 0.2 }, density: 1.0, city: 0 },
     monaco:      { land: 'city',   sky: 'clear',    trees: { palm: 1 }, density: 0.6, city: 2, sea: true, mountains: true },
     imola:       { land: 'park',   sky: 'hazy',     trees: { broad: 0.8, pine: 0.2 }, density: 1.3, city: 1 },
+    buddh:       { land: 'dry',    sky: 'hazy',     trees: { broad: 1 }, density: 0.8, city: 1 },     // the Yamuna plain, Greater Noida's towers
 };
 export const DEFAULT_THEME = { land: 'park', sky: 'clear', trees: { pine: 1 }, density: 1, city: 0 };
 export const themeOf = (id) => THEMES[id] || DEFAULT_THEME;

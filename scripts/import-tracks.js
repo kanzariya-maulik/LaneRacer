@@ -1,6 +1,7 @@
 // One-off importer: node scripts/import-tracks.js
 // Source: TUMFTM racetrack-database (LGPL-3.0), centreline + track widths per ~5 m; circuits it lacks (Monaco, Imola)
-// from OpenStreetMap roads and the F1 track outline (osm-centreline.js)
+// from OpenStreetMap roads and the F1 track outline (osm-centreline.js), or (Buddh: no F1 data since 2013) our own survey
+// in the same format, data/tracks/source/<file>.csv (survey-track.js: OSM roads, edges measured off aerial imagery)
 const fs = require('fs');
 const { osmCentreline } = require('./osm-centreline');
 const path = require('path');
@@ -32,6 +33,8 @@ const SOURCES = [
     // Not in TUMFTM: OSM roads (the circuit relation at Monaco; Imola's raceway ways), F1 outline [MultiViewer key, year]
     { id: 'monaco', name: 'Monaco', file: 'Monaco', step: 1, widths: MONACO_WIDTHS, f1: [22, 2023], osm: { query: 'relation(148194);way(r);out geom;', skip: /pit|stands/i } },
     { id: 'imola', name: 'Imola', file: 'Imola', widths: IMOLA_WIDTHS, f1: [6, 2024], osm: { query: 'way(44.335,11.700,44.350,11.725)[highway=raceway];out geom;', skip: /pit|karting/i } },
+    // Our own survey (survey-track.js), already a TUMFTM-style CSV
+    { id: 'buddh', name: 'Buddh International', file: 'Buddh', local: path.join(__dirname, '..', 'data', 'tracks', 'source', 'Buddh.csv') },
 ];
 const OUT_DIR = path.join(__dirname, '..', 'data', 'tracks');
 // node scripts/<importer>.js [id,id,...]: only those tracks
@@ -58,6 +61,7 @@ async function main() {
     for (const src of only(SOURCES)) {
         let csv, extra = {};
         if (src.osm) ({ csv, ...extra } = await osmCentreline(src)); // + tunnels
+        else if (src.local) csv = fs.readFileSync(src.local, 'utf8');
         else {
             const res = await fetch(BASE + src.file + '.csv');
             if (!res.ok) throw new Error(`${src.file}: HTTP ${res.status}`);

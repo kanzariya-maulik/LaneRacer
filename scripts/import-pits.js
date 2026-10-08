@@ -9,7 +9,7 @@ const { fitF1 } = require('./import-elevation');
 
 // Raceway ways (and their nodes) in a bbox 'west,south,east,north', via Overpass: the plain OSM API refuses busy city areas
 // (plus the listed ways whatever they are: Monaco's pit lane runs partly on a service road)
-const osmUrl = (bbox, ids = []) => { const [w, s, e, n] = bbox.split(','); return 'https://maps.mail.ru/osm/tools/overpass/api/interpreter?data=' + encodeURIComponent(`[out:xml];(way[highway=raceway](${s},${w},${n},${e});${ids.length ? `way(id:${ids.join(',')});` : ''});(._;>;);out;`); };
+const osmUrl = (bbox, ids = []) => { const [w, s, e, n] = bbox.split(','); return 'https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(`[out:xml];(way[highway=raceway](${s},${w},${n},${e});${ids.length ? `way(id:${ids.join(',')});` : ''});(._;>;);out;`); };
 const CACHE = path.join(__dirname, 'build', 'osm');
 const OUT_DIR = path.join(__dirname, '..', 'data', 'tracks');
 const PIT_WIDTH_M = 10; // 12 m would overlap the widened track at Sakhir/Suzuka
@@ -33,6 +33,7 @@ const PITS = {
     // Monaco: OSM lacks the pit lane along the start straight (2023 race cars in the pits: right of the track, ~11 m out)
     monaco: { bbox: '7.410,43.725,7.435,43.745', way: ['850261588', { follow: 1, offsetM: 11 }, '1388331347'] },
     imola: { bbox: '11.700,44.335,11.725,44.350', way: '196368195' },
+    buddh: { bbox: '77.528,28.340,77.542,28.360', way: '188019426' }, // from the T16 exit to T1, beside the main straight
 };
 
 function parseOsm(xml, keep = []) {
@@ -82,7 +83,7 @@ async function importPit(src) {
     const pitWays = [].concat(cfg.way).filter((w) => typeof w === 'string');
     const ways = parseOsm(await cached(`${src.id}.osm`, osmUrl(cfg.bbox, pitWays)), pitWays);
     const all = ways.flatMap(w => w.nds);
-    const csv = await cached(`${src.file}.csv`, BASE + src.file + '.csv');
+    const csv = src.local ? fs.readFileSync(src.local, 'utf8') : await cached(`${src.file}.csv`, BASE + src.file + '.csv');
     // A centreline built from OSM (osm-centreline.js) is already in OSM metres: same projection, nothing to fit
     const own = /lat0=([-\d.]+)/.exec(csv);
     const lat0 = own ? +own[1] : all.reduce((s, p) => s + p[0], 0) / all.length;

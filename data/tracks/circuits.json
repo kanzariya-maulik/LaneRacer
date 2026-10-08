@@ -473,5 +473,46 @@
         760
       ]
     ]
+  },
+  "buddh": {
+    "startLineM": 4290,
+    "gridLineM": 101,
+    "poleSide": "left",
+    "limiterStartM": 318,
+    "limiterEndM": 732,
+    "pitLimitKmh": 80,
+    "sources": [
+      "centreline and widths: our survey (scripts/survey-track.js, data/tracks/source/Buddh.csv): the OSM raceway ways in driving order, the real white lines measured every 5 m off Esri World Imagery (zoom 18, ~0.5 m a pixel), the centreline moved to their middle; 5.115 km against the official 5.125 km; widths 11.6-17.6 m (median 12.6, the main straight ~18)",
+      "elevation: Copernicus GLO-30 DEM (import-elevation.js): 12.3 m range (published: 14 m, all of it climbed through T1-T3), gradients -7.4 % to +10.1 % (Vettel: up to 8 % down and 10 % up)",
+      "start line = timing line: the chequered finish board on the pit wall in the imagery (no line painted across the track there), 4290 m from row 0; FIA 2013 circuit map puts the finish ~85 m earlier (its far corners are drawn ~30-60 m out)",
+      "grid line: the white line across the track under the start-lights gantry, 101 m past the timing line, the F1 grid (176 m) behind it; the line painted at 149 m before the timing line, with ~70 m of dense markings behind it, is MotoGP's (2023), its grid too short for F1 and reaching into T16",
+      "pole side: RaceFans track information ('left-hand side'), no primary source",
+      "garages: no source found, kept nearest pit exit",
+      "pit lane: OSM way 188019426; limiter: FIA 2013 preview 80 km/h over 414 m (F1Technical), centred on the timing line (estimate)",
+      "sectors: FIA 2013 Indian Grand Prix circuit map (16-india-circuit-print.pdf) fitted onto the survey: S1 line on the T4-T5 straight 1589 m from row 0, S2 line at T12 2949 m; 2013 sector times 41.2 / 22.3 / 20.7 s",
+      "DRS: FIA 2013 Indian Grand Prix preview: detect 16 m before T3 / activate 350 m after T3; detect 10 m after T15 / activate 36 m after T16 (corners at the survey's slowest points: T3 5078 m, T15 3577 m, T16 3956 m, agreeing with the FIA map within 25 m); ends at T4 and T1 braking (estimated) - [detectM, startM, endM] from the start line"
+    ],
+    "unconfirmed": [
+      "startLineM",
+      "poleSide",
+      "garage order direction",
+      "limiterStartM",
+      "limiterEndM",
+      "sector3M"
+    ],
+    "sector2M": 2405,
+    "sector3M": 3765,
+    "drs": [
+      [
+        772,
+        1138,
+        1974
+      ],
+      [
+        4403,
+        4808,
+        296
+      ]
+    ]
   }
 }

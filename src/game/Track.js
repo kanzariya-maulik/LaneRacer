@@ -5,7 +5,7 @@ const Assist = require('./Assist');
 const RacingLine = require('./RacingLine');
 const Elevation = require('../../public/js/sim/elevation.js'); // shared with the browser
 
-const TRACK_IDS = ['monza', 'spa', 'silverstone', 'suzuka', 'sakhir', 'interlagos', 'cota', 'zandvoort', 'spielberg', 'montreal', 'hungaroring', 'monaco', 'imola'];
+const TRACK_IDS = ['monza', 'spa', 'silverstone', 'suzuka', 'sakhir', 'interlagos', 'cota', 'zandvoort', 'spielberg', 'montreal', 'hungaroring', 'monaco', 'imola', 'buddh'];
 const DATA_DIR = path.join(__dirname, '..', '..', 'data', 'tracks');
 const CHECKPOINT_COUNT = 16;
 const GRID_SLOTS = 22; // 11 teams x 2 drivers

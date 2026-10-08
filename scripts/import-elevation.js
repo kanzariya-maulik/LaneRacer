@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
 const { SCALE, WIDTH_MULT, SOURCES, only } = require('./import-tracks');
+const { readTiff } = require('./dem');
 
 const OUT_DIR = path.join(__dirname, '..', 'data', 'tracks');
 const CACHE = path.join(__dirname, 'build', 'f1');
@@ -25,6 +26,13 @@ const F1 = { // MultiViewer circuit key, race session in the F1 live timing arch
     monaco: [22, '2023-05-28_Monaco_Grand_Prix/2023-05-28_Race'],
     imola: [6, '2024-05-19_Emilia_Romagna_Grand_Prix/2024-05-19_Race', 2024], // no 2023 race (cancelled)
 };
+// No F1 car positions (Buddh: last raced in 2013): the ground height under the road from the Copernicus GLO-30 elevation
+// model (1 arc-second tile). It is a surface model: a grandstand or the pit building beside the road leaks into its 30 m
+// pixels, so each point takes the median across the road, then a median and a mean along the lap (~30 m: the model's own
+// resolution). Checked against the published figures: 14 m of climb, -8 % to +10 % gradients (Vettel)
+const DEM = { buddh: 'Copernicus_DSM_COG_10_N28_00_E077_00_DEM' };
+const DEM_ACROSS_M = [-4, -2, 0, 2, 4], DEM_MEDIAN = 2, DEM_MEAN = 2; // points each side along the lap (~10 m apart)
+const DEM_ATTRIBUTION = 'Elevation: Copernicus GLO-30 DEM, produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA';
 const MAX_FIT_M = 5;       // outline fit (RMS)
 const OFF_MARGIN_M = 5;    // a car sample further than the real half-width plus this from the centreline is in the pits or off track
 const WINDOW = 30;         // points (~300 m) searched around a car's last match: keeps it on its own level at a bridge
@@ -176,9 +184,37 @@ async function importElevation(src) {
     console.log(`${src.id}: fit ${fit.e.toFixed(1)} m, ${used} samples (${skipped} off track), median ${counts[n >> 1]} per point, ${n - known.length} gaps, range ${Math.max(...track.z).toFixed(1)} m`);
 }
 
+async function importDem(src) {
+    const name = DEM[src.id], tif = path.join(__dirname, 'build', 'dem', `${name}.tif`);
+    if (!fs.existsSync(tif)) {
+        const res = await fetch(`https://copernicus-dem-30m.s3.amazonaws.com/${name}/${name}.tif`);
+        if (!res.ok) throw new Error(`${name}: HTTP ${res.status}`);
+        fs.mkdirSync(path.dirname(tif), { recursive: true });
+        fs.writeFileSync(tif, Buffer.from(await res.arrayBuffer()));
+    }
+    const ground = readTiff(tif);
+    // The survey's frame (survey-track.js): metres east / north of `origin`, longitude scaled at lat0
+    const csv = fs.readFileSync(src.local, 'utf8'), lat0 = +/lat0=([-\d.]+)/.exec(csv)[1], [ox, oy] = /origin=([-\d.]+),([-\d.]+)/.exec(csv).slice(1).map(Number);
+    const kx = 111320 * Math.cos((lat0 * Math.PI) / 180), ky = 110540;
+    const file = path.join(OUT_DIR, `${src.id}.json`), track = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const P = track.path.map((p) => [p.x / SCALE, -p.y / SCALE]), n = P.length; // back to metres, north up
+    const raw = P.map((p, i) => {
+        const a = P[(i - 1 + n) % n], b = P[(i + 1) % n], l = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        return DEM_ACROSS_M.map((o) => ground((p[1] + ((b[0] - a[0]) / l) * o + oy) / ky, (p[0] - ((b[1] - a[1]) / l) * o + ox) / kx)).sort((x, y) => x - y)[DEM_ACROSS_M.length >> 1];
+    });
+    const along = (A, k, f) => A.map((_, i) => f(Array.from({ length: 2 * k + 1 }, (_, d) => A[(i + d - k + n) % n])));
+    const med = along(raw, DEM_MEDIAN, (w) => w.sort((x, y) => x - y)[DEM_MEDIAN]), sm = along(med, DEM_MEAN, (w) => w.reduce((s, v) => s + v, 0) / w.length);
+    const lo = Math.min(...sm);
+    track.z = sm.map((v) => +(v - lo).toFixed(2));
+    track.attribution = (track.attribution || '').replace(/; Elevation:.*$/, '') + `; ${DEM_ATTRIBUTION}`;
+    fs.writeFileSync(file, JSON.stringify(track));
+    const grade = track.z.map((z, i) => (track.z[(i + 2) % n] - track.z[(i - 2 + n) % n]) / Math.hypot(P[(i + 2) % n][0] - P[(i - 2 + n) % n][0], P[(i + 2) % n][1] - P[(i - 2 + n) % n][1]));
+    console.log(`${src.id}: ${n} points from ${name}, range ${Math.max(...track.z).toFixed(1)} m, grades ${(100 * Math.min(...grade)).toFixed(1)} % to ${(100 * Math.max(...grade)).toFixed(1)} %`);
+}
+
 async function main() {
     fs.mkdirSync(CACHE, { recursive: true });
-    for (const src of only(SOURCES)) await importElevation(src);
+    for (const src of only(SOURCES)) await (DEM[src.id] ? importDem(src) : importElevation(src));
 }
 
 if (require.main === module) main().catch((e) => { console.error(e); process.exit(1); });

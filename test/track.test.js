@@ -20,8 +20,8 @@ const surveyAt = (id, m) => {
     return Track.pointAt(P, cum, m * raw.scale);
 };
 
-test('loads all thirteen circuits', () => {
-    assert.deepStrictEqual(Object.keys(tracks).sort(), ['cota', 'hungaroring', 'imola', 'interlagos', 'monaco', 'montreal', 'monza', 'sakhir', 'silverstone', 'spa', 'spielberg', 'suzuka', 'zandvoort']);
+test('loads all fourteen circuits', () => {
+    assert.deepStrictEqual(Object.keys(tracks).sort(), ['buddh', 'cota', 'hungaroring', 'imola', 'interlagos', 'monaco', 'montreal', 'monza', 'sakhir', 'silverstone', 'spa', 'spielberg', 'suzuka', 'zandvoort']);
 });
 
 for (const id of Track.TRACK_IDS) {
@@ -144,8 +144,8 @@ for (const id of Track.TRACK_IDS) {
 
 // Published height differences (m): Spa ~102, Suzuka ~40, Sakhir ~20, Silverstone ~12, Monza ~15, Spielberg ~65, Interlagos ~40,
 // Hungaroring ~35, COTA ~41 (F1 car heights give ~30 along the racing surface), Zandvoort ~10 (dunes), Montreal ~5,
-// Monaco ~42, Imola ~33
-const ELEVATION_RANGE = { spa: [80, 130], suzuka: [30, 55], sakhir: [10, 30], silverstone: [6, 20], monza: [8, 25], spielberg: [50, 75], interlagos: [30, 55], hungaroring: [25, 45], cota: [24, 45], zandvoort: [5, 15], montreal: [2, 10], monaco: [35, 50], imola: [28, 42] };
+// Monaco ~42, Imola ~33, Buddh ~14 (Copernicus DEM: 12.3)
+const ELEVATION_RANGE = { spa: [80, 130], suzuka: [30, 55], sakhir: [10, 30], silverstone: [6, 20], monza: [8, 25], spielberg: [50, 75], interlagos: [30, 55], hungaroring: [25, 45], cota: [24, 45], zandvoort: [5, 15], montreal: [2, 10], monaco: [35, 50], imola: [28, 42], buddh: [10, 18] };
 for (const id of Track.TRACK_IDS) {
     test(`${id}: real elevation, one height per path point, ${ELEVATION_RANGE[id].join('-')} m range`, () => {
         const t = tracks[id];
@@ -229,7 +229,7 @@ for (const id of Track.TRACK_IDS) {
     });
 }
 
-const DRS_COUNT = { monza: 2, spa: 2, silverstone: 2, suzuka: 1, sakhir: 3, interlagos: 2, cota: 2, zandvoort: 2, spielberg: 3, montreal: 3, hungaroring: 2, monaco: 1, imola: 1 };
+const DRS_COUNT = { monza: 2, spa: 2, silverstone: 2, suzuka: 1, sakhir: 3, interlagos: 2, cota: 2, zandvoort: 2, spielberg: 3, montreal: 3, hungaroring: 2, monaco: 1, imola: 1, buddh: 2 };
 for (const id of Track.TRACK_IDS) {
     test(`${id}: DRS zones on flat-out straights`, () => {
         const t = tracks[id], total = t.cum[t.path.length];
