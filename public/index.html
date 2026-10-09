@@ -57,18 +57,17 @@
                                 </select>
                                 <small>R / gamepad X during a race</small>
                             </label>
-                            <div class="graphics-picker assist-sliders">
-                                <div class="assist-row">
-                                    <span class="assist-label">Steering Assist</span>
-                                    <span id="assist-steer-val" class="assist-val">100%</span>
+                            <div class="graphics-picker help-picker">
+                                <span class="assist-label">Braking help</span>
+                                <div class="seg" id="help-brake" role="group" aria-label="Braking help">
+                                    <button type="button" data-v="0">Off</button><button type="button" data-v="50">Low</button><button type="button" data-v="100">High</button>
                                 </div>
-                                <input type="range" id="assist-steer-slider" min="0" max="100" value="100" class="custom-slider" aria-label="Steering assist">
-                                <div class="assist-row">
-                                    <span class="assist-label">Braking Assist</span>
-                                    <span id="assist-brake-val" class="assist-val">100%</span>
+                                <small id="help-brake-hint"></small>
+                                <span class="assist-label">Steering help</span>
+                                <div class="seg" id="help-steer" role="group" aria-label="Steering help">
+                                    <button type="button" data-v="0">Off</button><button type="button" data-v="100">On</button>
                                 </div>
-                                <input type="range" id="assist-brake-slider" min="0" max="100" value="100" class="custom-slider" aria-label="Braking assist">
-                                <small>Q cycles presets · gamepad View during a race</small>
+                                <small id="help-note">Q cycles braking help during a race</small>
                             </div>
                             <label class="graphics-picker">Other cars
                                 <select id="others-select">
@@ -163,6 +162,18 @@
                                             <option value="1" selected>On</option>
                                             <option value="0">Off</option>
                                         </select>
+                                    </label>
+                                    <label>Driver help
+                                        <select id="setting-help" title="Same for all: every car drives with the help levels you pick">
+                                            <option value="choose" selected>Each driver chooses</option>
+                                            <option value="fixed">Same for all</option>
+                                        </select>
+                                    </label>
+                                    <label class="help-fixed-only hidden">Braking help
+                                        <select id="setting-help-brake"><option value="0">Off</option><option value="50">Low</option><option value="100" selected>High</option></select>
+                                    </label>
+                                    <label class="help-fixed-only hidden">Steering help
+                                        <select id="setting-help-steer"><option value="0">Off</option><option value="100" selected>On</option></select>
                                     </label>
                                     <label class="collisions-only">Contact penalties
                                         <select id="setting-penalties" title="+5 s for hitting another car, +10 s if it goes off or spins">

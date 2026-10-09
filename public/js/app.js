@@ -24,6 +24,9 @@ const setCollisions = document.getElementById('setting-collisions');
 const setTyres = document.getElementById('setting-tyres');
 const setPenalties = document.getElementById('setting-penalties');
 const setTime = document.getElementById('setting-time');
+const setHelp = document.getElementById('setting-help');
+const setHelpBrake = document.getElementById('setting-help-brake');
+const setHelpSteer = document.getElementById('setting-help-steer');
 const settingsView = document.getElementById('settings-view');
 const MAX_RACERS = 22; // src/lobby.js: grid slots per track
 const graphicsSelect = document.getElementById('graphics-select');
@@ -60,80 +63,54 @@ function remembered(id, key, fallback, onChange) {
 
 let lastJoin = null; // declared before the assist restore below reads it (join / reconnect state)
 
-// ── Assist sliders ──────────────────────────────────────────────────────────
-const assistSteerSlider = document.getElementById('assist-steer-slider');
-const assistSteerVal    = document.getElementById('assist-steer-val');
-const assistBrakeSlider = document.getElementById('assist-brake-slider');
-const assistBrakeVal    = document.getElementById('assist-brake-val');
+// ── Driver help: braking Off / Low / High, steering Off / On (sent as 'steer,brake' percent) ──
+const helpBrake = document.getElementById('help-brake');
+const helpSteer = document.getElementById('help-steer');
+const BRAKE_HINTS = { 0: 'Off: you brake and lift. Fastest if you brake late', 50: 'Low: saves you if you would miss a corner, costs time', 100: 'High: brakes and lifts for you, a few % slower a lap' };
+let helpLevels = { steer: 100, brake: 100 };
 
-function updateSliderTrack(slider) {
-    if (!slider) return;
-    const pct = ((slider.value - slider.min) / (slider.max - slider.min)) * 100;
-    slider.style.setProperty('--pct', pct + '%');
+// Same snapping as carphysics.snapAssist: old slider values land on the nearest level
+function parseHelp(str) {
+    if (str === 'off') return { steer: 0, brake: 0 };
+    const [s, b] = String(str).split(',').map(Number);
+    if (!Number.isFinite(s) || !Number.isFinite(b)) return { steer: 100, brake: 100 };
+    return { steer: s >= 50 ? 100 : 0, brake: b < 25 ? 0 : b < 75 ? 50 : 100 };
 }
+const fixedHelp = () => (clientState.settings?.help?.mode === 'fixed' ? clientState.settings.help : null);
 
-function getAssistString() {
-    const s = assistSteerSlider ? +assistSteerSlider.value : 100;
-    const b = assistBrakeSlider ? +assistBrakeSlider.value : 100;
-    return `${s},${b}`;
-}
-
-function applyAssistString(str, instantSave = false) {
-    // Accept both legacy 'full'/'off' and new '0,0'–'100,100' format
-    let s = 100, b = 100;
-    if (str === 'off') { s = 0; b = 0; }
-    else if (str === 'full') { s = 100; b = 100; }
-    else {
-        const parts = String(str).split(',');
-        if (parts.length === 2) {
-            const ps = parseFloat(parts[0]), pb = parseFloat(parts[1]);
-            if (Number.isFinite(ps) && Number.isFinite(pb)) { s = Math.round(ps); b = Math.round(pb); }
-        }
+function renderHelp() {
+    const fixed = fixedHelp(), lv = fixed || helpLevels;
+    for (const [group, v] of [[helpBrake, lv.brake], [helpSteer, lv.steer]]) {
+        group.querySelectorAll('button').forEach((b) => { b.classList.toggle('on', +b.dataset.v === v); b.disabled = !!fixed; });
     }
-    if (assistSteerSlider) { assistSteerSlider.value = s; updateSliderTrack(assistSteerSlider); }
-    if (assistSteerVal)    assistSteerVal.textContent = `${s}%`;
-    if (assistBrakeSlider) { assistBrakeSlider.value = b; updateSliderTrack(assistBrakeSlider); }
-    if (assistBrakeVal)    assistBrakeVal.textContent = `${b}%`;
-    const v = `${s},${b}`;
+    document.getElementById('help-brake-hint').textContent = BRAKE_HINTS[lv.brake];
+    document.getElementById('help-note').textContent = fixed ? 'Set by the host for everyone' : 'Q cycles braking help during a race';
+}
+
+function applyAssistString(str) {
+    helpLevels = parseHelp(str);
+    const v = `${helpLevels.steer},${helpLevels.brake}`;
     (window.lanraceMem ||= {})['lanrace.assist'] = v;
     if (lastJoin) lastJoin.assist = v;
-    window.onAssistChange?.(v);
-    if (instantSave) {
-        try { localStorage.setItem('lanrace.assist', v); } catch (e) { /* blocked */ }
-        if (clientState.players?.[clientState.me]) socket.emit('set_assist', v);
-    } else {
-        debouncedSaveAssist(v);
-    }
+    renderHelp();
+    if (!fixedHelp()) window.onAssistChange?.(v); // fixed: the car keeps the host's levels
+    try { localStorage.setItem('lanrace.assist', v); } catch (e) { /* blocked */ }
+    if (clientState.players?.[clientState.me]) socket.emit('set_assist', v);
 }
 
-function onAssistSliderInput() {
-    if (assistSteerSlider) { updateSliderTrack(assistSteerSlider); if (assistSteerVal) assistSteerVal.textContent = `${assistSteerSlider.value}%`; }
-    if (assistBrakeSlider) { updateSliderTrack(assistBrakeSlider); if (assistBrakeVal) assistBrakeVal.textContent = `${assistBrakeSlider.value}%`; }
-    applyAssistString(getAssistString(), false);
-}
-
-assistSteerSlider?.addEventListener('input', onAssistSliderInput);
-assistBrakeSlider?.addEventListener('input', onAssistSliderInput);
-
-let _saveAssistTimer = null;
-function debouncedSaveAssist(v) {
-    clearTimeout(_saveAssistTimer);
-    _saveAssistTimer = setTimeout(() => {
-        try { localStorage.setItem('lanrace.assist', v); } catch (e) { /* blocked */ }
-        if (clientState.players?.[clientState.me]) socket.emit('set_assist', v);
-    }, 300);
-}
+helpBrake.addEventListener('click', (e) => { const v = e.target.dataset?.v; if (v !== undefined) applyAssistString(`${helpLevels.steer},${v}`); });
+helpSteer.addEventListener('click', (e) => { const v = e.target.dataset?.v; if (v !== undefined) applyAssistString(`${v},${helpLevels.brake}`); });
 
 // Global entry point used by game3d.js (Q key / gamepad) and the auto-restore below
-window.setAssist = (v, instantSave = false) => { applyAssistString(v, instantSave); };
+window.setAssist = (v) => applyAssistString(v);
 
 // Restore saved assist on page load
 (function restoreAssist() {
     try {
         const saved = localStorage.getItem('lanrace.assist');
-        applyAssistString(saved || '100,100', true);
+        applyAssistString(saved || '100,100');
     } catch (e) {
-        applyAssistString('100,100', true);
+        applyAssistString('100,100');
     }
 })();
 
@@ -309,7 +286,8 @@ function emitSettings() {
         qualiLaps: parseInt(setQualiLaps.value, 10),
         collisions: setCollisions.value === '1',
         tyreWear: setTyres.value === '1',
-        contactPenalties: setPenalties.value === '1'
+        contactPenalties: setPenalties.value === '1',
+        help: { mode: setHelp.value, brake: +setHelpBrake.value, steer: +setHelpSteer.value }
     });
 }
 setTrack.addEventListener('change', emitSettings);
@@ -321,6 +299,7 @@ setCollisions.addEventListener('change', emitSettings);
 setTyres.addEventListener('change', emitSettings);
 setPenalties.addEventListener('change', emitSettings);
 setTime.addEventListener('change', emitSettings);
+[setHelp, setHelpBrake, setHelpSteer].forEach((el) => el.addEventListener('change', emitSettings));
 
 chatForm.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -431,6 +410,12 @@ window.updateSettingsUI = () => {
     setCollisions.value = clientState.settings.collisions === false ? '0' : '1';
     setTyres.value = clientState.settings.tyreWear === false ? '0' : '1';
     setPenalties.value = clientState.settings.contactPenalties === false ? '0' : '1';
+    const help = clientState.settings.help || { mode: 'choose', steer: 100, brake: 100 };
+    setHelp.value = help.mode;
+    setHelpBrake.value = String(help.brake);
+    setHelpSteer.value = String(help.steer);
+    document.querySelectorAll('.help-fixed-only').forEach((el) => el.classList.toggle('hidden', help.mode !== 'fixed'));
+    renderHelp();
     document.querySelectorAll('.collisions-only').forEach((el) => el.classList.toggle('hidden', clientState.settings.collisions === false));
 
     // Header chips and the read-only view non-hosts see
@@ -438,7 +423,8 @@ window.updateSettingsUI = () => {
     const track = setTrack.selectedOptions[0]?.textContent || s.trackId;
     const out = s.outLaps ?? 1, timed = s.qualiLaps ?? 2, quali = s.qualifying ? `${out} out + ${timed} timed` : 'Off';
     const time = s.timeOfDay === 'night' ? 'Night' : 'Day';
-    const rows = [['Track', track], ['Time', time], ['Laps', s.maxLaps], ['Qualifying', quali], ['Collisions', s.collisions === false ? 'Off' : s.contactPenalties === false ? 'On, no penalties' : 'On, penalties'], ['Tyre wear', s.tyreWear === false ? 'Off' : 'On']];
+    const rows = [['Track', track], ['Time', time], ['Laps', s.maxLaps], ['Qualifying', quali], ['Collisions', s.collisions === false ? 'Off' : s.contactPenalties === false ? 'On, no penalties' : 'On, penalties'], ['Tyre wear', s.tyreWear === false ? 'Off' : 'On'],
+        ['Driver help', help.mode === 'fixed' ? `Same for all: braking ${{ 0: 'Off', 50: 'Low', 100: 'High' }[help.brake]}, steering ${help.steer ? 'On' : 'Off'}` : 'Each driver chooses']];
     settingsView.replaceChildren(...rows.map(([k, v]) => {
         const d = document.createElement('div');
         d.append(Object.assign(document.createElement('dt'), { textContent: k }), Object.assign(document.createElement('dd'), { textContent: v }));

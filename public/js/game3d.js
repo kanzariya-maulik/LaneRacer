@@ -172,31 +172,20 @@ function toggleLine() {
     window.showBanner?.(`RACING LINE: ${lineMode.toUpperCase()}`, true);
 }
 
-// Assist on/off for your own car, any time (lobby select or Q / gamepad View): server and prediction switch together
+// Q / gamepad View: step your braking help Off → Low → High → Off (steering help kept); the host can fix it for everyone
 let padView = false;
 function toggleAssist() {
     if (isSpectator()) return;
-    // Cycle: Full (100,100) → Steer only (100,0) → Brake only (0,100) → Off (0,0) → Full
-    const cur = store.get('lanrace.assist') || '100,100';
-    const cycle = { '100,100': '100,0', '100,0': '0,100', '0,100': '0,0', '0,0': '100,100',
-                    'full': '100,0', 'off': '100,100' };
-    window.setAssist?.(cycle[cur] ?? '0,0', true); // instant: the server must switch the same tick the predictor does
+    if (clientState.settings?.help?.mode === 'fixed') return window.showBanner?.('DRIVER HELP: SET BY HOST', true);
+    const [s, b] = String(store.get('lanrace.assist') || '100,100').split(',').map(Number);
+    const next = { 0: 50, 50: 100, 100: 0 }[b] ?? 100;
+    window.setAssist?.(`${s >= 50 ? 100 : 0},${next}`); // sent at once: the server switches the same tick the predictor does
 }
 window.onAssistChange = (v) => {
     if (predictor) { predictor.assist = v; if (predictor.car) predictor.car.assist = v; }
     if (clientState.status !== 'LOBBY') {
-        // Build a short human-readable label for the banner
-        let label = 'ASSIST: ';
-        if (v === 'off' || v === '0,0') { label += 'OFF'; }
-        else if (v === 'full' || v === '100,100') { label += 'FULL'; }
-        else {
-            const parts = String(v).split(',');
-            const s = parseFloat(parts[0] ?? 100), b = parseFloat(parts[1] ?? 100);
-            if (Number.isFinite(s) && Number.isFinite(b)) {
-                label += `STEER ${Math.round(s)}%  BRAKE ${Math.round(b)}%`;
-            } else { label += v.toUpperCase(); }
-        }
-        window.showBanner?.(label, true);
+        const [s, b] = v.split(',').map(Number);
+        window.showBanner?.(`BRAKING HELP: ${{ 0: 'OFF', 50: 'LOW', 100: 'HIGH' }[b]}${s ? '' : ' · STEERING HELP OFF'}`, true);
     }
 };
 
@@ -1606,7 +1595,7 @@ window.showQualiResults = (list) => {
         const lp = clientState.players[r.id];
         const li = document.createElement('li');
         const gap = r.position > 1 && r.bestLap !== null && pole !== null ? `  +${(r.bestLap - pole).toFixed(3)}` : '';
-        li.textContent = `P${r.position}  ${lp ? lp.username : '—'}  ${r.bestLap === null ? 'no time' : fmtTime(r.bestLap)}${gap}`;
+        li.textContent = `P${r.position}  ${lp ? lp.username : '—'}${helpTags(lp?.assist) ? ' · ' + helpTags(lp.assist) : ''}  ${r.bestLap === null ? 'no time' : fmtTime(r.bestLap)}${gap}`;
         ol.appendChild(li);
     }
 };
@@ -1626,7 +1615,7 @@ window.showRaceResults = (res) => {
         team.style.background = teamInfo[lp?.teamId]?.chatColor || '#888';
         const best = span('rr-best' + (r.id === res.fastestLapId ? ' fl' : ''), r.bestLap === null ? '—' : fmtTime(r.bestLap));
         if (r.id === res.fastestLapId) best.insertAdjacentHTML('afterbegin', STOPWATCH + ' ');
-        li.append(span('rr-pos', r.position), team, span('rr-name', lp?.username || '—'), span('rr-chg ' + c.changeCls, c.change),
+        li.append(span('rr-pos', r.position), team, span('rr-name', `${lp?.username || '—'}${helpTags(lp?.assist) ? ' · ' + helpTags(lp.assist) : ''}`), span('rr-chg ' + c.changeCls, c.change),
             span('rr-laps', r.laps), best, span('rr-pen', c.pen), span('rr-time' + (r.dnf ? ' dnf' : ''), c.time));
         ol.appendChild(li);
     }
@@ -1762,6 +1751,8 @@ window.showSectorFlash = (n, time, delta, cls) => {
 const liveSec = {};
 window.onSectorAll = (s) => { liveSectors(liveSec, s); };
 const STOPWATCH = document.querySelector('#fl-card .stopwatch').outerHTML;
+// Driver help badges: B = braking help (Low or High), S = steering help
+const helpTags = (a) => (a ? `${a.brake > 0 ? 'B' : ''}${a.steer > 0 ? 'S' : ''}` : '');
 const codeOf = (id) => { const lp = clientState.players[id]; return lp ? driverCode(lp.username) : '---'; };
 
 // F1 TV-style purple card when anyone sets the session's fastest lap
@@ -1886,6 +1877,7 @@ function updateHUD(withTower = true) {
             li.append(el('span', 'tt-pos', p.rank), team, name);
             if (p.inPit && !quali) li.append(el('span', 'tt-tag', 'PIT'));
             if (p.compound) li.append(el('span', `tt-tyre tyre-${p.compound}`, `${p.compound}${p.stops ? ' ' + p.stops : ''}`));
+            const tags = helpTags(lp.assist); if (tags) li.append(el('span', 'tt-tag help', tags));
             if (p.penalty) li.append(el('span', 'tt-tag pen', `+${p.penalty}s`));
             if (clientState.fastestLap?.id === id) { // purple stopwatch: fastest lap of the session
                 const fl = el('span', 'tt-fl');
