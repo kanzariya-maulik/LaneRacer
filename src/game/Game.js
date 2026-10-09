@@ -30,6 +30,7 @@ const SLIP_MIN_M = 5, SLIP_RANGE_M = 40, SLIP_LAT_M = 3; // …fading out by 40 
 const STOP_TRIGGER_M = 12, STOP_SLOW_KMH = 40, STOP_BRAKE = 0.2;
 const STOP_S = 2.5, STOP_SPREAD_S = 0.4, RELEASE_HOLD_S = 0.5, RELEASE_GAP_M = 10, PARK_M = 0.5, PARK_MS = 0.3;
 const COMPOUND_PENALTY_S = 22;
+const GUIDE_MAX_S = 6; // not parked by then: the guide gives the car back (no service); braking again retries
 const STOP_CODE = { guide: 1, service: 2, hold: 3 };
 
 const FLAGS = { inPit: 1, limiter: 2, drs: 4, drsAvailable: 8, finished: 16, lapValid: 32, ghost: 64 };
@@ -81,7 +82,7 @@ class Game {
                 x: slot.x, y: slot.y, angle: slot.angle,
                 vx: 0, vy: 0, speed: 0, steer: 0,
                 inPit: false, limiter: false, pitS: 0,
-                box: boxes ? boxes[index] : null, stop: null, servicedLap: -1,
+                box: boxes ? boxes[index] : null, stop: null, servicedLap: -1, pitVisits: 0, servicedVisit: -1, wasInPit: false, stopRetry: null,
                 limits: 0, penalty: 0, offLimits: false, finishTime: null,
                 lastSafeX: slot.x, lastSafeY: slot.y, gridX: slot.x, gridY: slot.y, jumpStart: false, reacted: false,
                 drs: false, drsAvailable: false, drsEligible: [], tow: 0, lapS: null,
@@ -161,15 +162,22 @@ class Game {
     updateStop(p) {
         const t = this.track, sc = t.scale;
         if (!t.pit || !p.box || p.finished) return;
+        if (p.inPit && !p.wasInPit) p.pitVisits++; // quali: a fresh set every visit
+        p.wasInPit = p.inPit;
         if (!p.stop) {
-            const ahead = p.box.s - p.pitS, kmh = (Math.hypot(p.vx, p.vy) / sc) * 3.6;
+            const ahead = p.box.s - p.pitS, kmh = (Math.hypot(p.vx, p.vy) / sc) * 3.6, braking = (p.input.brake || 0) > STOP_BRAKE;
+            if (!p.inPit) { p.stopRetry = null; return; }
+            // After a guide gave up: only a fresh press of the brake asks again
+            if (p.stopRetry === 'release') { if (!braking) p.stopRetry = 'press'; return; }
+            const done = this.mode === 'quali' ? p.servicedVisit === p.pitVisits : p.servicedLap === p.lap;
             // Already on the mark (a quali car starting in its box) is not arriving at it
-            if (!p.inPit || p.servicedLap === p.lap || ahead < PARK_M * sc || ahead > STOP_TRIGGER_M * sc) return;
-            if ((p.input.brake || 0) > STOP_BRAKE || kmh < STOP_SLOW_KMH) p.stop = { phase: 'guide', t: STOP_S + this.rng() * STOP_SPREAD_S };
+            if (done || ahead < PARK_M * sc || ahead > STOP_TRIGGER_M * sc) return;
+            if (braking || (!p.stopRetry && kmh < STOP_SLOW_KMH)) { p.stopRetry = null; p.stop = { phase: 'guide', t: STOP_S + this.rng() * STOP_SPREAD_S, age: 0 }; }
             return;
         }
         if (p.stop.phase === 'guide') {
             if (Math.hypot(p.x - p.box.x, p.y - p.box.y) < PARK_M * sc && Math.hypot(p.vx, p.vy) < PARK_MS * sc) p.stop.phase = 'service';
+            else if ((p.stop.age += this.dt) > GUIDE_MAX_S) { p.stop = null; p.stopRetry = 'release'; }
             return;
         }
         if (p.stop.phase === 'service') {
@@ -194,6 +202,7 @@ class Game {
         p.stops++;
         if (!p.compoundsUsed.includes(p.compound)) p.compoundsUsed = [...p.compoundsUsed, p.compound];
         p.servicedLap = p.lap;
+        p.servicedVisit = p.pitVisits;
     }
 
     // A race finisher who never ran a second compound (races of 2+ laps, tyre wear on)
@@ -685,6 +694,7 @@ class Game {
             if (p.lap >= this.settings.maxLaps) {
                 p.finished = true;
                 p.finishTime = this.time;
+                p.stop = null; // parked where it is: no stop code in the packet forever
                 this.finishCar(p);
                 p.vx = p.vy = p.speed = 0; // parked: a moving velocity would make other clients dead-reckon it forward
                 this.winnerCount++;
@@ -698,6 +708,7 @@ class Game {
             p.lap++;
             this.recordLap(p);
             if (p.lap >= this.qualiLaps()) { // run complete: park the car
+                p.stop = null;
                 p.finished = true;
                 p.lapStart = null;
                 p.sectorStart = null;

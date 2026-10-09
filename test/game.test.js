@@ -9,6 +9,8 @@ const io = { emit() {}, volatile: { emit() {} } };
 const monza = Track.load('monza');
 const lp = (id, teamId = 'ferrari') => ({ id, username: id.toUpperCase(), teamId });
 const RACE = { maxLaps: 3, qualifying: false };
+// Fast-packet bytes per car at worst (see 'worst-case car entry'): a car in a pit stop with every field at its widest
+const CAR_BYTES = 88;
 const close = (a, b) => assert.ok(Math.abs(a - b) < 1e-9, `${a} vs ${b}`);
 
 // Teleport p through checkpoints in order; each call to lap() ends on the start line
@@ -822,7 +824,7 @@ test('slipstream: right behind another car cuts drag; alongside or far behind do
     assert.strictEqual(b.tow, 0, 'alongside is no tow');
 });
 
-test('fast update: compact per-car arrays with flags, at most 75 bytes per car (velocity, tow, lastSeq for prediction, wear, pit stop)', () => {
+test('fast update: compact per-car arrays with flags, at most CAR_BYTES per car (velocity, tow, lastSeq for prediction, wear, pit stop)', () => {
     let pkt = null;
     const io2 = { emit() {}, volatile: { emit(ev, d) { if (ev === 'game_state') pkt = d; } } };
     const g = new Game(io2, [lp('a'), lp('b', 'haas')], monza, QUALI, () => {}, 'quali');
@@ -834,7 +836,7 @@ test('fast update: compact per-car arrays with flags, at most 75 bytes per car (
     assert.strictEqual(a.length, 14);
     const F = Game.FLAGS;
     assert.strictEqual(a[6] & (F.inPit | F.limiter | F.ghost), F.inPit | F.limiter | F.ghost, 'garage car: in pit, limiter, ghost');
-    for (const e of pkt.c) assert.ok(JSON.stringify(e).length <= 75, `${JSON.stringify(e).length} bytes`);
+    for (const e of pkt.c) assert.ok(JSON.stringify(e).length <= CAR_BYTES, `${JSON.stringify(e).length} bytes`);
     assert.deepStrictEqual(g.initPayload().index, g.index);
 });
 
@@ -999,6 +1001,21 @@ test('input queue: guessing stops when the client goes silent (controls released
     assert.strictEqual(a.input.throttle, 0);
 });
 
+test('fast update: worst-case car entry fits the per-car byte budget', () => {
+    // Worst case: 20 cars (10 teams x 2) so index 19, coordinates to -10140 world units (largest circuit), speed and
+    // velocity to -572 (95 m/s x scale 6), angle -3.1416, steer -0.563, every flag, tow 0.19, a 7-digit input seq
+    // (~46 h at 60 Hz), wear 0.9999, in service (code 3 is the same width) with 2.9 s to go
+    const ps = Array.from({ length: 20 }, (_, i) => lp('p' + i, ['ferrari', 'mclaren', 'redbull', 'mercedes', 'astonmartin', 'alpine', 'williams', 'racingbulls', 'sauber', 'haas'][i % 10]));
+    const g = new Game(io, ps, monza, { ...RACE, collisions: false }, () => {}); // collisions off: the ghost flag too
+    const p = g.players.p19;
+    Object.assign(p, { x: -10140.44, y: -10140.44, angle: -3.14159, speed: -571.84, steer: -0.5634, vx: -571.84, vy: -571.84, tow: 0.194,
+        lastSeq: 9999999, wear: 0.99994, inPit: true, limiter: true, drs: true, drsAvailable: true, finished: true, lapValid: true,
+        stop: { phase: 'hold', t: 2.94 } });
+    const e = g.fastPacket().c.find((c) => c[0] === 19);
+    assert.strictEqual(JSON.stringify(e), '[19,-10140.4,-10140.4,-3.1416,-571.8,-0.563,127,-571.8,-571.8,0.19,9999999,0.9999,3,2.9]');
+    assert.strictEqual(JSON.stringify(e).length, CAR_BYTES);
+});
+
 test('fast update carries velocity, tow and the last applied input for reconciliation', () => {
     let pkt = null;
     const io2 = { emit() {}, volatile: { emit(ev, d) { if (ev === 'game_state') pkt = d; } } };
@@ -1009,7 +1026,7 @@ test('fast update carries velocity, tow and the last applied input for reconcili
     assert.strictEqual(e.length, 14); // … wear, stop code, stop time
     assert.ok(Math.abs(e[7]) + Math.abs(e[8]) > 0, 'velocity present');
     assert.strictEqual(e[10], 36);
-    assert.ok(JSON.stringify(e).length <= 75, `${JSON.stringify(e).length} bytes`);
+    assert.ok(JSON.stringify(e).length <= CAR_BYTES, `${JSON.stringify(e).length} bytes`);
 });
 
 test('start() runs the fixed-step loop and reports net_stats once a second', async () => {
