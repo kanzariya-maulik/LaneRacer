@@ -1,9 +1,9 @@
 // Racing line: minimum-curvature path within the track edges, and the speed the car carries along it.
-// Visual only: speeds are capped to what the Full braking assist allows, so the colours match what the car does.
+// Speeds are the car's real limit (no help grip, full braking), so red starts where a good driver brakes.
 const { C } = require('./CarPhysics');
-const { DOWN, MAX_SAFE, AIM, BRAKE_MARGIN } = require('./Assist');
+const { DOWN, MAX_SAFE, safeSpeeds } = require('./Assist');
 
-const PASSES = 2000;     // smoothing passes (prototype: ~50 ms per track; more passes don't make laps faster)
+const PASSES = 2000;     // smoothing passes (~100-160 ms per track)
 const MARGIN_M = 1.5;    // keep this far inside the track edge
 
 // Unit normals, same convention as offsetPoints in game3d.js: (x − ty·o, y + tx·o)
@@ -31,7 +31,7 @@ function curvatures(L, scale) {
     });
 }
 
-// Cornering acceleration (no extra grip from the steering help)
+// Cornering acceleration: every car has the same grip (the steering help adds lock, not grip)
 const latMax = (v) => C.LAT_ASSIST * C.MU * (C.G + DOWN * v * v);
 const drag = (v) => (0.5 * C.RHO * C.CDA * v * v) / C.MASS + C.ROLL_G * C.G;
 
@@ -43,8 +43,7 @@ function cornerSpeed(k) {
 }
 
 // Speed along a line: corner limits, then forward (drive) and backward (brake) passes, twice round so the lap wraps
-// assist (optional): { cum, safe } — also hold each point to the Full braking assist's own rule, so red starts where it brakes
-function profile(L, scale, cap, assist) {
+function profile(L, scale, cap) {
     const n = L.length, k = curvatures(L, scale);
     const vmax = k.map((x, i) => Math.min(cornerSpeed(x), cap ? cap[i] : Infinity));
     const v = vmax.slice();
@@ -57,51 +56,49 @@ function profile(L, scale, cap, assist) {
     }
     for (let pass = 0; pass < 2; pass++) for (let i = n - 1; i >= 0; i--) {
         const j = (i + 1) % n, vj = v[j];
-        const a = BRAKE_MARGIN * C.MU * (C.G + DOWN * vj * vj) * rem(j, vj) + drag(vj); // where the braking assist starts
+        const a = C.MU * (C.G + DOWN * vj * vj) * rem(j, vj) + drag(vj); // full braking at the limit
         v[i] = Math.min(v[i], Math.sqrt(vj * vj + 2 * a * ds[i]));
     }
-    if (assist) holdToAssist(v, assist, scale);
     const phase = v.map((vi, i) => {
         const drop = vi - v[(i + 1) % n];
-        const cornerLimited = vi >= 0.97 * vmax[i] && vmax[i] < MAX_SAFE * AIM - 0.1; // not the straight-line speed cap
-        return drop > 1 ? 2 : cornerLimited || drop > 0 ? 1 : 0;
+        const cornerLimited = vi >= 0.97 * vmax[i] && vmax[i] < MAX_SAFE - 0.1; // not the straight-line speed cap
+        return drop > 1 ? 2 : cornerLimited || drop > 0.1 ? 1 : 0; // a drop ≤ 0.1 m/s is float noise at top speed: flat
     });
     const lap = ds.reduce((s, d, i) => s + d / Math.max((v[i] + v[(i + 1) % n]) / 2, 0.1), 0);
     return { speed: v, phase, vmax, lap };
 }
 
-// Mirror of Assist.brakeAssist: it brakes when some point j ahead needs more than BRAKE_MARGIN of the grip at its
-// target speed s_j (centreline distance, at least 1 m). Keep v[i] under that limit for every j within reach.
-function holdToAssist(v, { cum, safe }, scale) {
-    const n = v.length, total = cum[n];
-    for (let i = 0; i < n; i++) {
-        const reach = (v[i] * v[i]) / (2 * BRAKE_MARGIN * C.MU * C.G) + 30;
-        for (let k = 1; k <= n; k++) {
-            const j = (i + k) % n, d = ((((cum[j] - cum[i]) % total) + total) % total) / scale;
-            if (d > reach) break;
-            const s = safe[j] * AIM;
-            v[i] = Math.min(v[i], Math.sqrt(s * s + 2 * Math.max(d, 1) * BRAKE_MARGIN * C.MU * (C.G + DOWN * s * s)) - 0.05);
-        }
-    }
-}
-
 function compute(t) {
     const P = t.path, n = P.length, N = normals(P), m = MARGIN_M * t.scale; // inside the real white lines (+ = driver's right)
     const lo = t.edgeL.map((e) => -(e - m)), hi = t.edgeR.map((e) => e - m);
-    // Minimum curvature: pull each point toward the 4th-order smooth of its neighbours, along its normal
+    // Minimum curvature: minimise Σ w_j·|L_{j−1} − 2L_j + L_{j+1}|², each point moving along its normal.
+    // w_j = 1/ds_j⁵: |second difference| ≈ κ·ds², so ds⁻³ makes it Σκ²·ds, and the extra ds⁻² weighs tight spots
+    // more (the peak sets the corner speed). Unweighted, points bunched on the inside of a hairpin look cheap and
+    // the line pinches into a tighter apex than the centreline's.
     const o = new Array(n).fill(0);
     for (let pass = 0; pass < PASSES; pass++) {
         const L = P.map((p, i) => ({ x: p.x + N[i].x * o[i], y: p.y + N[i].y * o[i] }));
+        const seg = L.map((p, i) => Math.hypot(L[(i + 1) % n].x - p.x, L[(i + 1) % n].y - p.y));
+        const w = seg.map((s, j) => ((seg[(j - 1 + n) % n] + s) / 2) ** -5);
         for (let i = 0; i < n; i++) {
-            const g = (d) => L[(i + d + n) % n];
-            const tx = (-g(-2).x + 4 * g(-1).x + 4 * g(1).x - g(2).x) / 6, ty = (-g(-2).y + 4 * g(-1).y + 4 * g(1).y - g(2).y) / 6;
-            const want = (tx - P[i].x) * N[i].x + (ty - P[i].y) * N[i].y;
+            const g = (d) => L[(i + d + n) % n], a = w[(i - 1 + n) % n], b = w[i], c = w[(i + 1) % n], s = a + 4 * b + c;
+            const tx = (-a * (g(-2).x - 2 * g(-1).x) + 2 * b * (g(-1).x + g(1).x) - c * (g(2).x - 2 * g(1).x)) / s;
+            const ty = (-a * (g(-2).y - 2 * g(-1).y) + 2 * b * (g(-1).y + g(1).y) - c * (g(2).y - 2 * g(1).y)) / s;
+            // Where the normal meets the line through that target (along the line's own direction), not the target
+            // projected on the normal: at a hairpin the normals converge and projection pulls points together
+            const dx = g(1).x - g(-1).x, dy = g(1).y - g(-1).y, cr = N[i].x * dy - N[i].y * dx;
+            const want = Math.abs(cr) > 0.3 * Math.hypot(dx, dy)
+                ? ((tx - P[i].x) * dy - (ty - P[i].y) * dx) / cr
+                : (tx - P[i].x) * N[i].x + (ty - P[i].y) * N[i].y;
             o[i] = Math.max(lo[i], Math.min(hi[i], o[i] + 0.5 * (want - o[i])));
         }
     }
     const offset = o.map((x) => Math.round(x * 10) / 10);
-    const prof = profile(linePoints(P, offset), t.scale, t.safeSpeed.map((s) => s * AIM), { cum: t.cum, safe: t.safeSpeed });
-    return { offset, speed: prof.speed.map((v) => Math.floor(v * 10) / 10), phase: prof.phase };
+    const L = linePoints(P, offset);
+    // Corner limit along the line at real grip (crests included): the braking help's targets, shared with the client
+    const limit = safeSpeeds(L, t.scale, t.vcurv).map((v) => Math.floor(v * 10) / 10);
+    const prof = profile(L, t.scale, limit);
+    return { offset, speed: prof.speed.map((v) => Math.floor(v * 10) / 10), phase: prof.phase, limit };
 }
 
 module.exports = { compute, profile, linePoints, curvatures, latMax };

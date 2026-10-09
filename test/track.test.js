@@ -93,6 +93,10 @@ for (const id of Track.TRACK_IDS) {
     test(`${id}: safe corner speeds`, () => {
         assert.strictEqual(t.safeSpeed.length, t.path.length);
         for (const v of t.safeSpeed) assert.ok(v > 15 && v <= 100);
+        assert.strictEqual(t.lineLimit.length, t.path.length);
+        for (const v of t.lineLimit) assert.ok(v > 15 && v <= 100);
+        // The line is wider than the centreline: its slowest corner is no slower than the centreline's
+        assert.ok(Math.min(...t.lineLimit) >= Math.min(...t.safeSpeed) - 0.1, `${id}: line corner slower than centreline`);
     });
 
     test(`${id}: start line at circuits.json startLineM`, () => {

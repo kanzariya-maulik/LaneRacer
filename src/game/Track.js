@@ -392,7 +392,9 @@ function build(raw, circuit = {}) {
     track.bridges = buildBridges(track);
     track.openWall = openWalls(track);
     track.medians = buildMedians(track);
-    track.racingLine = RacingLine.compute(track); // visual guide, sent to clients in game_init
+    const { limit: lineLimit, ...line } = RacingLine.compute(track);
+    track.racingLine = line;  // visual guide, sent to clients in game_init
+    track.lineLimit = lineLimit;  // braking help's corner speeds (shared sim, sent with the track)
     return track;
 }
 
