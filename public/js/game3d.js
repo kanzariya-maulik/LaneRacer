@@ -235,6 +235,12 @@ function onKey(e, down) {
         ownView = !ownView;
         window.showBanner?.(ownView ? 'YOUR CAR · V TO WATCH' : 'WATCHING', true);
     }
+    // Next tyre set: 1 soft, 2 medium, 3 hard (Q, W and E are taken: assist, throttle, DRS)
+    if (down && !e.repeat && clientState.status !== 'LOBBY' && ['1', '2', '3'].includes(key)) {
+        const c = 'SMH'[+key - 1];
+        socket.emit('tyre_next', c);
+        window.showBanner?.(`NEXT TYRES: ${{ S: 'SOFT', M: 'MEDIUM', H: 'HARD' }[c]}`, true);
+    }
     const k = KEYMAP[key];
     if (!k) return;
     // Presses are ignored in the lobby (typing a name), releases always count so no key stays stuck
@@ -1835,6 +1841,18 @@ function updateHUD(withTower = true) {
     }
     $('session-bar').textContent = bar;
     $('pit-limiter').classList.toggle('hidden', !(racing && me.limiter));
+    const comp = me?.compound || 'M', wear = predictor?.car?.wear ?? 0;
+    if (hudTyre !== comp) { hudTyre = comp; const chip = $('tyre-chip'); chip.textContent = comp; chip.className = `tyre-${comp}`; }
+    $('tyre-wear').firstElementChild.style.transform = `scaleX(${(1 - wear).toFixed(3)})`;
+    $('tyre-wear').classList.toggle('worn', wear > 0.8);
+    $('tyre-next').textContent = `NEXT ${me?.nextCompound || '—'}`;
+    const st = predictor?.car?.stop;
+    if (hudHadStop && !st && racing) hudGoUntil = performance.now() + 800; // released: flash GO
+    hudHadStop = !!st;
+    const go = performance.now() < hudGoUntil;
+    $('box-msg').classList.toggle('hidden', !(racing && (st || go)));
+    if (st) $('box-msg').textContent = st.phase === 'service' ? `BOX — ${Math.max(0, st.t).toFixed(1)} s` : st.phase === 'hold' ? 'HOLD' : 'BOX';
+    else if (go) $('box-msg').textContent = 'GO';
     $('drs-badge').className = !racing ? 'drs-off' : me.drs ? 'drs-open' : me.drsAvailable ? 'drs-avail' : 'drs-off';
     let hint = '';
     if (racing && clientState.trackData) {
@@ -1867,6 +1885,7 @@ function updateHUD(withTower = true) {
             const name = el('span', 'tt-name', codes.indexOf(codes[i]) !== codes.lastIndexOf(codes[i]) ? lp.username.slice(0, 8) : codes[i]);
             li.append(el('span', 'tt-pos', p.rank), team, name);
             if (p.inPit && !quali) li.append(el('span', 'tt-tag', 'PIT'));
+            if (p.compound) li.append(el('span', `tt-tyre tyre-${p.compound}`, `${p.compound}${p.stops ? ' ' + p.stops : ''}`));
             if (p.penalty) li.append(el('span', 'tt-tag pen', `+${p.penalty}s`));
             if (clientState.fastestLap?.id === id) { // purple stopwatch: fastest lap of the session
                 const fl = el('span', 'tt-fl');
@@ -1972,7 +1991,7 @@ const ownFrame = { rpm: 0, load: 0, limiter: false, pit: false, speedMs: 0 };
 const listenerFrame = { x: 0, y: 0, fx: 1, fy: 0, vx: 0, vy: 0 }, sndFrame = { own: null, others: soundOthers, listener: listenerFrame };
 const silentFrame = { own: null, others: [], listener: listenerFrame };
 const camDir = new THREE.Vector3();
-let lastDrs = false, hudLit = -1, hudFlash = null, hudGear = '';
+let lastDrs = false, hudLit = -1, hudFlash = null, hudGear = '', hudTyre = null, hudHadStop = false, hudGoUntil = 0;
 function updateSound(dt) {
     const gs = clientState.gameState, me = gs[clientState.me], racing = !!me && !isSpectator();
     const followId = racing && !watchingAfterFinish() ? clientState.me : spectateId; // dash and engine: the car on screen

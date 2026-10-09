@@ -21,6 +21,7 @@ const setQuali = document.getElementById('setting-quali');
 const setOutLaps = document.getElementById('setting-outlaps');
 const setQualiLaps = document.getElementById('setting-qualilaps');
 const setCollisions = document.getElementById('setting-collisions');
+const setTyres = document.getElementById('setting-tyres');
 const setPenalties = document.getElementById('setting-penalties');
 const setTime = document.getElementById('setting-time');
 const settingsView = document.getElementById('settings-view');
@@ -242,6 +243,13 @@ inputUser.focus();
 // Wide, tall screens have room for My settings next to the teams: start it open there
 if (matchMedia('(min-width: 1281px) and (min-height: 900px)').matches) document.querySelector('.my-settings').open = true;
 
+const compoundSelect = document.getElementById('compound-select');
+try { compoundSelect.value = localStorage.getItem('lanrace.compound') || 'M'; } catch (e) { /* storage blocked */ }
+compoundSelect.addEventListener('change', () => {
+    try { localStorage.setItem('lanrace.compound', compoundSelect.value); } catch (e) { /* storage blocked */ }
+    socket.emit('set_compound', compoundSelect.value);
+});
+
 btnJoin.addEventListener('click', () => {
     if (isJoined) { // Save: a new name for the driver already on the grid
         socket.emit('update_profile', { username: inputUser.value });
@@ -250,7 +258,7 @@ btnJoin.addEventListener('click', () => {
     }
     if (!selectedTeam) return window.appendChat('SYSTEM', '#f43f5e', 'Pick a team first.');
     const username = inputUser.value.trim() || `Player${Math.floor(Math.random() * 1000)}`;
-    lastJoin = { username, teamId: selectedTeam, assist: getAssistString() };
+    lastJoin = { username, teamId: selectedTeam, assist: getAssistString(), compound: compoundSelect.value };
     window.lanraceAudio?.unlock(); // the click is the gesture browsers need to start sound
     socket.emit('join_lobby', lastJoin);
     setJoinedUI(true);
@@ -300,6 +308,7 @@ function emitSettings() {
         outLaps: parseInt(setOutLaps.value, 10),
         qualiLaps: parseInt(setQualiLaps.value, 10),
         collisions: setCollisions.value === '1',
+        tyreWear: setTyres.value === '1',
         contactPenalties: setPenalties.value === '1'
     });
 }
@@ -309,6 +318,7 @@ setQuali.addEventListener('change', emitSettings);
 setOutLaps.addEventListener('change', emitSettings);
 setQualiLaps.addEventListener('change', emitSettings);
 setCollisions.addEventListener('change', emitSettings);
+setTyres.addEventListener('change', emitSettings);
 setPenalties.addEventListener('change', emitSettings);
 setTime.addEventListener('change', emitSettings);
 
@@ -419,6 +429,7 @@ window.updateSettingsUI = () => {
     setQualiLaps.value = clientState.settings.qualiLaps ?? 2;
     document.querySelectorAll('.quali-only').forEach((el) => el.classList.toggle('hidden', !clientState.settings.qualifying));
     setCollisions.value = clientState.settings.collisions === false ? '0' : '1';
+    setTyres.value = clientState.settings.tyreWear === false ? '0' : '1';
     setPenalties.value = clientState.settings.contactPenalties === false ? '0' : '1';
     document.querySelectorAll('.collisions-only').forEach((el) => el.classList.toggle('hidden', clientState.settings.collisions === false));
 
@@ -427,7 +438,7 @@ window.updateSettingsUI = () => {
     const track = setTrack.selectedOptions[0]?.textContent || s.trackId;
     const out = s.outLaps ?? 1, timed = s.qualiLaps ?? 2, quali = s.qualifying ? `${out} out + ${timed} timed` : 'Off';
     const time = s.timeOfDay === 'night' ? 'Night' : 'Day';
-    const rows = [['Track', track], ['Time', time], ['Laps', s.maxLaps], ['Qualifying', quali], ['Collisions', s.collisions === false ? 'Off' : s.contactPenalties === false ? 'On, no penalties' : 'On, penalties']];
+    const rows = [['Track', track], ['Time', time], ['Laps', s.maxLaps], ['Qualifying', quali], ['Collisions', s.collisions === false ? 'Off' : s.contactPenalties === false ? 'On, no penalties' : 'On, penalties'], ['Tyre wear', s.tyreWear === false ? 'Off' : 'On']];
     settingsView.replaceChildren(...rows.map(([k, v]) => {
         const d = document.createElement('div');
         d.append(Object.assign(document.createElement('dt'), { textContent: k }), Object.assign(document.createElement('dd'), { textContent: v }));

@@ -788,3 +788,13 @@ input:disabled { opacity: 0.7; }
 #countdown-overlay.go.tick #countdown-text { animation-name: count-go; }
 @keyframes count-go { 0% { transform: scale(0.6); opacity: 0; } 30% { transform: scale(1.1); opacity: 1; } 100% { transform: scale(1.4); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { #countdown-overlay.tick #countdown-text { animation: none; } }
+
+.cl-tyre { display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 44px; }
+#tyre-chip { width: 26px; height: 26px; border-radius: 50%; border: 4px solid; display: grid; place-items: center; font: 700 12px/1 var(--font, sans-serif); background: #111; }
+.tyre-S { border-color: #e10600; color: #e10600; } .tyre-M { border-color: #ffd12e; color: #ffd12e; } .tyre-H { border-color: #f2f2f2; color: #f2f2f2; }
+#tyre-wear { width: 40px; height: 4px; background: #333; border-radius: 2px; overflow: hidden; }
+#tyre-wear i { display: block; height: 100%; width: 100%; background: #3ecf6e; transform-origin: left; }
+#tyre-wear.worn i { background: #e10600; }
+#tyre-next { font-size: 9px; opacity: 0.8; letter-spacing: 0.04em; }
+#box-msg { position: absolute; top: 38%; left: 50%; transform: translateX(-50%); font: 800 28px/1 var(--font, sans-serif); color: #fff; background: rgba(0,0,0,0.6); padding: 10px 18px; border-radius: 6px; }
+.tt-tyre { font-size: 10px; margin-left: 4px; border: 2px solid; border-radius: 8px; padding: 0 4px; }
