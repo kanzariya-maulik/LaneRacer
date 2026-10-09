@@ -49,7 +49,7 @@ function parseAssist(assist) {
 }
 
 function step(car, input, dt, scale, offTrack = false, assist = 'off') {
-    const mu = offTrack ? C.GRASS_MU : C.MU;
+    const mu = offTrack ? C.GRASS_MU : C.MU * (car.tyreGrip ?? 1); // tyres.js: compound and wear
     const { steer: assistSteer, brake: assistBrake } = parseAssist(assist);
     // k is the speed-dependent blend (1 = full assist below ASSIST_FULL_KMH, 0 = none above ASSIST_OFF_KMH)
 
@@ -92,6 +92,9 @@ function step(car, input, dt, scale, offTrack = false, assist = 'off') {
     let yaw = (vf / C.WHEELBASE) * Math.tan(car.steer);
     const yawMax = (latAccel / Math.max(Math.abs(vf), 1)) * (slip < C.MAX_SLIP ? C.YAW_ASSIST : 1);
     yaw = Math.max(-yawMax, Math.min(yawMax, yaw));
+    // For tyre wear (drive.js): share of the cornering grip in use, and the slide angle
+    car.latUse = Math.min(1, Math.abs(yaw * vf) / Math.max(latAccel, 1e-6));
+    car.slip = slip;
     car.angle += yaw * dt;
 
     // Re-project velocity onto the new heading; tyres cancel sideways slide up to their grip

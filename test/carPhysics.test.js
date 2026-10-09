@@ -175,3 +175,21 @@ test('hills: a compression adds cornering grip, a crest takes it away (the car g
     assert.ok(crest < flat * 0.8, `crest ${crest} vs ${flat}`);
     assert.ok(Number.isFinite(turn(-1)), 'airborne-hard crest stays finite');
 });
+
+test('tyreGrip scales cornering: worn tyres run wide on the same input', () => {
+    const run = (tyreGrip) => {
+        const car = { x: 0, y: 0, angle: 0, vx: 50 * 6, vy: 0, speed: 50 * 6, steer: 0, tyreGrip };
+        for (let k = 0; k < 120; k++) step(car, { throttle: 0.4, brake: 0, steer: 1 }, 1 / 60, 6);
+        return car.angle;
+    };
+    assert.ok(run(0.88) < run(1) - 0.05, 'less grip, less rotation');
+    assert.strictEqual(run(undefined), run(1));
+});
+
+test('step reports grip use and slip', () => {
+    const car = { x: 0, y: 0, angle: 0, vx: 40 * 6, vy: 0, speed: 40 * 6, steer: 0 };
+    step(car, { throttle: 0, brake: 0, steer: 0 }, 1 / 60, 6);
+    assert.ok(car.latUse < 0.01 && car.slip < 0.01);
+    for (let k = 0; k < 30; k++) step(car, { throttle: 0, brake: 0, steer: 1 }, 1 / 60, 6);
+    assert.ok(car.latUse > 0.5 && car.latUse <= 1);
+});
