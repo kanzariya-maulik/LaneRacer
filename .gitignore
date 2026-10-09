@@ -10,3 +10,6 @@ scripts/build/
 
 # Network log (src/netlog.js)
 logs/
+
+# Agent scratch (plan ledgers, review packages)
+.superpowers/
