@@ -3,6 +3,7 @@ const assert = require('node:assert');
 const Track = require('../src/game/Track');
 const Game = require('../src/game/Game');
 const Physics = require('../src/game/Physics');
+const RL = require('../src/game/RacingLine');
 
 let P;
 before(async () => { P = await import('../public/js/predict.js'); });
@@ -12,6 +13,7 @@ const rng = (seed) => () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
 // Server game + one predicting client over a simulated network (latency ± jitter, loss), 60 s of driving
 function run({ latency = 30, jitter = 20, loss = 2, seconds = 60, track = 'monza', bump = null } = {}) {
     const t = Track.load(track), sc = t.scale, rand = rng(42);
+    const L = RL.linePoints(t.path, t.racingLine.offset); // steer along the racing line (the braking help's corner speeds)
     let pkt = null;
     const g = new Game({ emit() {}, volatile: { emit(ev, d) { if (ev === 'game_state') pkt = d; } } },
         [{ id: 'a', username: 'A', teamId: 'redbull', assist: 'full' }], t, { maxLaps: 99, qualifying: false }, () => {});
@@ -28,7 +30,7 @@ function run({ latency = 30, jitter = 20, loss = 2, seconds = 60, track = 'monza
         // client: sample input (steer at a point ahead on the track), predict, send newest + 5
         if (!pr.car && pkt) pr.reset(pkt.c[0]);
         if (pr.car) {
-            const n = Physics.nearestOnTrack(pr.car.x, pr.car.y, t), ah = t.path[(n.i + 3) % t.path.length];
+            const n = Physics.nearestOnTrack(pr.car.x, pr.car.y, t), ah = L[(n.i + 3) % t.path.length];
             let d = Math.atan2(ah.y - pr.car.y, ah.x - pr.car.x) - pr.car.angle; d = Math.atan2(Math.sin(d), Math.cos(d));
             const input = { seq: ++seq, steer: Math.max(-1, Math.min(1, d * 2)), throttle: Math.abs(d) > 0.25 ? 0.4 : 1, brake: 0, drs: false };
             pr.step(input);
