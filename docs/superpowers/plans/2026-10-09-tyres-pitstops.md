@@ -456,7 +456,7 @@ git commit -m "Wear tyres every tick in the shared sim and sync compound and wea
 ### Task 4: Pit lane rebuild: connectors, taper, continuous pit wall
 
 **Files:**
-- Modify: `src/game/Track.js` (`buildPit`, constants block), `src/game/Physics.js` (new `nearestOnPathHint`), `public/js/sim/physics.js` (the browser copy: same function), `public/js/sim/drive.js` (pit width per point, closure removed, hint), `src/game/RacingLine.js` (remove `pitWindow`)
+- Modify: `src/game/Track.js` (`buildPit`, constants block), `public/js/sim/physics.js` (new `nearestOnPathHint`; `src/game/Physics.js` re-exports this class), `public/js/sim/drive.js` (pit width per point, closure removed, hint), `src/game/RacingLine.js` (remove `pitWindow`)
 - Test: `test/track.test.js`, `test/game.test.js`, `test/scenery.test.js`
 
 **Interfaces:**
@@ -566,7 +566,7 @@ In `test/scenery.test.js` line ~114 replace `if (pit.cum[i] < pit.closeS) contin
 Run: `npm test`
 Expected: FAIL (`pit.widthAt` undefined, `closeWall` present, connectors absent)
 
-- [ ] **Step 4: Implement `nearestOnPathHint`** in both `src/game/Physics.js` and `public/js/sim/physics.js` (they are the same class; add the identical static method next to `nearestOnTrack`):
+- [ ] **Step 4: Implement `nearestOnPathHint`** in `public/js/sim/physics.js`, next to `nearestOnTrack` (`src/game/Physics.js` re-exports this class, so the server gets it too):
 
 ```js
     // Nearest point on an open polyline, searching ±HINT_SPAN segments around the last one; full search as the fallback
@@ -584,8 +584,6 @@ Expected: FAIL (`pit.widthAt` undefined, `closeWall` present, connectors absent)
         return { dist: Math.sqrt(bd2), px: bx, py: by, i: bi, t: bt };
     }
 ```
-
-(Check `src/game/Physics.js`: if it re-exports the browser class instead of duplicating it, add the method once.)
 
 - [ ] **Step 5: Implement the rebuilt `buildPit`** in `src/game/Track.js`. Replace the constants `CLOSE_RAMP_M`, `WALL_CLEAR_M` with:
 
@@ -742,7 +740,7 @@ Expected: PASS on all 14 circuits. If a circuit throws `no pit entry/exit connec
 - [ ] **Step 9: Commit**
 
 ```bash
-git add src/game/Track.js src/game/Physics.js public/js/sim/physics.js public/js/sim/drive.js src/game/RacingLine.js test/
+git add src/game/Track.js public/js/sim/physics.js public/js/sim/drive.js src/game/RacingLine.js test/
 git commit -m "Rebuild pit lanes with tapered entry and exit connectors that never overlap the road"
 ```
 
