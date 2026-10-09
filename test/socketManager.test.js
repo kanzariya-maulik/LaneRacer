@@ -203,6 +203,32 @@ test('assist is each player\'s own choice: picked at join, changed any time, app
     b.fire('disconnect');
 });
 
+test('host "Same for all" help: every car gets the host\'s levels, set_assist can\'t change it, "Each driver chooses" restores own choices', () => {
+    const io = fakeIo();
+    setupSocketManager(io, noNet);
+    const a = io.connect('a');
+    a.fire('join_lobby', { username: 'A', teamId: 'ferrari', assist: '0,0' });
+    const b = io.connect('b');
+    b.fire('join_lobby', { username: 'B', teamId: 'haas', assist: '100,100' });
+    a.fire('update_settings', { trackId: 'monza', maxLaps: 1, qualifying: true, help: { mode: 'fixed', steer: 0, brake: 50 } });
+    let lob = io.events('lobby_state_sync').at(-1);
+    assert.deepStrictEqual([lob.players.a.assist, lob.players.b.assist], [{ steer: 0, brake: 0.5 }, { steer: 0, brake: 0.5 }]);
+    b.fire('set_assist', '100,100');
+    lob = io.events('lobby_state_sync').at(-1);
+    assert.deepStrictEqual(lob.players.b.assist, { steer: 0, brake: 0.5 }, 'set_assist changed a fixed car');
+    a.fire('update_settings', { help: { mode: 'choose' } });
+    lob = io.events('lobby_state_sync').at(-1);
+    assert.deepStrictEqual([lob.players.a.assist, lob.players.b.assist], [{ steer: 0, brake: 0 }, { steer: 1, brake: 1 }], 'own choices not restored');
+    a.fire('update_settings', { help: { mode: 'fixed', steer: 100, brake: 100 } });
+    const c = io.connect('c');
+    c.fire('join_lobby', { username: 'C', teamId: 'mclaren', assist: '0,0' });
+    a.fire('toggle_ready', true); b.fire('toggle_ready', true); c.fire('toggle_ready', true);
+    a.fire('start_game');
+    const init = io.events('game_init').at(-1);
+    for (const id of ['a', 'b', 'c']) assert.deepStrictEqual(init.players[id].assist, { steer: 1, brake: 1 }, `${id} not on the host's levels`);
+    for (const s of [a, b, c]) s.fire('disconnect');
+});
+
 // Race under way: a (host) and b on the grid, lights out
 function startRace(t, io) {
     const a = join(io, 'a', 'ferrari', 0), b = join(io, 'b', 'haas');

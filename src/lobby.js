@@ -29,6 +29,7 @@ function sanitizeSettings(current, incoming, trackIds) {
     if (Number.isFinite(incoming.outLaps)) next.outLaps = clamp(Math.round(incoming.outLaps), 1, 3);
     if (Number.isFinite(incoming.qualiLaps)) next.qualiLaps = clamp(Math.round(incoming.qualiLaps), 1, 10);
     if (typeof incoming.tyreWear === 'boolean') next.tyreWear = incoming.tyreWear;
+    if (incoming.help !== undefined) next.help = sanitizeHelp(incoming.help, current.help || HELP_DEFAULT);
     return next;
 }
 
@@ -78,4 +79,20 @@ function sanitizeAssist(a) {
 // Start / next tyre compound: S, M or H (medium unless valid)
 const sanitizeCompound = (c) => (c === 'S' || c === 'M' || c === 'H' ? c : 'M');
 
-module.exports = { sanitizeCompound, TEAMS, MAX_RACERS, sanitizeUsername, sanitizeChat, sanitizeSettings, sanitizeInput, sanitizeInputs, sanitizeAssist, canJoinTeam, pickRacers };
+// Host setting: every driver chooses their own help, or every car drives with the host's levels
+const HELP_DEFAULT = { mode: 'choose', steer: 100, brake: 100 };
+function sanitizeHelp(h, current = HELP_DEFAULT) {
+    if (!h || typeof h !== 'object') return current;
+    const pct = (v, d) => (Number.isFinite(v) ? v : d);
+    const a = snapAssist(pct(h.steer, current.steer) / 100, pct(h.brake, current.brake) / 100);
+    const mode = h.mode === 'fixed' || h.mode === 'choose' ? h.mode : current.mode;
+    return { mode, steer: a.steer * 100, brake: a.brake * 100 };
+}
+
+// What a car drives with: the host's levels when fixed, otherwise the driver's own choice
+function effectiveAssist(settings, own) {
+    const h = settings?.help;
+    return h?.mode === 'fixed' ? snapAssist(h.steer / 100, h.brake / 100) : own;
+}
+
+module.exports = { sanitizeHelp, effectiveAssist, sanitizeCompound, TEAMS, MAX_RACERS, sanitizeUsername, sanitizeChat, sanitizeSettings, sanitizeInput, sanitizeInputs, sanitizeAssist, canJoinTeam, pickRacers };

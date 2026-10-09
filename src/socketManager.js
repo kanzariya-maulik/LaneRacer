@@ -12,7 +12,7 @@ const state = {
     status: 'LOBBY', // LOBBY, QUALIFYING, QUALI_RESULTS, COUNTDOWN, RACE, FINISHED
     players: {},
     hostId: null,
-    settings: { trackId: 'monza', maxLaps: 3, qualifying: true, collisions: true, tyreWear: true, contactPenalties: true, timeOfDay: 'day', outLaps: 1, qualiLaps: 2 }
+    settings: { trackId: 'monza', maxLaps: 3, qualifying: true, collisions: true, tyreWear: true, contactPenalties: true, timeOfDay: 'day', outLaps: 1, qualiLaps: 2, help: { mode: 'choose', steer: 100, brake: 100 } }
 };
 
 let gameInstance = null;
@@ -100,12 +100,14 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
             if (!check.ok) return socket.emit('join_error', check.reason);
 
             const isFirstPlayer = Object.keys(state.players).length === 0;
+            const own = lobby.sanitizeAssist(data.assist);
             state.players[socket.id] = {
                 id: socket.id,
                 username: lobby.sanitizeUsername(data.username),
                 teamId: check.team.id,
                 color: check.team.chatColor,
-                assist: lobby.sanitizeAssist(data.assist), // each player's own choice, changeable any time
+                ownAssist: own,                                     // the driver's own choice, kept while the host fixes help
+                assist: lobby.effectiveAssist(state.settings, own), // what the car drives with
                 compound: lobby.sanitizeCompound(data.compound),
                 isReady: false,
                 isSpectating: state.status !== 'LOBBY'
@@ -196,6 +198,8 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
             if (socket.id !== state.hostId || state.status !== 'LOBBY') return;
             state.settings = lobby.sanitizeSettings(state.settings, settings, Track.TRACK_IDS);
             io.emit('settings_updated', state.settings);
+            for (const p of Object.values(state.players)) p.assist = lobby.effectiveAssist(state.settings, p.ownAssist ?? p.assist);
+            io.emit('lobby_state_sync', lobbySnapshot());
         });
 
         socket.on('start_game', () => {
@@ -228,7 +232,8 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
         socket.on('set_assist', (assist) => {
             const player = state.players[socket.id];
             if (!player) return;
-            player.assist = lobby.sanitizeAssist(assist);
+            player.ownAssist = lobby.sanitizeAssist(assist);
+            player.assist = lobby.effectiveAssist(state.settings, player.ownAssist); // fixed by the host: unchanged
             const car = gameInstance?.players[socket.id];
             if (car) car.assist = player.assist; // takes effect on the next tick
             io.emit('lobby_state_sync', lobbySnapshot());

@@ -133,3 +133,18 @@ test('tyreWear setting and compound choice are sanitised', () => {
     assert.strictEqual(lobby.sanitizeCompound('S'), 'S');
     assert.strictEqual(lobby.sanitizeCompound('Z'), 'M');
 });
+
+test('sanitizeSettings: driver help mode and levels, snapped; garbage keeps the current value', () => {
+    const cur = { ...DEFAULTS, help: { mode: 'choose', steer: 100, brake: 100 } };
+    assert.deepStrictEqual(lobby.sanitizeSettings(cur, { help: { mode: 'fixed', steer: 0, brake: 60 } }, TRACK_IDS).help, { mode: 'fixed', steer: 0, brake: 50 });
+    assert.deepStrictEqual(lobby.sanitizeSettings(cur, { help: { mode: 'evil', steer: 'x' } }, TRACK_IDS).help, { mode: 'choose', steer: 100, brake: 100 });
+    assert.deepStrictEqual(lobby.sanitizeSettings(cur, { help: 7 }, TRACK_IDS).help, cur.help);
+    assert.deepStrictEqual(lobby.sanitizeSettings(DEFAULTS, { help: { mode: 'fixed' } }, TRACK_IDS).help, { mode: 'fixed', steer: 100, brake: 100 });
+});
+
+test('effectiveAssist: the host\'s levels when fixed, otherwise the driver\'s own', () => {
+    const own = { steer: 0, brake: 0 };
+    assert.deepStrictEqual(lobby.effectiveAssist({ help: { mode: 'choose', steer: 100, brake: 100 } }, own), own);
+    assert.deepStrictEqual(lobby.effectiveAssist({ help: { mode: 'fixed', steer: 100, brake: 50 } }, own), { steer: 1, brake: 0.5 });
+    assert.deepStrictEqual(lobby.effectiveAssist({}, own), own);
+});
