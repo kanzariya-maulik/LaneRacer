@@ -822,7 +822,7 @@ test('slipstream: right behind another car cuts drag; alongside or far behind do
     assert.strictEqual(b.tow, 0, 'alongside is no tow');
 });
 
-test('fast update: compact per-car arrays with flags, at most 75 bytes per car (velocity, tow, lastSeq for prediction, wear)', () => {
+test('fast update: compact per-car arrays with flags, at most 75 bytes per car (velocity, tow, lastSeq for prediction, wear, pit stop)', () => {
     let pkt = null;
     const io2 = { emit() {}, volatile: { emit(ev, d) { if (ev === 'game_state') pkt = d; } } };
     const g = new Game(io2, [lp('a'), lp('b', 'haas')], monza, QUALI, () => {}, 'quali');
@@ -831,7 +831,7 @@ test('fast update: compact per-car arrays with flags, at most 75 bytes per car (
     assert.strictEqual(typeof pkt.t, 'number');
     assert.strictEqual(pkt.c.length, 2);
     const a = pkt.c.find(e => e[0] === g.index.a);
-    assert.strictEqual(a.length, 12);
+    assert.strictEqual(a.length, 14);
     const F = Game.FLAGS;
     assert.strictEqual(a[6] & (F.inPit | F.limiter | F.ghost), F.inPit | F.limiter | F.ghost, 'garage car: in pit, limiter, ghost');
     for (const e of pkt.c) assert.ok(JSON.stringify(e).length <= 75, `${JSON.stringify(e).length} bytes`);
@@ -1006,7 +1006,7 @@ test('fast update carries velocity, tow and the last applied input for reconcili
     g.frozen = false;
     for (let k = 0; k < 30; k++) { g.handleInputs('a', [{ seq: 7 + k, steer: 0, throttle: 1, brake: 0, drs: false }]); g.update(); }
     const e = pkt.c[0];
-    assert.strictEqual(e.length, 12);
+    assert.strictEqual(e.length, 14); // … wear, stop code, stop time
     assert.ok(Math.abs(e[7]) + Math.abs(e[8]) > 0, 'velocity present');
     assert.strictEqual(e[10], 36);
     assert.ok(JSON.stringify(e).length <= 75, `${JSON.stringify(e).length} bytes`);

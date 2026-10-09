@@ -1,6 +1,7 @@
 // Client-side prediction for your own car: run the shared simulation on your inputs straight away,
 // then reconcile with the server (rewind to its state, replay unacknowledged inputs, blend out the difference).
 import { driveCar } from './sim/drive.js';
+import { gripOf } from './sim/tyres.js';
 
 export const STEP_S = 1 / 60;
 export const SNAP_M = 5;              // corrections this big snap (reset, teleport)
@@ -22,6 +23,7 @@ export class Predictor {
         this.lastError = 0;
         this.finished = false;
         this.lastS = -1;                  // newest server packet applied
+        this.box = null;                  // this player's pit box (game_init): the stop guide drives into it
     }
 
     // Server entry → simulation state
@@ -31,6 +33,9 @@ export class Predictor {
         c.inPit = !!(e[6] & 1); c.limiter = !!(e[6] & 2); c.drs = !!(e[6] & 4);
         c.vx = e[7] ?? Math.cos(e[3]) * e[4]; c.vy = e[8] ?? Math.sin(e[3]) * e[4]; c.tow = e[9] || 0;
         c.wear = e[11] ?? c.wear ?? 0;
+        if (c.compound) c.tyreGrip = gripOf(c.compound, c.wear); // predicted grip always from the server's wear
+        const code = e[12] || 0; // pit stop (Game.updateStop): 1 guided in, 2 service, 3 held for a safe release
+        c.stop = code ? { phase: ['', 'guide', 'service', 'hold'][code], t: e[13] || 0 } : null;
         c.lastSafeX = c.x; c.lastSafeY = c.y;
         this.finished = !!(e[6] & FIN);
     }
@@ -42,7 +47,7 @@ export class Predictor {
     }
 
     reset(e) {
-        this.car = { assist: this.assist };
+        this.car = { assist: this.assist, box: this.box };
         if (this.tyres) Object.assign(this.car, this.tyres);
         this.load(e);
         this.prev = { x: this.car.x, y: this.car.y, angle: this.car.angle };

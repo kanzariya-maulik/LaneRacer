@@ -27,6 +27,11 @@ const DRS_GAP_S = 1;          // race: within this of the car ahead at the detec
 const SLIP_MAX = 0.2;         // drag cut right behind another car…
 const SLIP_MIN_M = 5, SLIP_RANGE_M = 40, SLIP_LAT_M = 3; // …fading out by 40 m behind, only roughly in line
 
+const STOP_TRIGGER_M = 12, STOP_SLOW_KMH = 40, STOP_BRAKE = 0.2;
+const STOP_S = 2.5, STOP_SPREAD_S = 0.4, RELEASE_HOLD_S = 0.5, RELEASE_GAP_M = 10, PARK_M = 0.5, PARK_MS = 0.3;
+const COMPOUND_PENALTY_S = 22;
+const STOP_CODE = { guide: 1, service: 2, hold: 3 };
+
 const FLAGS = { inPit: 1, limiter: 2, drs: 4, drsAvailable: 8, finished: 16, lapValid: 32, ghost: 64 };
 const META_FIELDS = ['lap', 'checkpoint', 'rank', 'gap', 'lapsDown', 'lastLap', 'bestLap', 'lapStart', 'bestLapSectors', 'lastValid', 'penalty', 'compound', 'nextCompound', 'stops', 'compoundsUsed', 'wearPerM'];
 const META_EVERY = 6; // ticks: info updates at 10 Hz
@@ -48,6 +53,7 @@ class Game {
         this.onFinish = onFinish;
         this.mode = mode;
         this.dt = 1 / TICK_RATE;
+        this.rng = settings.rng || Math.random; // pit service time
         this.time = 0;                     // race clock (s), starts at lights out
         this.clock = 0;                    // session clock (s) for client interpolation, never frozen
         this.frozen = mode === 'race';     // race: lights still on — cars can move, but that's a jump start
@@ -63,10 +69,10 @@ class Game {
         const cpCount = track.checkpoints.length;
         this.players = {};
         this.index = {}; this.seq = 0; this.sentMeta = {};
-        const boxes = mode === 'quali' && track.pit ? Game.garageSlots(players, track) : null;
+        const boxes = track.pit ? Game.garageSlots(players, track) : null;
         players.forEach((p, index) => {
             this.index[p.id] = index;
-            const slot = boxes ? boxes[index] : track.startPositions[index % track.startPositions.length];
+            const slot = mode === 'quali' && boxes ? boxes[index] : track.startPositions[index % track.startPositions.length];
             this.players[p.id] = {
                 id: p.id,
                 username: p.username,
@@ -75,6 +81,7 @@ class Game {
                 x: slot.x, y: slot.y, angle: slot.angle,
                 vx: 0, vy: 0, speed: 0, steer: 0,
                 inPit: false, limiter: false, pitS: 0,
+                box: boxes ? boxes[index] : null, stop: null, servicedLap: -1,
                 limits: 0, penalty: 0, offLimits: false, finishTime: null,
                 lastSafeX: slot.x, lastSafeY: slot.y, gridX: slot.x, gridY: slot.y, jumpStart: false, reacted: false,
                 drs: false, drsAvailable: false, drsEligible: [], tow: 0, lapS: null,
@@ -150,6 +157,52 @@ class Game {
         });
     }
 
+    // Pit stop: braking for (or crawling to) its box on the lane → guided in → serviced → released
+    updateStop(p) {
+        const t = this.track, sc = t.scale;
+        if (!t.pit || !p.box || p.finished) return;
+        if (!p.stop) {
+            const ahead = p.box.s - p.pitS, kmh = (Math.hypot(p.vx, p.vy) / sc) * 3.6;
+            // Already on the mark (a quali car starting in its box) is not arriving at it
+            if (!p.inPit || p.servicedLap === p.lap || ahead < PARK_M * sc || ahead > STOP_TRIGGER_M * sc) return;
+            if ((p.input.brake || 0) > STOP_BRAKE || kmh < STOP_SLOW_KMH) p.stop = { phase: 'guide', t: STOP_S + this.rng() * STOP_SPREAD_S };
+            return;
+        }
+        if (p.stop.phase === 'guide') {
+            if (Math.hypot(p.x - p.box.x, p.y - p.box.y) < PARK_M * sc && Math.hypot(p.vx, p.vy) < PARK_MS * sc) p.stop.phase = 'service';
+            return;
+        }
+        if (p.stop.phase === 'service') {
+            p.stop.t -= this.dt;
+            if (p.stop.t > 0) return;
+            this.serviceTyres(p);
+            p.stop = { phase: 'hold', t: RELEASE_HOLD_S };
+        }
+        // Unsafe release: a moving car in the lane just behind the box holds us (at most RELEASE_HOLD_S)
+        const busy = Object.values(this.players).some((q) => q !== p && q.inPit && !q.stop && Math.hypot(q.vx, q.vy) > sc
+            && q.pitS < p.box.s && p.box.s - q.pitS < RELEASE_GAP_M * sc);
+        if (busy && p.stop.t > 0) { p.stop.t -= this.dt; return; }
+        p.stop = null;
+    }
+
+    serviceTyres(p) {
+        p.compound = p.nextCompound || Tyres.nextHarder(p.compound);
+        p.nextCompound = null;
+        p.wear = 0;
+        p.wearPerM = Game.tyreWearPerM(this.settings, this.track, p.compound);
+        p.tyreGrip = Tyres.gripOf(p.compound, 0);
+        p.stops++;
+        if (!p.compoundsUsed.includes(p.compound)) p.compoundsUsed = [...p.compoundsUsed, p.compound];
+        p.servicedLap = p.lap;
+    }
+
+    // A race finisher who never ran a second compound (races of 2+ laps, tyre wear on)
+    finishCar(p) {
+        if (this.mode !== 'race' || this.settings.tyreWear === false || (this.settings.maxLaps || 1) < 2 || p.compoundsUsed.length >= 2) return;
+        p.penalty += COMPOUND_PENALTY_S;
+        this.io.emit('chat_msg', { username: 'SYSTEM', color: '#ff0000', msg: `${p.username}: +${COMPOUND_PENALTY_S}s, raced on one tyre compound (total +${p.penalty}s)` });
+    }
+
     // Lap progress for a car in the pit lane: the matching point on the track
     trackPos(p) {
         const t = this.track, pit = t.pit;
@@ -166,7 +219,8 @@ class Game {
                 | (p.drsAvailable && FLAGS.drsAvailable) | (p.finished && FLAGS.finished)
                 | (p.lapValid && FLAGS.lapValid) | ((this.mode === 'quali' || this.settings.collisions === false) && FLAGS.ghost);
             c.push([this.index[id], r1(p.x), r1(p.y), +p.angle.toFixed(4), r1(p.speed), +p.steer.toFixed(3), flags,
-                    r1(p.vx), r1(p.vy), +(p.tow || 0).toFixed(2), p.lastSeq, +(p.wear || 0).toFixed(4)]);
+                    r1(p.vx), r1(p.vy), +(p.tow || 0).toFixed(2), p.lastSeq, +(p.wear || 0).toFixed(4),
+                    p.stop ? STOP_CODE[p.stop.phase] : 0, p.stop ? +p.stop.t.toFixed(1) : 0]);
         }
         return { s: this.seq, t: +this.clock.toFixed(3), g: +this.time.toFixed(3), c };
     }
@@ -385,6 +439,7 @@ class Game {
                 const p = this.players[id];
                 if (p.finished) continue; // finished race cars and parked quali cars stay put
                 this.drive(p);
+                this.updateStop(p);
                 if (this.frozen) this.checkJumpStart(p);
                 else {
                     if (this.mode === 'race' && !p.reacted && p.input.throttle > 0) this.reaction(p);
@@ -630,6 +685,7 @@ class Game {
             if (p.lap >= this.settings.maxLaps) {
                 p.finished = true;
                 p.finishTime = this.time;
+                this.finishCar(p);
                 p.vx = p.vy = p.speed = 0; // parked: a moving velocity would make other clients dead-reckon it forward
                 this.winnerCount++;
                 p.finishOrder = this.winnerCount;

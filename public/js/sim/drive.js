@@ -60,8 +60,31 @@ export function updatePitState(p, t, near, nearPit) {
     }
 }
 
+// A car being guided into its box (Game.updateStop): follow the lane, turn into the box, stop on its mark.
+// Speed follows a signed profile along the box's heading, so a car that overshoots (late on the brakes) reverses back
+const GUIDE_DECEL = 4, GUIDE_STOP_M = 0.1; // m/s², m
+export function guideToBox(p, t) {
+    const b = p.box, sc = t.scale, c = Math.cos(b.angle), s = Math.sin(b.angle);
+    const along = ((p.x - b.x) * c + (p.y - b.y) * s) / sc; // m, < 0 short of the mark
+    const dir = along < 0 ? 1 : -1, d = Math.hypot(b.x - p.x, b.y - p.y);
+    const lead = Math.min(d, 6 * sc) * 0.6; // aim at a point before the box (on the way in), closing in on the mark
+    const ax = b.x - dir * c * lead, ay = b.y - dir * s * lead;
+    let err = Math.atan2(ay - p.y, ax - p.x) - p.angle - (dir < 0 ? Math.PI : 0); err = Math.atan2(Math.sin(err), Math.cos(err));
+    const v = p.speed / sc;
+    const want = dir * Math.min((t.pit.limitKmh || PIT_LIMIT_KMH) / 3.6, Math.sqrt(2 * GUIDE_DECEL * Math.max(0, Math.abs(along) - GUIDE_STOP_M)));
+    // Brake with a car rolling forward stops it (never reverses it); at a standstill on the mark, no input at all
+    const still = Math.abs(v) < 0.05 && want === 0;
+    return { steer: Math.max(-1, Math.min(1, dir * err * 2)), throttle: !still && v < want - 0.3 ? 0.3 : 0, brake: !still && v > want + 0.3 ? 1 : 0, drs: false };
+}
+
 export function driveCar(p, input, t, dt) {
     const scale = t.scale, pit = t.pit;
+    // Pit stop (Game.updateStop): guided into the box, then held still while the tyres change
+    if (p.stop && p.stop.phase !== 'guide') {
+        p.vx = p.vy = p.speed = 0; p.steer = 0;
+        return Physics.nearestOnTrack(p.x, p.y, t, p.roadI);
+    }
+    if (p.stop && p.box) input = guideToBox(p, t);
     const x0 = p.x, y0 = p.y;
     // The pit lane only matters near it: elsewhere a far-away answer without searching it (3 of these a tick)
     const nearPit = (x, y) => (!pit ? null : nearPitBox(pit, x, y) ? Physics.nearestOnPathHint(x, y, pit.path, p.pitI) : FAR_PIT);
