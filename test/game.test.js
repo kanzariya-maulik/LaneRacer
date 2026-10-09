@@ -409,15 +409,48 @@ const pitS = (p) => {
 };
 const pitPoint = (s) => Track.pointAt(monza.pit.path, monza.pit.cum, s, false);
 
-test('pit entry is closed: driving up the pit lane stops before the garages', () => {
+test('pit entry is open: a car drives down the lane past the garages under the limiter', () => {
     const g = new Game(io, [lp('a')], monza, RACE, () => {});
-    const p = g.players.a;
-    place(p, pitPoint(monza.pit.closeS - 30 * monza.scale), 20);
-    p.input = FULL;
-    for (let k = 0; k < 180; k++) {
+    const p = g.players.a, pit = monza.pit;
+    place(p, pitPoint(pit.cum[3]), 20);
+    for (let k = 0; k < 60 * 25 && pitS(p) < pit.garageSpan[1]; k++) {
+        const ah = pitPoint(Math.min(pit.len, pitS(p) + 15 * monza.scale));
+        let d = Math.atan2(ah.y - p.y, ah.x - p.x) - p.angle; d = Math.atan2(Math.sin(d), Math.cos(d));
+        p.input = { throttle: 1, brake: 0, steer: Math.max(-1, Math.min(1, d * 2)) };
         g.drive(p);
-        assert.ok(pitS(p) < monza.pit.closeS, 'car got past the pit entry barrier');
+        if (pitS(p) > pit.limStart + 20 * monza.scale && pitS(p) < pit.limEnd) assert.ok(p.limiter, 'limiter on');
     }
+    assert.ok(pitS(p) >= pit.garageSpan[1], 'got past the garages');
+});
+
+for (const id of Track.TRACK_IDS) {
+    test(`${id}: a car racing past the pit entry on the track keeps its speed and stays out of the pit lane`, () => {
+        const tr = Track.load(id), pit = tr.pit, g = new Game(io, [lp('a')], tr, RACE, () => {});
+        const p = g.players.a, s0 = pit.entryS - 80 * tr.scale, q = Track.pointAt(tr.path, tr.cum, s0);
+        let safe = 80;
+        for (let m = -80; m <= 80; m += 10) safe = Math.min(safe, 0.9 * tr.safeSpeed[Physics.nearestOnTrack(...Object.values(Track.pointAt(tr.path, tr.cum, s0 + (80 + m) * tr.scale)).slice(0, 2), tr).i]);
+        const v = safe * tr.scale;
+        Object.assign(p, { x: q.x, y: q.y, angle: q.angle, vx: Math.cos(q.angle) * v, vy: Math.sin(q.angle) * v, speed: v });
+        for (let n = 0; n < 90; n++) {
+            const near = Physics.nearestOnTrack(p.x, p.y, tr), ah = Track.pointAt(tr.path, tr.cum, tr.cum[near.i] + 20 * tr.scale);
+            let d = Math.atan2(ah.y - p.y, ah.x - p.x) - p.angle; d = Math.atan2(Math.sin(d), Math.cos(d));
+            p.input = { throttle: 1, brake: 0, steer: Math.max(-1, Math.min(1, d * 2)) };
+            g.drive(p);
+            assert.ok(!p.inPit && !p.limiter, 'flagged in the pit lane');
+        }
+        assert.ok(p.speed > 0.8 * v, `${(p.speed / tr.scale * 3.6).toFixed(0)} km/h left`);
+    });
+}
+
+test('pit wall: a car on the track can\'t cut into the pit lane beside the garages', () => {
+    const g = new Game(io, [lp('a')], monza, RACE, () => {});
+    const p = g.players.a, pit = monza.pit, mid = pitPoint((pit.garageSpan[0] + pit.garageSpan[1]) / 2);
+    const n = Physics.nearestOnTrack(mid.x, mid.y, monza), q = Track.pointAt(monza.path, monza.cum, monza.cum[n.i]);
+    const toPit = Math.atan2(mid.y - q.y, mid.x - q.x);
+    place(p, { x: q.x, y: q.y, angle: toPit }, 15);
+    p.input = { throttle: 1, brake: 0, steer: 0 };
+    for (let k = 0; k < 120; k++) g.drive(p);
+    assert.ok(!p.inPit, 'went through the pit wall');
 });
 
 test('garage cars still drive out of the pit lane', () => {
@@ -631,48 +664,6 @@ test('assist choice reaches the car', () => {
     assert.strictEqual(g.players.b.assist, 'off');
 });
 
-for (const id of Track.TRACK_IDS) {
-    test(`${id}: a car on the kerb beside the closed pit entry glances off and keeps at least half its speed`, () => {
-        const tr = Track.load(id), pit = tr.pit;
-        const cl = Track.pointAt(pit.path, pit.cum, pit.closeS, false);
-        const c = Physics.nearestOnTrack(cl.x, cl.y, tr);
-        const k = -pit.trackSide; // from the track toward the pit lane
-        // where a car fits between the road edge and the barrier (not at Monaco: its wall stands right there instead)
-        for (const offM of [0.5, 0.9, 1.2, 1.5].filter((o) => o + 1.1 < tr.wallOffset / tr.scale)) {
-            const s0 = tr.cum[c.i] - 60 * tr.scale;
-            const q = Track.pointAt(tr.path, tr.cum, s0);
-            const off = tr.width / 2 + offM * tr.scale;
-            const g = new Game(io, [lp('a')], tr, RACE, () => {});
-            // Flat out where it's flat out, otherwise 90% of the stretch's corner speed (Spa's pit entry is in a chicane)
-            let safe = 80;
-            for (let m = -60; m <= 40; m += 10) safe = Math.min(safe, 0.9 * tr.safeSpeed[Physics.nearestOnTrack(...Object.values(Track.pointAt(tr.path, tr.cum, tr.cum[c.i] + m * tr.scale)).slice(0, 2), tr).i]);
-            const p = g.players.a, v = safe * tr.scale;
-            Object.assign(p, { x: q.x - Math.sin(q.angle) * k * off, y: q.y + Math.cos(q.angle) * k * off, angle: q.angle,
-                vx: Math.cos(q.angle) * v, vy: Math.sin(q.angle) * v, speed: v, input: { throttle: 1, brake: 0, steer: 0 } });
-            // Hold the line `offM` past the edge: steer at a point 20 m ahead at the same offset
-            for (let n = 0; n < 90; n++) {
-                const near = Physics.nearestOnTrack(p.x, p.y, tr);
-                const ah = Track.pointAt(tr.path, tr.cum, tr.cum[near.i] + 20 * tr.scale);
-                const tx = ah.x - Math.sin(ah.angle) * k * off, ty = ah.y + Math.cos(ah.angle) * k * off;
-                let d = Math.atan2(ty - p.y, tx - p.x) - p.angle;
-                d = Math.atan2(Math.sin(d), Math.cos(d));
-                p.input = { throttle: 1, brake: 0, steer: Math.max(-1, Math.min(1, d * 2)) };
-                g.drive(p);
-            }
-            assert.ok(p.speed > 0.5 * v, `${offM} m past the line: ${(p.speed / tr.scale * 3.6).toFixed(0)} km/h left`);
-        }
-    });
-}
-
-test('the closed pit entry is not pit lane: no limiter, no exemption', () => {
-    const g = new Game(io, [lp('a')], monza, RACE, () => {});
-    const p = g.players.a, pit = monza.pit;
-    const q = Track.pointAt(pit.path, pit.cum, pit.closeS - 20 * monza.scale, false);
-    p.x = q.x; p.y = q.y;
-    g.updatePit(p);
-    assert.ok(!p.inPit && !p.limiter);
-});
-
 test('a sector from a lap deleted later is never a best', () => {
     const { events, io: sio } = spy();
     const g = new Game(sio, [lp('a')], monza, QUALI, () => {}, 'quali');
@@ -734,21 +725,6 @@ test('race: track limits warn or penalise but never delete the lap', () => {
     excursion(g, p);
     assert.strictEqual(p.limits, 1);
     assert.strictEqual(p.lapValid, true);
-});
-
-test('walls stop the car body, not just its centre: nothing pokes through the pit entry barrier', () => {
-    const g = new Game(io, [lp('a')], monza, RACE, () => {});
-    const p = g.players.a, [a, b] = monza.pit.closeWall;
-    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
-    const ex = b.x - a.x, ey = b.y - a.y, len = Math.hypot(ex, ey);
-    const nx = -ey / len, ny = ex / len;           // one side of the barrier
-    const angle = Math.atan2(-ny, -nx);             // facing the barrier head-on
-    const start = 12 * monza.scale;
-    place(p, { x: mx + nx * start, y: my + ny * start, angle }, 15);
-    p.input = FULL;
-    for (let k = 0; k < 120; k++) g.drive(p);
-    const d = (p.x - mx) * nx + (p.y - my) * ny;   // centre's distance in front of the barrier
-    assert.ok(d >= Physics.CAR_HALF_LENGTH_M * monza.scale - 1, `nose ${((Physics.CAR_HALF_LENGTH_M * monza.scale - d) / monza.scale).toFixed(2)} m through the barrier`);
 });
 
 test('jump start: moving before lights out costs 10 s, once', () => {

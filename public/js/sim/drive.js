@@ -28,6 +28,8 @@ function nearPitBox(pit, x, y) {
 
 // Distance along the pit lane of a nearestOnPath result
 export const pitAlong = (pit, n) => pit.cum[n.i] + n.t * (pit.cum[n.i + 1] - pit.cum[n.i]);
+// Half the lane's width at a nearestOnPath result (0 at the mouths: the lane tapers into the road edge)
+export const pitHalf = (pit, n) => (pit.widthAt[n.i] + (pit.widthAt[Math.min(n.i + 1, pit.widthAt.length - 1)] - pit.widthAt[n.i]) * n.t) / 2;
 
 // Barrier response: n points from the barrier back toward the car
 export function bounce(p, nx, ny) {
@@ -46,7 +48,7 @@ export function bounce(p, nx, ny) {
 export function updatePitState(p, t, near, nearPit) {
     const pit = t.pit;
     p.pitS = pitAlong(pit, nearPit);
-    p.inPit = nearPit.dist <= pit.width / 2 && near.dist > t.width / 2 && p.pitS >= pit.closeS; // closed entry isn't pit lane
+    p.inPit = nearPit.dist <= pitHalf(pit, nearPit) && near.dist > t.width / 2;
     p.limiter = p.inPit && p.pitS >= pit.limStart && p.pitS <= pit.limEnd;
     if (p.limiter) {
         const max = ((pit.limitKmh || PIT_LIMIT_KMH) / 3.6) * t.scale, v = Math.hypot(p.vx, p.vy);
@@ -62,9 +64,9 @@ export function driveCar(p, input, t, dt) {
     const scale = t.scale, pit = t.pit;
     const x0 = p.x, y0 = p.y;
     // The pit lane only matters near it: elsewhere a far-away answer without searching it (3 of these a tick)
-    const nearPit = (x, y) => (!pit ? null : nearPitBox(pit, x, y) ? Physics.nearestOnPath(x, y, pit.path, false) : FAR_PIT);
+    const nearPit = (x, y) => (!pit ? null : nearPitBox(pit, x, y) ? Physics.nearestOnPathHint(x, y, pit.path, p.pitI) : FAR_PIT);
     const before = Physics.nearestOnTrack(p.x, p.y, t, p.roadI), beforePit = nearPit(p.x, p.y);
-    const grass = before.dist > t.width / 2 + KERB_M * scale && !(beforePit && beforePit.dist <= pit.width / 2 && pitAlong(pit, beforePit) >= pit.closeS);
+    const grass = before.dist > t.width / 2 + KERB_M * scale && !(beforePit && beforePit.dist <= pitHalf(pit, beforePit));
     // The road this car is on (followed from last tick, so it keeps its level at a bridge), and how that road climbs
     const road = slopeAt(t, p.x, p.y, p.angle, p.roadI); // hills: gravity, crests and compressions (flat without track z)
     p.grade = road.grade; p.vcurv = road.vcurv;
@@ -80,16 +82,12 @@ export function driveCar(p, input, t, dt) {
     }
 
     // Pit wall: a move across it is undone
-    const hit = pit && (Physics.crossWall(x0, y0, p.x, p.y, pit.wall) || Physics.crossWall(x0, y0, p.x, p.y, pit.closeWall));
+    const hit = pit && Physics.crossWall(x0, y0, p.x, p.y, pit.wall);
     if (hit) {
         p.x = x0 + hit.nx * 0.5;
         p.y = y0 + hit.ny * 0.5;
         bounce(p, hit.nx, hit.ny);
     }
-    // …and the pit entry barrier stops the whole car body, not just its centre
-    // ponytail: the pit wall stays centre-only — on the widened tracks it stands at least 1 m past the white line
-    const o = pit && Physics.wallOverlap(p, pit.closeWall, scale);
-    if (o) { p.x += o.nx * o.depth; p.y += o.ny * o.depth; bounce(p, o.nx, o.ny); }
 
     // Bridges (Suzuka): parapets on the deck and the walls of the underpass, each only for cars on its own level
     if (t.bridges && t.bridges.length) {
@@ -114,19 +112,18 @@ export function driveCar(p, input, t, dt) {
 
     // Barrier: outside both the track's run-off and the pit lane's
     const wallDist = t.width / 2 + (t.wallOffset ?? WALL_OFFSET);
-    const pitDist = pit && pit.width / 2 + PIT_RUNOFF_M * scale;
+    const pitDist = (n) => pitHalf(pit, n) + PIT_RUNOFF_M * scale;
     const after = Physics.nearestOnTrack(p.x, p.y, t, p.roadI), afterPit = nearPit(p.x, p.y);
-    // The pit lane upstream of the closure barrier is off-limits (no pit stops)
-    const afterS = afterPit && pitAlong(pit, afterPit);
+    if (afterPit && afterPit !== FAR_PIT) p.pitI = afterPit.i;
     // No barrier where the track opens between two nearby legs (Track.js openWalls: the infield of a hairpin)
     const open = (n) => {
         if (!t.openWall) return false;
         const a = t.path[n.i], b = t.path[(n.i + 1) % t.path.length];
         return !!t.openWall[-(b.y - a.y) * (p.x - n.px) + (b.x - a.x) * (p.y - n.py) > 0 ? 0 : 1][n.i];
     };
-    const overTrack = open(after) ? -Infinity : after.dist - wallDist, overPit = afterPit && afterS >= pit.closeS ? afterPit.dist - pitDist : Infinity;
+    const overTrack = open(after) ? -Infinity : after.dist - wallDist, overPit = afterPit ? afterPit.dist - pitDist(afterPit) : Infinity;
     if (overTrack > 0 && overPit > 0) {
-        const [near, lim] = overPit < overTrack ? [afterPit, pitDist] : [after, wallDist];
+        const [near, lim] = overPit < overTrack ? [afterPit, pitDist(afterPit)] : [after, wallDist];
         const nx = (p.x - near.px) / near.dist, ny = (p.y - near.py) / near.dist;
         p.x = near.px + nx * (lim - 1);
         p.y = near.py + ny * (lim - 1);
@@ -136,8 +133,8 @@ export function driveCar(p, input, t, dt) {
     const edge = Physics.nearestOnTrack(p.x, p.y, t, p.roadI), edgePit = nearPit(p.x, p.y);
     const reach = (n) => n.dist > 1e-9 ? Physics.carReach(p, (p.x - n.px) / n.dist, (p.y - n.py) / n.dist, scale) : 0;
     const inTrack = edge.dist + reach(edge) <= wallDist || open(edge);
-    const inPitLane = edgePit && pitAlong(pit, edgePit) >= pit.closeS && edgePit.dist + reach(edgePit) <= pitDist;
-    if (!inTrack && !inPitLane && edge.dist <= wallDist && !(edgePit && edgePit.dist <= pitDist && pitAlong(pit, edgePit) >= pit.closeS)) {
+    const inPitLane = edgePit && edgePit.dist + reach(edgePit) <= pitDist(edgePit);
+    if (!inTrack && !inPitLane && edge.dist <= wallDist && !(edgePit && edgePit.dist <= pitDist(edgePit))) {
         const nx = (p.x - edge.px) / edge.dist, ny = (p.y - edge.py) / edge.dist;
         const lim = wallDist - reach(edge);
         p.x = edge.px + nx * lim; p.y = edge.py + ny * lim;

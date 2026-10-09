@@ -5,8 +5,6 @@ const { DOWN, MAX_SAFE, AIM, BRAKE_MARGIN } = require('./Assist');
 
 const PASSES = 2000;     // smoothing passes (prototype: ~50 ms per track; more passes don't make laps faster)
 const MARGIN_M = 1.5;    // keep this far inside the track edge
-const PIT_MARGIN_M = 3;  // ...and this far on the pit side before the closed pit entry
-const PIT_RAMP_M = 60;   // matches Track.js CLOSE_RAMP_M
 
 // Unit normals, same convention as offsetPoints in game3d.js: (x − ty·o, y + tx·o)
 function normals(P) {
@@ -88,32 +86,9 @@ function holdToAssist(v, { cum, safe }, scale) {
     }
 }
 
-// Track points in the 60 m before the closed pit entry, and which offset sign faces the pit lane
-function pitWindow(t) {
-    const P = t.path, n = P.length, pit = t.pit, total = t.cum[n];
-    let pk = 0;
-    for (let k = 0; k < pit.path.length; k++) if (pit.cum[k] <= pit.closeS) pk = k;
-    const q = pit.path[pk];
-    let c = 0, best = Infinity;
-    P.forEach((p, i) => { const d = (p.x - q.x) ** 2 + (p.y - q.y) ** 2; if (d < best) { best = d; c = i; } });
-    const N = normals(P)[c];
-    const side = Math.sign((q.x - P[c].x) * N.x + (q.y - P[c].y) * N.y) || 1;
-    const idx = [];
-    for (let k = -1; k < n; k++) {
-        const i = (c - k + n) % n;
-        if (((t.cum[c] - t.cum[i] + total) % total) / t.scale > PIT_RAMP_M) break;
-        idx.push(i);
-    }
-    return { side, idx };
-}
-
 function compute(t) {
     const P = t.path, n = P.length, N = normals(P), m = MARGIN_M * t.scale; // inside the real white lines (+ = driver's right)
     const lo = t.edgeL.map((e) => -(e - m)), hi = t.edgeR.map((e) => e - m);
-    if (t.pit) {
-        const { side, idx } = pitWindow(t), pm = PIT_MARGIN_M * t.scale;
-        for (const i of idx) { if (side > 0) hi[i] = Math.min(hi[i], t.edgeR[i] - pm); else lo[i] = Math.max(lo[i], -(t.edgeL[i] - pm)); }
-    }
     // Minimum curvature: pull each point toward the 4th-order smooth of its neighbours, along its normal
     const o = new Array(n).fill(0);
     for (let pass = 0; pass < PASSES; pass++) {
@@ -130,4 +105,4 @@ function compute(t) {
     return { offset, speed: prof.speed.map((v) => Math.floor(v * 10) / 10), phase: prof.phase };
 }
 
-module.exports = { compute, profile, linePoints, curvatures, latMax, pitWindow };
+module.exports = { compute, profile, linePoints, curvatures, latMax };

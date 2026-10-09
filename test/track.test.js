@@ -52,12 +52,42 @@ for (const id of Track.TRACK_IDS) {
         }
     });
 
-    test(`${id}: pit entry closed just before the first garage`, () => {
-        const { closeS, closeWall, garageSpan, wall, path: pp, cum } = t.pit;
-        assert.ok(closeS < garageSpan[0], 'closure must be before the garages');
-        const n = Physics.nearestOnPath(wall[0].x, wall[0].y, pp, false);
-        assert.ok(Math.abs(closeS - (cum[n.i] + n.t * (cum[n.i + 1] - cum[n.i]))) < 1 * t.scale, 'closure must start at the pit wall');
-        assert.strictEqual(closeWall.length, 2);
+    test(`${id}: pit lane only meets the road at its two mouths, at full width with room for the wall`, () => {
+        const pit = t.pit, half = t.width / 2;
+        pit.path.forEach((q, i) => {
+            const d = Physics.nearestOnTrack(q.x, q.y, t).dist;
+            assert.ok(d - pit.widthAt[i] / 2 >= half - 0.01 * t.scale, `lane asphalt on the road at ${(pit.cum[i] / t.scale).toFixed(0)} m`);
+            if (pit.widthAt[i] >= pit.width - 1e-6) assert.ok(d - pit.width / 2 >= half + 1 * t.scale - 1e-6, `no room for the pit wall at ${(pit.cum[i] / t.scale).toFixed(0)} m`);
+        });
+        const full = (i) => pit.widthAt[i] >= pit.width - 1e-6;
+        const first = pit.widthAt.findIndex((_, i) => full(i)), last = pit.widthAt.length - 1 - [...pit.widthAt].reverse().findIndex((_, i) => full(pit.widthAt.length - 1 - i));
+        assert.ok(pit.cum[first] <= 60 * t.scale && pit.len - pit.cum[last] <= 60 * t.scale, 'full width within 60 m of each mouth');
+        assert.strictEqual(pit.widthAt[0], 0); assert.strictEqual(pit.widthAt.at(-1), 0);
+        assert.ok(!('closeWall' in pit) && !('closeS' in pit));
+    });
+
+    test(`${id}: pit lane is smooth (radius ≥ 30 m on the connectors) and never crosses itself`, () => {
+        const P = t.pit.path, n = P.length;
+        for (let i = 2; i < n - 2; i++) {
+            const a = P[i - 2], b = P[i], c = P[i + 2];
+            const ab = Math.hypot(b.x - a.x, b.y - a.y), bc = Math.hypot(c.x - b.x, c.y - b.y), ca = Math.hypot(a.x - c.x, a.y - c.y);
+            const cr = Math.abs((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x));
+            if (cr && t.pit.widthAt[i] < t.pit.width - 1e-6) assert.ok((ab * bc * ca) / (2 * cr) >= 30 * t.scale - 1e-6, `tight connector at ${i}`);
+        }
+        for (let i = 0; i + 1 < n; i++) for (let j = i + 2; j + 1 < n; j++) {
+            const p = P[i], q = P[i + 1], r = P[j], s = P[j + 1];
+            const d = (q.x - p.x) * (s.y - r.y) - (q.y - p.y) * (s.x - r.x);
+            if (!d) continue;
+            const u = ((r.x - p.x) * (s.y - r.y) - (r.y - p.y) * (s.x - r.x)) / d, v = ((r.x - p.x) * (q.y - p.y) - (r.y - p.y) * (q.x - p.x)) / d;
+            assert.ok(!(u > 0 && u < 1 && v > 0 && v < 1), `lane crosses itself at ${i}/${j}`);
+        }
+    });
+
+    test(`${id}: pit wall runs the whole full-width lane on the track side`, () => {
+        const pit = t.pit, sOf = (w) => { const k = Physics.nearestOnPath(w.x, w.y, pit.path, false); return pit.cum[k.i] + k.t * (pit.cum[k.i + 1] - pit.cum[k.i]); };
+        const full = pit.widthAt.map((w) => w >= pit.width - 1e-6), first = full.indexOf(true), last = full.lastIndexOf(true);
+        assert.ok(sOf(pit.wall[0]) <= pit.cum[first] + 5 * t.scale && sOf(pit.wall.at(-1)) >= pit.cum[last] - 5 * t.scale);
+        for (const w of pit.wall) assert.ok(Physics.nearestOnTrack(w.x, w.y, t).dist >= t.width / 2, 'wall on the road');
     });
 
     test(`${id}: safe corner speeds`, () => {
@@ -117,14 +147,6 @@ for (const id of Track.TRACK_IDS) {
                 assert.ok(s > pit.limStart && s < pit.limEnd, `${g.teamId} box outside the limiter zone`);
             }
         }
-    });
-
-    test(`${id}: pit wall clears the track edge and runs past the garages`, () => {
-        const { wall, path: pp, cum, garageSpan } = t.pit;
-        assert.ok(wall.length > 20, `wall only ${wall.length} points`);
-        for (const w of wall) assert.ok(Physics.nearestOnTrack(w.x, w.y, t).dist >= t.width / 2, 'wall on the track');
-        const sOf = (w) => { const n = Physics.nearestOnPath(w.x, w.y, pp, false); return cum[n.i] + n.t * (cum[n.i + 1] - cum[n.i]); };
-        assert.ok(sOf(wall[0]) < garageSpan[0] && sOf(wall.at(-1)) > garageSpan[1], 'wall gap beside the garages');
     });
 
     test(`${id}: 22 grid slots on the asphalt and not overlapping`, () => {
@@ -219,15 +241,6 @@ test('a track without a pit lane still builds', () => {
     assert.strictEqual(t.startPositions.length, 22);
     assert.deepStrictEqual(t.sectorCps.length, 3);
 });
-
-for (const id of Track.TRACK_IDS) {
-    test(`${id}: pit entry barrier reaches past the track run-off`, () => {
-        const t = tracks[id], out = t.pit.closeWall[0], near = Physics.nearestOnTrack(out.x, out.y, t);
-        // past the run-off barrier, or (Monaco: the pit lane leaves inside the Rascasse hairpin) against the road, closer than a
-        // car is wide
-        assert.ok(near.dist >= t.width / 2 + t.wallOffset || near.dist - t.width / 2 < 2 * t.scale, 'gap around the barrier end'); // past this track's barrier
-    });
-}
 
 const DRS_COUNT = { monza: 2, spa: 2, silverstone: 2, suzuka: 1, sakhir: 3, interlagos: 2, cota: 2, zandvoort: 2, spielberg: 3, montreal: 3, hungaroring: 2, monaco: 1, imola: 1, buddh: 2 };
 for (const id of Track.TRACK_IDS) {

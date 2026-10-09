@@ -111,7 +111,7 @@ for (const id of Track.TRACK_IDS) {
     test(`${id}: the pit lane is clear: no verge grass across it, the ground under it`, () => {
         const t = tracks[id], pit = t.pit, { at, vr } = ground(), over = [], verge = [], Z = E.pathHeights(t, pit.path);
         for (let i = 1; i < pit.path.length - 2; i++) {
-            if (pit.cum[i] < pit.closeS) continue;
+            if (pit.widthAt[i] < pit.width) continue; // the tapered mouths join the road
             const p = pit.path[i], q = pit.path[i + 1], ang = Math.atan2(q.y - p.y, q.x - p.x), surf = Z[i];
             for (const l of [-0.9, 0, 0.9]) {
                 const o = (l * pit.width) / 2, x = p.x - Math.sin(ang) * o, y = p.y + Math.cos(ang) * o;

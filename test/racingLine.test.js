@@ -44,16 +44,6 @@ for (const id of ['monza', 'spa']) {
     });
 }
 
-test('pit side keeps clear of the closed pit entry', () => {
-    for (const id of Track.TRACK_IDS) {
-        const t = tracks[id];
-        if (!t.pit) continue;
-        const { side, idx } = RL.pitWindow(t);
-        const lim = (i) => (side > 0 ? t.edgeR[i] : t.edgeL[i]) - 3 * t.scale + 0.06;
-        for (const i of idx) assert.ok(side * t.racingLine.offset[i] <= lim(i), `${id} point ${i} too close to the pit entry`);
-    }
-});
-
 test('a track without pit data still gets a line', () => {
     const t = { ...tracks.monza, pit: null };
     const rl = RL.compute(t);

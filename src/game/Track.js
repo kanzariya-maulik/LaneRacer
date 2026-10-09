@@ -18,9 +18,12 @@ const WALL_OFFSET = 80; // matches public/js/sim/drive.js
 const GARAGE_ORDER = ['redbull', 'ferrari', 'mercedes', 'alpine', 'mclaren', 'alfaromeo', 'astonmartin', 'haas', 'alphatauri', 'williams', 'redbull-suzuka'];
 const GARAGE_PITCH_M = 18;
 const BOX_GAP_M = 9;
-const CLOSE_RAMP_M = 60;  // the barrier angles back this far, so a car meeting it glances off onto the track
-const PIT_RUNOFF_M = 2;   // matches public/js/sim/drive.js
-const WALL_CLEAR_M = 0.5; // pit wall only where it stays this far off the track edge
+const PIT_CLEAR_M = 1;          // the lane's edge this far off the drawn road wherever it is full width (room for the pit wall)
+const CONNECTOR_R_M = 30;       // entry / exit curves no tighter than this
+const TAPER_MAX_M = 60;         // a mouth reaches full lane width within this
+const MOUTH_STEP_M = 5, MOUTH_MAX_M = 300; // mouths tried further from the garages until a connector fits
+const PIT_STEP_M = 4;           // spacing of the rebuilt lane's points
+const PIT_SNAP_M = 0.5;         // lane points this little short of the wall room are moved out to it (see buildPit)
 
 // cum[i] = distance along the loop to path[i]; cum[n] = full lap length
 function cumulative(pts) {
@@ -79,64 +82,127 @@ function edgeAt(t, near, x, y) {
 // Offset sideways along L = (-sin a, cos a)
 const lateral = (p, off) => ({ x: p.x - Math.sin(p.angle) * off, y: p.y + Math.cos(p.angle) * off, angle: p.angle });
 
+// Cubic Bézier a→d with handles b, c, sampled every `step` world units (by arc length, approximately)
+function bezier(a, b, c, d, step) {
+    const at = (u) => { const v = 1 - u; return { x: v * v * v * a.x + 3 * v * v * u * b.x + 3 * v * u * u * c.x + u * u * u * d.x, y: v * v * v * a.y + 3 * v * v * u * b.y + 3 * v * u * u * c.y + u * u * u * d.y }; };
+    const fine = Array.from({ length: 201 }, (_, k) => at(k / 200)), out = [fine[0]];
+    let acc = 0;
+    for (let k = 1; k < fine.length; k++) {
+        acc += Math.hypot(fine[k].x - fine[k - 1].x, fine[k].y - fine[k - 1].y);
+        if (acc >= step) { out.push(fine[k]); acc = 0; }
+    }
+    if (out.at(-1) !== fine.at(-1)) out.push(fine.at(-1));
+    return out;
+}
+// Smallest circumradius over every point and its neighbours two away
+function minRadius(P) {
+    let r = Infinity;
+    for (let i = 2; i + 2 < P.length; i++) {
+        const a = P[i - 2], b = P[i], c = P[i + 2];
+        const ab = Math.hypot(b.x - a.x, b.y - a.y), bc = Math.hypot(c.x - b.x, c.y - b.y), ca = Math.hypot(a.x - c.x, a.y - c.y);
+        const cr = Math.abs((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x));
+        if (cr) r = Math.min(r, (ab * bc * ca) / (2 * cr));
+    }
+    return r;
+}
+
 function buildPit(raw, circuit, track) {
-    const { scale, width } = raw;
-    const pts = raw.pit.path, half = raw.pit.width / 2;
-    const cum = cumulative(pts), len = cum[pts.length - 1];
+    const { scale, width } = raw, full = raw.pit.width, roadHalf = width / 2, room = full / 2 + PIT_CLEAR_M * scale;
     const total = track.cum[track.path.length];
     const trackS = (p) => along(track.cum, Physics.nearestOnPath(p.x, p.y, track.path));
-    const entryS = trackS(pts[0]), exitS = trackS(pts.at(-1));
-    const span = (((exitS - entryS) % total) + total) % total;
+    const clear = (p) => Physics.nearestOnTrack(p.x, p.y, track).dist - roadHalf; // from the drawn road edge
+    // scripts/import-pits.js put the lanes exactly the wall room off the road as it smoothed it; this road (fair()) leaves
+    // stretches a few cm (Monaco: 43 cm) short. Those points move out to the wall room, square to the road; real dips
+    // (Zandvoort's lane passing another leg, Buddh's the last apex) stay where they are and break the garage lane
+    const lane = raw.pit.path.map((p) => {
+        const n = Physics.nearestOnTrack(p.x, p.y, track), c = n.dist - roadHalf;
+        if (c >= room || c < room - PIT_SNAP_M * scale) return p;
+        const k = (room - c) / n.dist;
+        return { x: p.x + (p.x - n.px) * k, y: p.y + (p.y - n.py) * k };
+    });
+    const rawCum = cumulative(lane);
+    const dirAt = (P, i) => { const a = P[Math.max(0, i - 1)], b = P[Math.min(P.length - 1, i + 1)], l = Math.hypot(b.x - a.x, b.y - a.y) || 1; return { x: (b.x - a.x) / l, y: (b.y - a.y) / l }; };
+
+    // The garage lane: the longest run of the surveyed lane at full width with room for the wall
+    const ok = lane.map((p) => clear(p) >= room - 1e-9);
+    let a = 0, b = -1;
+    for (let i = 0, from = 0; i < lane.length; i++) {
+        if (!ok[i]) { from = i + 1; continue; }
+        if (i - from > b - a) { a = from; b = i; }
+    }
+    if (b <= a) throw new Error(`${raw.id}: no stretch of pit lane clear of the road`);
+    const mid = lane[(a + b) >> 1], mn = Physics.nearestOnPath(mid.x, mid.y, track.path), mp = pointAt(track.path, track.cum, along(track.cum, mn));
+    const laneSide = Math.sign(-Math.sin(mp.angle) * (mid.x - mp.x) + Math.cos(mp.angle) * (mid.y - mp.y)) || 1; // lateral() sign of the lane
+
+    // A connector from the road edge at lap distance s (tangent to the road) to lane point k (tangent to the lane)
+    const connector = (s, k, entry, step = PIT_STEP_M * scale) => {
+        const e = lateral(pointAt(track.path, track.cum, s), laneSide * roadHalf), ed = { x: Math.cos(e.angle), y: Math.sin(e.angle) };
+        const q = lane[k], qd = dirAt(lane, k), h = 0.4 * Math.hypot(q.x - e.x, q.y - e.y);
+        return entry ? bezier(e, { x: e.x + ed.x * h, y: e.y + ed.y * h }, { x: q.x - qd.x * h, y: q.y - qd.y * h }, q, step)
+            : bezier(q, { x: q.x + qd.x * h, y: q.y + qd.y * h }, { x: e.x - ed.x * h, y: e.y - ed.y * h }, e, step);
+    };
+    // Fits: never on the road, full width within TAPER_MAX_M of the mouth
+    const fits = (C, entry) => {
+        let dist = 0, opened = false;
+        const seq = entry ? C : [...C].reverse();
+        for (let i = 0; i < seq.length; i++) {
+            if (i) dist += Math.hypot(seq[i].x - seq[i - 1].x, seq[i].y - seq[i - 1].y);
+            const c = clear(seq[i]);
+            if (c < -0.01 * scale) return false;
+            if (c >= room - 1e-9) opened = true;
+            else if (opened) return false;              // once open it stays open
+            if (!opened && dist > TAPER_MAX_M * scale) return false;
+        }
+        return opened;
+    };
+    // From beside the garage lane's end, away from the garages: the surveyed lanes run 50-100 m alongside the road before
+    // they clear it, too far for a TAPER_MAX_M taper from their real branch-off. Where none fits there, the connector joins
+    // the lane further in (Monaco's and Montreal's lanes leave the road at a hairpin / chicane, too sharply to meet sooner)
+    const mouth = (k0, entry) => {
+        const max = circuit.pitMouthMaxM ?? MOUTH_MAX_M;
+        for (let k = k0; entry ? k < b : k > a; k += entry ? 1 : -1) {
+            const s0 = trackS(lane[k]);
+            for (let m = 0; m <= max; m += MOUTH_STEP_M) {
+                const s = (((s0 + (entry ? -m : m) * scale) % total) + total) % total, C = connector(s, k, entry);
+                // smooth enough: judged on every Bézier sample (step 0), so a short connector's kink can't hide between 4 m points
+                if (minRadius(connector(s, k, entry, 0)) >= CONNECTOR_R_M * scale && fits(C, entry)) return { s, C, m, k };
+            }
+        }
+        throw new Error(`${raw.id}: no pit ${entry ? 'entry' : 'exit'} connector fits`);
+    };
+    const en = mouth(a, true), ex = mouth(b, false);
+    const pts = [...en.C, ...lane.slice(en.k + 1, ex.k), ...ex.C].map(({ x, y }) => ({ x, y }));
+    const cum = cumulative(pts), len = cum[pts.length - 1];
+    // Full width where the wall fits beside it, narrowing in step with the gap to the road edge toward each mouth
+    const widthAt = pts.map((p) => { const c = clear(p); return c >= room - 1e-9 ? full : Math.max(0, (full * c) / room); });
+    widthAt[0] = 0; widthAt[pts.length - 1] = 0;
+    const entryS = en.s, exitS = ex.s, span = (((exitS - entryS) % total) + total) % total;
+    const onPit = (rawM) => { const p = pointAt(lane, rawCum, rawM * scale, false); return along(cum, Physics.nearestOnPath(p.x, p.y, pts, false)); };
 
     const startOnPit = along(cum, Physics.nearestOnPath(track.start.x, track.start.y, pts, false));
     const sp = pointAt(pts, cum, startOnPit, false);
     const trackSide = Math.sign(-Math.sin(sp.angle) * (track.start.x - sp.x) + Math.cos(sp.angle) * (track.start.y - sp.y)) || 1;
-    const limStart = (circuit.limiterStartM ?? 0) * scale;
-    const limEnd = Math.min(len, (circuit.limiterEndM ?? Infinity) * scale);
 
-    // Pit wall: longest run of the track-side edge that clears the track, inside the limiter zone
-    let run = [], wall = [], runFrom = 0, wallFrom = 0;
-    for (let i = 0; i < pts.length; i++) {
-        const w = lateral(pointAt(pts, cum, cum[i], false), trackSide * half);
-        const ok = cum[i] >= limStart && cum[i] <= limEnd
-            && Physics.nearestOnTrack(w.x, w.y, track).dist >= width / 2 + WALL_CLEAR_M * scale;
-        if (ok) { if (!run.length) runFrom = i; run.push({ x: w.x, y: w.y }); } else run = [];
-        if (run.length > wall.length) { wall = run; wallFrom = runFrom; }
-    }
+    // Pit wall: the track-side edge of the full-width lane, one polyline
+    const isFull = (i) => widthAt[i] >= full - 1e-6;
+    const w0 = widthAt.findIndex((_, i) => isFull(i)), w1 = widthAt.length - 1 - [...widthAt].reverse().findIndex((_, i) => isFull(widthAt.length - 1 - i));
+    const wall = [];
+    for (let i = w0; i <= w1; i++) { const w = lateral(pointAt(pts, cum, cum[i], false), trackSide * full / 2); wall.push({ x: w.x, y: w.y }); }
 
-    // Garages centred on the start line (slid along if needed to stay beside the pit wall), garage 1 nearest the
-    // pit exit, or the pit entry where circuits.json says garagesFrom: "entry"; boxes in the lane on the garage side
-    const dir = circuit.garagesFrom === 'entry' ? -1 : 1;
-    const pitch = GARAGE_PITCH_M * scale, reach = 5.5 * pitch;
-    const wallLo = cum[wallFrom], wallHi = cum[wallFrom + Math.max(0, wall.length - 1)];
-    // Limiter only where the pit wall keeps track cars out of the pit lane
-    const limLo = Math.max(limStart, wallLo), limHi = Math.min(limEnd, wallHi);
-    const margin = reach + 5 * scale;
-    const centre = Math.max(wallLo + margin, Math.min(startOnPit, wallHi - margin));
+    // Limiter: circuits.json metres along the surveyed lane, onto the rebuilt one, inside the walled stretch
+    const limStart = Math.max(cum[w0], onPit(circuit.limiterStartM ?? 0));
+    const limEnd = Math.min(cum[w1], circuit.limiterEndM != null ? onPit(circuit.limiterEndM) : cum[w1]);
+
+    // Garages centred on the start line (slid to stay inside the limiter zone), garage 1 nearest the exit unless garagesFrom: "entry"
+    const dir = circuit.garagesFrom === 'entry' ? -1 : 1, pitch = GARAGE_PITCH_M * scale, reach = 5.5 * pitch, margin = reach + 5 * scale;
+    const centre = Math.max(limStart + margin, Math.min(startOnPit, limEnd - margin)); // limiter zone: inside the wall
     const garages = GARAGE_ORDER.map((teamId, k) => {
-        const s = centre + dir * (5 - k) * pitch;
-        const c = pointAt(pts, cum, s, false);
-        const boxes = [-1, 1].map((d) => lateral(pointAt(pts, cum, s + (d * BOX_GAP_M * scale) / 2, false), (-trackSide * half) / 2));
+        const s = centre + dir * (5 - k) * pitch, c = pointAt(pts, cum, s, false);
+        const boxes = [-1, 1].map((d) => { const bs = s + (d * BOX_GAP_M * scale) / 2; return { ...lateral(pointAt(pts, cum, bs, false), (-trackSide * full / 2) / 2), s: bs }; });
         return { teamId, s, x: c.x, y: c.y, angle: c.angle, boxes };
     });
-    const garageSpan = [centre - reach, centre + reach];
-
-    // Pit entry closed (no pit stops): angled barrier from the start of the pit wall, so no gap or wedge beside it
-    const closeS = wallLo;
-    const inner = lateral(pointAt(pts, cum, closeS, false), trackSide * half);
-    const up = pointAt(pts, cum, closeS - CLOSE_RAMP_M * scale, false);
-    let outerOff = half + PIT_RUNOFF_M * scale;
-    // Outer end reaches past the track's run-off barrier, so there is no way round it (stepped out until it does: the
-    // track isn't square to the barrier there); stops at another part of the road rather than crossing it
-    for (let k = 0; k < 20; k++) {
-        const o = lateral(up, -trackSide * outerOff), d = Physics.nearestOnTrack(o.x, o.y, track).dist;
-        const short = width / 2 + track.wallOffset - d;
-        if (short <= 0 || (k > 0 && d - width / 2 < 2 * scale)) break; // the first step as before; further ones not across a road
-        outerOff += short + scale;
-    }
-    const closeWall = [lateral(up, -trackSide * outerOff), inner].map(({ x, y }) => ({ x, y }));
-
-    return { path: pts, width: raw.pit.width, cum, len, entryS, exitS, span, startOnPit, trackSide, limStart: limLo, limEnd: limHi, wall, garages, garageSpan, closeS, closeWall, fitM: raw.pit.fitM, limitKmh: circuit.pitLimitKmh || null };
+    return { path: pts, width: full, widthAt, cum, len, entryS, exitS, span, startOnPit, trackSide, limStart, limEnd, wall, garages,
+        garageSpan: [centre - reach, centre + reach], fitM: raw.pit.fitM, limitKmh: circuit.pitLimitKmh || null };
 }
 
 // Where the track crosses itself at two heights (Suzuka's figure-8): a bridge. The upper road runs over a deck between

@@ -108,3 +108,11 @@ test('nose-to-tail: cars touch where the wings touch, not before', async () => {
     const back = [{ x: (e.rear - 0.05) * S, y: -50 }, { x: (e.rear - 0.05) * S, y: 50 }];
     assert.strictEqual(Physics.wallOverlap(a, back, S), null, 'nothing sticks out behind the rear wing');
 });
+
+test('nearestOnPathHint matches the full search, near the hint and from a stale one', () => {
+    const P = Array.from({ length: 60 }, (_, i) => ({ x: i * 10, y: Math.sin(i / 5) * 30 }));
+    for (const [x, y, hint] of [[123, 4, 12], [123, 4, 50], [590, -20, 3], [-5, 0, 30], [300, 80, 29]]) {
+        const a = Physics.nearestOnPathHint(x, y, P, hint), b = Physics.nearestOnPath(x, y, P, false);
+        assert.deepStrictEqual([a.i, a.t, a.dist], [b.i, b.t, b.dist]);
+    }
+});

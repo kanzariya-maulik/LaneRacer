@@ -73,6 +73,21 @@ class Physics {
         return { dist: Math.sqrt(bd2), px: bx, py: by, i: bi, t: bt };
     }
 
+    // Nearest point on an open polyline, searching ±HINT_SPAN segments around the last one; full search as the fallback
+    static nearestOnPathHint(x, y, path, hint, closed = false) {
+        const m = closed ? path.length : path.length - 1;
+        if (hint === undefined || hint === null || m < 2 * HINT_SPAN) return this.nearestOnPath(x, y, path, closed);
+        let bd2 = Infinity, bi = 0, bt = 0, bx = x, by = y;
+        for (let k = Math.max(0, hint - HINT_SPAN); k <= Math.min(m - 1, hint + HINT_SPAN); k++) {
+            const v = path[k], w = path[(k + 1) % path.length], ex = w.x - v.x, ey = w.y - v.y, l2 = ex * ex + ey * ey;
+            const t = l2 ? Math.max(0, Math.min(1, ((x - v.x) * ex + (y - v.y) * ey) / l2)) : 0, px = v.x + t * ex, py = v.y + t * ey;
+            const d2 = (x - px) ** 2 + (y - py) ** 2;
+            if (d2 < bd2) { bd2 = d2; bi = k; bt = t; bx = px; by = py; }
+        }
+        if (bi === Math.max(0, hint - HINT_SPAN) || bi === Math.min(m - 1, hint + HINT_SPAN)) return this.nearestOnPath(x, y, path, closed); // at the window's edge: may be outside it
+        return { dist: Math.sqrt(bd2), px: bx, py: by, i: bi, t: bt };
+    }
+
     // First wall segment the move a→b crosses; n points back to a's side
     static crossWall(ax, ay, bx, by, wall) {
         for (let i = 0; i + 1 < wall.length; i++) {
