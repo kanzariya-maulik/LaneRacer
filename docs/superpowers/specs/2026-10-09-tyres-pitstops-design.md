@@ -33,16 +33,16 @@ Races where strategy matters: drivers choose tyre compounds, tyres lose grip as 
 State per car: `compound`, `nextCompound`, `wear`, `stops`, `compoundsUsed` (set), `stop` = `null | { phase: 'guide' | 'service' | 'hold', t }`, `servicedLap` (lap of the last stop).
 
 1. **Entry:** the closing barrier and the "PIT CLOSED" board are removed. On the lane, the existing `updatePitState` applies: the limiter is engaged between the limiter boards.
-2. **Guide:** when a car on the lane, not finished, with `servicedLap !== lap`, comes within 12 m (along the lane) of its team box and is under 40 km/h above the limit, `stop.phase = 'guide'`. Steering and braking come from a shared function `guideToBox(p, box)`: follow the lane, turn into the box, stop on its mark in ~1 s. Driver inputs are ignored.
+2. **Guide:** when a car on the lane, not finished, with `servicedLap !== lap`, is within 12 m (along the lane) before its team box and the driver is braking (brake > 0.2) or below 40 km/h, `stop.phase = 'guide'`. Steering and braking come from a shared function `guideToBox(p, box)`: follow the lane, turn into the box, stop on its mark in ~1 s. Driver inputs are ignored.
 3. **Service:** stationary on the mark → `phase = 'service'`, `t = 2.5 + rng × 0.4` s (server rng, value sent to clients). At the end: `compound = nextCompound || next harder (S→M→H→M)`, `wear = 0`, `stops++`, `compoundsUsed.add(compound)`, `servicedLap = lap`.
 4. **Hold / release:** `phase = 'hold'` while another car is in the lane within 10 m behind the box and moving (unsafe release), at most 0.5 s extra, then `stop = null` and the driver has control at zero speed.
-5. **Drive-through:** passing the box above 5 km/h without being guided is allowed. Nothing happens, and the driver simply loses time.
+5. **Drive-through:** passing the box without braking (at the limiter speed) starts no guide: no service, the driver simply loses time.
 6. **Lap progress:** unchanged. `trackPos` already maps lane positions onto the lap, so gaps, ranks and the line crossing work in the lane.
 7. **Qualifying:** entering the pits cancels the current timed lap (unchanged). A stop in the box services the car exactly as in a race (new set of `nextCompound`, `wear = 0`); the next run starts with the out-lap from the pit exit as today.
 8. **Penalty:** at the finish, a race with `maxLaps ≥ 2` and `tyreWear` on adds 22 s to any finisher with `compoundsUsed.size < 2` (applied through the existing `penalty` field, announced in chat like track-limit penalties).
 9. **Edge cases:** finished cars are not serviced; a disconnected car mid-stop stays parked as today; a car can't be serviced twice on the same lap.
 
-Inputs: a new client message field `next: 'S' | 'M' | 'H'` (sanitised in `lobby.js`), sent on Q / W / E or on a HUD tap; the start compound is chosen in the lobby (default M).
+Inputs: a new client message field `next: 'S' | 'M' | 'H'` (sanitised in `lobby.js`), sent on keys 1 / 2 / 3 (Q is the assist toggle, W throttle, E DRS) or on a HUD tap; the start compound is chosen in the lobby (default M).
 
 ## 3. Pit lane geometry (`src/game/Track.js` `buildPit`)
 
