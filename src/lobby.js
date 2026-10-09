@@ -27,6 +27,16 @@ function sanitizeSettings(current, incoming, trackIds) {
     // Qualifying run: untimed out-laps (1 = the drive from the pits to the line), then timed laps
     if (Number.isFinite(incoming.outLaps)) next.outLaps = clamp(Math.round(incoming.outLaps), 1, 3);
     if (Number.isFinite(incoming.qualiLaps)) next.qualiLaps = clamp(Math.round(incoming.qualiLaps), 1, 10);
+    if (typeof incoming.trackLimits === 'boolean') {
+        next.trackLimits = incoming.trackLimits;
+    } else if (incoming.trackLimits !== undefined && (incoming.trackLimits === '0' || incoming.trackLimits === '1' || incoming.trackLimits === 0 || incoming.trackLimits === 1)) {
+        next.trackLimits = incoming.trackLimits === '1' || incoming.trackLimits === 1;
+    }
+    if (typeof incoming.botCar === 'boolean') {
+        next.botCar = incoming.botCar;
+    } else if (incoming.botCar !== undefined && (incoming.botCar === '0' || incoming.botCar === '1' || incoming.botCar === 0 || incoming.botCar === 1)) {
+        next.botCar = incoming.botCar === '1' || incoming.botCar === 1;
+    }
     return next;
 }
 
@@ -35,10 +45,16 @@ const num = (v, min, max) => (Number.isFinite(v) ? clamp(v, min, max) : 0);
 function sanitizeInput(input) {
     const i = input && typeof input === 'object' ? input : {};
     if ('throttle' in i || 'brake' in i || 'steer' in i) {
-        return { throttle: num(i.throttle, 0, 1), brake: num(i.brake, 0, 1), steer: num(i.steer, -1, 1), drs: i.drs === true };
+        const res = { throttle: num(i.throttle, 0, 1), brake: num(i.brake, 0, 1), steer: num(i.steer, -1, 1), drs: i.drs === true };
+        if ('handbrake' in i) res.handbrake = i.handbrake === true;
+        if ('explicitReverse' in i) res.explicitReverse = i.explicitReverse === true;
+        return res;
     }
     // Legacy on/off keys from older clients
-    return { throttle: i.up ? 1 : 0, brake: i.down ? 1 : 0, steer: (i.right ? 1 : 0) - (i.left ? 1 : 0), drs: false };
+    const res = { throttle: i.up ? 1 : 0, brake: i.down ? 1 : 0, steer: (i.right ? 1 : 0) - (i.left ? 1 : 0), drs: false };
+    if ('handbrake' in i) res.handbrake = i.handbrake === true;
+    if ('explicitReverse' in i) res.explicitReverse = i.explicitReverse === true;
+    return res;
 }
 
 // selfId: a player switching team doesn't count against a team they're already in

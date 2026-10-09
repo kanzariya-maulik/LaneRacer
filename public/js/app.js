@@ -22,9 +22,27 @@ const setOutLaps = document.getElementById('setting-outlaps');
 const setQualiLaps = document.getElementById('setting-qualilaps');
 const setCollisions = document.getElementById('setting-collisions');
 const setPenalties = document.getElementById('setting-penalties');
+const setTrackLimits = document.getElementById('setting-track-limits');
+const setBot = document.getElementById('setting-bot');
 const setTime = document.getElementById('setting-time');
 const settingsView = document.getElementById('settings-view');
 const MAX_RACERS = 22; // src/lobby.js: grid slots per track
+
+try {
+    const savedHostSettings = JSON.parse(localStorage.getItem('lanrace.hostSettings'));
+    if (savedHostSettings && typeof savedHostSettings === 'object') {
+        if (savedHostSettings.trackId && setTrack) setTrack.value = savedHostSettings.trackId;
+        if (savedHostSettings.maxLaps && setLaps) setLaps.value = savedHostSettings.maxLaps;
+        if (savedHostSettings.timeOfDay && setTime) setTime.value = savedHostSettings.timeOfDay;
+        if (savedHostSettings.qualifying !== undefined && setQuali) setQuali.value = savedHostSettings.qualifying ? '1' : '0';
+        if (savedHostSettings.outLaps && setOutLaps) setOutLaps.value = savedHostSettings.outLaps;
+        if (savedHostSettings.qualiLaps && setQualiLaps) setQualiLaps.value = savedHostSettings.qualiLaps;
+        if (savedHostSettings.collisions !== undefined && setCollisions) setCollisions.value = savedHostSettings.collisions ? '1' : '0';
+        if (savedHostSettings.contactPenalties !== undefined && setPenalties) setPenalties.value = savedHostSettings.contactPenalties ? '1' : '0';
+        if (savedHostSettings.trackLimits !== undefined && setTrackLimits) setTrackLimits.value = savedHostSettings.trackLimits ? '1' : '0';
+        if (savedHostSettings.botCar !== undefined && setBot) setBot.value = savedHostSettings.botCar ? '1' : '0';
+    }
+} catch (e) {}
 const graphicsSelect = document.getElementById('graphics-select');
 try { graphicsSelect.value = localStorage.getItem('lanrace.quality') || 'auto'; } catch (e) { /* storage blocked: Auto */ }
 if (!graphicsSelect.value) graphicsSelect.value = 'auto';
@@ -60,8 +78,6 @@ function remembered(id, key, fallback, onChange) {
 let lastJoin = null; // declared before the assist restore below reads it (join / reconnect state)
 
 // ── Assist sliders ──────────────────────────────────────────────────────────
-const assistSteerSlider = document.getElementById('assist-steer-slider');
-const assistSteerVal    = document.getElementById('assist-steer-val');
 const assistBrakeSlider = document.getElementById('assist-brake-slider');
 const assistBrakeVal    = document.getElementById('assist-brake-val');
 
@@ -72,25 +88,28 @@ function updateSliderTrack(slider) {
 }
 
 function getAssistString() {
-    const s = assistSteerSlider ? +assistSteerSlider.value : 100;
     const b = assistBrakeSlider ? +assistBrakeSlider.value : 100;
-    return `${s},${b}`;
+    return `100,${b}`;
 }
 
 function applyAssistString(str, instantSave = false) {
-    // Accept both legacy 'full'/'off' and new '0,0'–'100,100' format
-    let s = 100, b = 100;
-    if (str === 'off') { s = 0; b = 0; }
-    else if (str === 'full') { s = 100; b = 100; }
-    else {
+    // Steer is always 100. Brake assists from 0% to 100%
+    const s = 100;
+    let b = 100;
+    if (str === 'off' || str === '100,0' || str === '0,0') {
+        b = 0;
+    } else if (str === 'full' || str === '100,100') {
+        b = 100;
+    } else {
         const parts = String(str).split(',');
-        if (parts.length === 2) {
-            const ps = parseFloat(parts[0]), pb = parseFloat(parts[1]);
-            if (Number.isFinite(ps) && Number.isFinite(pb)) { s = Math.round(ps); b = Math.round(pb); }
+        if (parts.length >= 2) {
+            const pb = parseFloat(parts[1]);
+            if (Number.isFinite(pb)) b = Math.max(0, Math.min(100, Math.round(pb)));
+        } else if (parts.length === 1) {
+            const pb = parseFloat(parts[0]);
+            if (Number.isFinite(pb)) b = Math.max(0, Math.min(100, Math.round(pb)));
         }
     }
-    if (assistSteerSlider) { assistSteerSlider.value = s; updateSliderTrack(assistSteerSlider); }
-    if (assistSteerVal)    assistSteerVal.textContent = `${s}%`;
     if (assistBrakeSlider) { assistBrakeSlider.value = b; updateSliderTrack(assistBrakeSlider); }
     if (assistBrakeVal)    assistBrakeVal.textContent = `${b}%`;
     const v = `${s},${b}`;
@@ -106,12 +125,10 @@ function applyAssistString(str, instantSave = false) {
 }
 
 function onAssistSliderInput() {
-    if (assistSteerSlider) { updateSliderTrack(assistSteerSlider); if (assistSteerVal) assistSteerVal.textContent = `${assistSteerSlider.value}%`; }
     if (assistBrakeSlider) { updateSliderTrack(assistBrakeSlider); if (assistBrakeVal) assistBrakeVal.textContent = `${assistBrakeSlider.value}%`; }
     applyAssistString(getAssistString(), false);
 }
 
-assistSteerSlider?.addEventListener('input', onAssistSliderInput);
 assistBrakeSlider?.addEventListener('input', onAssistSliderInput);
 
 let _saveAssistTimer = null;
@@ -143,13 +160,49 @@ try { volumeRange.value = localStorage.getItem('lanrace.volume') ?? 70; } catch 
 volumeRange.addEventListener('input', () => window.lanraceAudio?.setVolume(volumeRange.value / 100));
 remembered('engine-select', 'lanrace.engine', 'all', (v) => window.lanraceAudio?.setMode(v));
 remembered('engine-type-select', 'lanrace.engineType', 'v8', (v) => window.lanraceAudio?.setEngineType(v));
+remembered('autobrake-select', 'lanrace.autobrake', 'on', (v) => { (window.lanraceMem ||= {})['lanrace.autobrake'] = v; });
+remembered('music-select', 'lanrace.music', 'off', (v) => window.lanraceAudio?.setMusicTrack?.(v));
+const musicVolumeRange = document.getElementById('music-volume-range');
+if (musicVolumeRange) {
+    try { musicVolumeRange.value = localStorage.getItem('lanrace.musicVolume') ?? 50; } catch (e) { /* default */ }
+    musicVolumeRange.addEventListener('input', () => window.lanraceAudio?.setMusicVolume?.(musicVolumeRange.value / 100));
+}
 
 let isJoined = false;
-let amReady = false;
+let amReady = true;
+let wasKicked = false;
 let teams = [];
 let selectedTeam = null;
+try {
+    selectedTeam = localStorage.getItem('lanrace.teamId') || null;
+    const savedName = localStorage.getItem('lanrace.username');
+    if (savedName && inputUser) inputUser.value = savedName;
+} catch (e) {}
 
-fetch('teams.json').then(r => r.json()).then((list) => { teams = list; window.updateLobbyUI(); }); // team names in the driver list too
+function autoJoinLobby() {
+    if (isJoined || wasKicked || !teams.length || !socket?.connected) return;
+    const counts = teamCounts();
+    if (!selectedTeam || (counts[selectedTeam] || 0) >= (teams.find(t => t.id === selectedTeam)?.maxPlayers || 2)) {
+        selectedTeam = teams.find(t => (counts[t.id] || 0) < t.maxPlayers)?.id || teams[0]?.id;
+    }
+    const savedName = localStorage.getItem('lanrace.username');
+    const username = (inputUser.value.trim() || savedName || `Driver ${Math.floor(Math.random() * 900 + 100)}`).slice(0, 15);
+    inputUser.value = username;
+    try {
+        localStorage.setItem('lanrace.username', username);
+        if (selectedTeam) localStorage.setItem('lanrace.teamId', selectedTeam);
+    } catch (e) {}
+    lastJoin = { username, teamId: selectedTeam, assist: getAssistString() };
+    socket.emit('join_lobby', lastJoin);
+    setJoinedUI(true);
+    amReady = true;
+}
+
+fetch('teams.json').then(r => r.json()).then((list) => {
+    teams = list;
+    autoJoinLobby();
+    window.updateLobbyUI();
+}); // team names in the driver list too
 
 function teamCounts() {
     const counts = {};
@@ -169,15 +222,33 @@ function syncProfile() {
     if (document.activeElement !== inputUser) inputUser.value = me.username;
 }
 
-// Joined: the Join button becomes Save, shown only while the typed name differs from the current one
 function renderNameField() {
-    const me = isJoined && clientState.players[clientState.me];
     inputUser.disabled = !canEditProfile();
     btnJoin.textContent = isJoined ? 'Save' : 'Join ▶';
-    btnJoin.classList.toggle('hidden', isJoined && (!me || !canEditProfile() || inputUser.value.trim() === me.username || !inputUser.value.trim()));
+    btnJoin.classList.add('hidden'); // auto-join: manual join button not needed
 }
-inputUser.addEventListener('input', renderNameField);
-inputUser.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !btnJoin.classList.contains('hidden')) btnJoin.click(); });
+
+let _saveNameTimer = null;
+inputUser.addEventListener('input', () => {
+    const name = inputUser.value.trim();
+    try { localStorage.setItem('lanrace.username', name); } catch (e) {}
+    clearTimeout(_saveNameTimer);
+    if (isJoined && name && name.length <= 15) {
+        _saveNameTimer = setTimeout(() => {
+            socket.emit('update_profile', { username: name });
+        }, 400);
+    }
+});
+inputUser.addEventListener('blur', () => {
+    clearTimeout(_saveNameTimer);
+    const name = inputUser.value.trim();
+    if (isJoined && name && name.length <= 15) {
+        socket.emit('update_profile', { username: name });
+    }
+});
+inputUser.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') inputUser.blur();
+});
 
 function renderTeamGrid() {
     syncProfile();
@@ -212,8 +283,9 @@ function renderTeamGrid() {
         card.append(swatch, name, count);
         card.addEventListener('click', () => {
             if (t.id === selectedTeam) return;
-            if (isJoined) return socket.emit('update_profile', { teamId: t.id }); // switches once the server says the seat is free
             selectedTeam = t.id;
+            try { localStorage.setItem('lanrace.teamId', selectedTeam); } catch (e) {}
+            if (isJoined) socket.emit('update_profile', { teamId: t.id });
             renderTeamGrid();
         });
         teamGrid.appendChild(card);
@@ -243,32 +315,33 @@ inputUser.focus();
 if (matchMedia('(min-width: 1281px) and (min-height: 900px)').matches) document.querySelector('.my-settings').open = true;
 
 btnJoin.addEventListener('click', () => {
-    if (isJoined) { // Save: a new name for the driver already on the grid
-        socket.emit('update_profile', { username: inputUser.value });
+    if (isJoined) {
+        socket.emit('update_profile', { username: inputUser.value.trim() });
         inputUser.blur();
         return;
     }
-    if (!selectedTeam) return window.appendChat('SYSTEM', '#f43f5e', 'Pick a team first.');
-    const username = inputUser.value.trim() || `Player${Math.floor(Math.random() * 1000)}`;
-    lastJoin = { username, teamId: selectedTeam, assist: getAssistString() };
-    window.lanraceAudio?.unlock(); // the click is the gesture browsers need to start sound
-    socket.emit('join_lobby', lastJoin);
-    setJoinedUI(true);
+    autoJoinLobby();
 });
 
 // Removed by the host: back to the join screen (and not auto-rejoined on a reconnect); joining again is allowed
 socket.on('kicked', () => {
+    wasKicked = true;
     lastJoin = null;
     amReady = false;
     setJoinedUI(false);
-    window.appendChat('SYSTEM', '#f43f5e', 'You were removed by the host. You can join again.');
+    window.appendChat('SYSTEM', '#f43f5e', 'You were removed by the host. Refresh to rejoin.');
 });
 
 // A reconnect (WiFi drop, sleep, server restart) is a new socket the server doesn't know: join again as the same driver
 socket.on('connect', () => {
-    if (!lastJoin || !isJoined) return;
-    amReady = false;
-    btnReady.innerText = 'Ready Up';
+    if (!lastJoin || !isJoined) {
+        autoJoinLobby();
+        return;
+    }
+    amReady = true;
+    btnReady.innerText = 'Unready';
+    btnReady.classList.remove('primary');
+    btnReady.classList.add('success');
     socket.emit('join_lobby', lastJoin);
 });
 
@@ -292,7 +365,8 @@ btnStart.addEventListener('click', () => {
 });
 
 function emitSettings() {
-    socket.emit('update_settings', {
+    updateLobbyTrackPreview();
+    const settings = {
         trackId: setTrack.value,
         timeOfDay: setTime.value,
         maxLaps: parseInt(setLaps.value, 10),
@@ -300,10 +374,145 @@ function emitSettings() {
         outLaps: parseInt(setOutLaps.value, 10),
         qualiLaps: parseInt(setQualiLaps.value, 10),
         collisions: setCollisions.value === '1',
-        contactPenalties: setPenalties.value === '1'
+        contactPenalties: setPenalties.value === '1',
+        trackLimits: setTrackLimits ? setTrackLimits.value === '1' : true,
+        botCar: setBot ? setBot.value === '1' : false
+    };
+    try { localStorage.setItem('lanrace.hostSettings', JSON.stringify(settings)); } catch (e) {}
+    socket.emit('update_settings', settings);
+}
+
+// ── Track Previews & Custom Track Dropdown ──────────────────────────────
+let trackPreviews = {};
+
+function drawTrackSimple(canvas, trackId) {
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const d = trackPreviews[trackId];
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!d || !d.path || !d.path.length) return;
+
+    const pad = Math.min(canvas.width, canvas.height) * 0.12;
+    const b = d.bounds || { minX: -1000, maxX: 1000, minY: -1000, maxY: 1000 };
+    const bw = Math.max(1, b.maxX - b.minX);
+    const bh = Math.max(1, b.maxY - b.minY);
+    const cw = canvas.width - pad * 2;
+    const ch = canvas.height - pad * 2;
+    const scale = Math.min(cw / bw, ch / bh);
+    const ox = pad + (cw - bw * scale) / 2;
+    const oy = pad + (ch - bh * scale) / 2;
+
+    ctx.save();
+    ctx.beginPath();
+    for (let i = 0; i < d.path.length; i++) {
+        const [x, y] = d.path[i];
+        const px = ox + (x - b.minX) * scale;
+        const py = oy + (y - b.minY) * scale;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.strokeStyle = '#f8fafc';
+    ctx.lineWidth = Math.max(1.8, Math.min(3.2, canvas.width / 45));
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+
+    // Start-finish indicator dot
+    const [sx, sy] = d.path[0];
+    const spx = ox + (sx - b.minX) * scale;
+    const spy = oy + (sy - b.minY) * scale;
+    ctx.fillStyle = '#38bdf8';
+    ctx.beginPath();
+    ctx.arc(spx, spy, ctx.lineWidth * 1.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+}
+
+const lobbyTrackCanvas = document.getElementById('lobby-track-preview');
+const lobbyTrackName = document.getElementById('lobby-track-name');
+const trackDropdownTrigger = document.getElementById('track-dropdown-trigger');
+const trackDropdownThumb = document.getElementById('track-dropdown-thumb');
+const trackDropdownLabel = document.getElementById('track-dropdown-label');
+const trackDropdownMenu = document.getElementById('track-dropdown-menu');
+
+function updateLobbyTrackPreview() {
+    const trackId = setTrack?.value || clientState?.settings?.trackId || 'monza';
+    const trackOpt = Array.from(setTrack?.options || []).find(o => o.value === trackId);
+    const trackName = trackOpt?.textContent || trackPreviews[trackId]?.name || trackId;
+
+    if (lobbyTrackName) lobbyTrackName.textContent = trackName.toUpperCase();
+    if (lobbyTrackCanvas) drawTrackSimple(lobbyTrackCanvas, trackId);
+    if (trackDropdownThumb) drawTrackSimple(trackDropdownThumb, trackId);
+    if (trackDropdownLabel) trackDropdownLabel.textContent = trackName;
+
+    if (trackDropdownMenu) {
+        const items = trackDropdownMenu.querySelectorAll('.track-dropdown-item');
+        items.forEach(it => {
+            it.classList.toggle('selected', it.dataset.value === trackId);
+        });
+    }
+}
+
+function renderTrackDropdown() {
+    if (!trackDropdownMenu || !setTrack) return;
+    trackDropdownMenu.innerHTML = '';
+    const options = Array.from(setTrack.options).filter(o => o.style.display !== 'none');
+    for (const opt of options) {
+        const item = document.createElement('div');
+        item.className = 'track-dropdown-item' + (opt.value === setTrack.value ? ' selected' : '');
+        item.dataset.value = opt.value;
+
+        const thumb = document.createElement('canvas');
+        thumb.width = 46;
+        thumb.height = 30;
+        thumb.className = 'track-item-thumb';
+
+        const label = document.createElement('span');
+        label.className = 'track-item-label';
+        label.textContent = opt.textContent;
+
+        item.append(thumb, label);
+        item.addEventListener('click', () => {
+            setTrack.value = opt.value;
+            emitSettings();
+            updateLobbyTrackPreview();
+            trackDropdownMenu.classList.add('hidden');
+        });
+
+        trackDropdownMenu.appendChild(item);
+        drawTrackSimple(thumb, opt.value);
+    }
+    updateLobbyTrackPreview();
+}
+
+if (trackDropdownTrigger && trackDropdownMenu) {
+    trackDropdownTrigger.addEventListener('click', (e) => {
+        e.stopPropagation();
+        trackDropdownMenu.classList.toggle('hidden');
+    });
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('#track-dropdown')) {
+            trackDropdownMenu.classList.add('hidden');
+        }
     });
 }
-setTrack.addEventListener('change', emitSettings);
+
+fetch('tracks-preview.json')
+    .then(r => r.json())
+    .then(data => {
+        trackPreviews = data;
+        renderTrackDropdown();
+    })
+    .catch(err => {
+        console.warn('Failed to load track previews:', err);
+    });
+
+setTrack.addEventListener('change', () => {
+    updateLobbyTrackPreview();
+    emitSettings();
+});
 setLaps.addEventListener('change', emitSettings);
 setQuali.addEventListener('change', emitSettings);
 setOutLaps.addEventListener('change', emitSettings);
@@ -311,6 +520,8 @@ setQualiLaps.addEventListener('change', emitSettings);
 setCollisions.addEventListener('change', emitSettings);
 setPenalties.addEventListener('change', emitSettings);
 setTime.addEventListener('change', emitSettings);
+setTrackLimits?.addEventListener('change', emitSettings);
+setBot?.addEventListener('change', emitSettings);
 
 chatForm.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -321,6 +532,7 @@ chatForm.addEventListener('submit', (e) => {
 });
 
 window.updateLobbyUI = () => {
+    if (!isJoined && !wasKicked && teams.length && socket?.connected) autoJoinLobby();
     playersList.innerHTML = '';
     const myId = clientState.me;
     const amHost = clientState.hostId === myId;
@@ -384,6 +596,12 @@ window.updateLobbyUI = () => {
     if (amHost) {
         hostSettings.classList.remove('hidden');
         btnReady.classList.add('hidden');
+        if (!window._hasEmittedSavedSettings) {
+            window._hasEmittedSavedSettings = true;
+            try {
+                if (localStorage.getItem('lanrace.hostSettings')) emitSettings();
+            } catch (e) {}
+        }
     } else {
         hostSettings.classList.add('hidden');
         if (isJoined) btnReady.classList.remove('hidden');
@@ -397,7 +615,7 @@ window.updateLobbyUI = () => {
         screenLobby.classList.remove('hidden');
         screenGame.classList.add('hidden');
         // Server state wins: syncs arrive whenever anyone joins, so don't reset a ready player
-        amReady = !!me?.isReady;
+        amReady = me ? (me.isReady !== false) : true;
         btnReady.innerText = amReady ? 'Unready' : 'Ready Up';
         btnReady.classList.toggle('primary', !amReady);
         btnReady.classList.toggle('success', amReady);
@@ -411,7 +629,9 @@ window.updateLobbyUI = () => {
 };
 
 window.updateSettingsUI = () => {
+    if (!clientState || !clientState.settings) return;
     setTrack.value = clientState.settings.trackId;
+    updateLobbyTrackPreview();
     setLaps.value = clientState.settings.maxLaps;
     setTime.value = clientState.settings.timeOfDay === 'night' ? 'night' : 'day';
     setQuali.value = clientState.settings.qualifying ? '1' : '0';
@@ -421,21 +641,37 @@ window.updateSettingsUI = () => {
     setCollisions.value = clientState.settings.collisions === false ? '0' : '1';
     setPenalties.value = clientState.settings.contactPenalties === false ? '0' : '1';
     document.querySelectorAll('.collisions-only').forEach((el) => el.classList.toggle('hidden', clientState.settings.collisions === false));
+    if (setTrackLimits) setTrackLimits.value = clientState.settings.trackLimits === false ? '0' : '1';
+    if (setBot) setBot.value = clientState.settings.botCar ? '1' : '0';
 
     // Header chips and the read-only view non-hosts see
     const s = clientState.settings;
     const track = setTrack.selectedOptions[0]?.textContent || s.trackId;
     const out = s.outLaps ?? 1, timed = s.qualiLaps ?? 2, quali = s.qualifying ? `${out} out + ${timed} timed` : 'Off';
     const time = s.timeOfDay === 'night' ? 'Night' : 'Day';
-    const rows = [['Track', track], ['Time', time], ['Laps', s.maxLaps], ['Qualifying', quali], ['Collisions', s.collisions === false ? 'Off' : s.contactPenalties === false ? 'On, no penalties' : 'On, penalties']];
+    const rows = [
+        ['Track', track],
+        ['Time', time],
+        ['Laps', s.maxLaps],
+        ['Qualifying', quali],
+        ['Collisions', s.collisions === false ? 'Off' : s.contactPenalties === false ? 'On, no penalties' : 'On, penalties'],
+        ['Track limits', s.trackLimits === false ? 'Off' : 'On'],
+        ['AI Bot', s.botCar ? 'On' : 'Off']
+    ];
     settingsView.replaceChildren(...rows.map(([k, v]) => {
         const d = document.createElement('div');
         d.append(Object.assign(document.createElement('dt'), { textContent: k }), Object.assign(document.createElement('dd'), { textContent: v }));
         return d;
     }));
-    document.getElementById('session-summary').replaceChildren(...[track, time, `${s.maxLaps} ${s.maxLaps === 1 ? 'lap' : 'laps'}`,
-        s.qualifying ? `Quali ${out}+${timed}` : 'Quali off', `Collisions ${s.collisions === false ? 'off' : 'on'}`]
-        .map((text) => Object.assign(document.createElement('span'), { textContent: text })));
+    document.getElementById('session-summary').replaceChildren(...[
+        track,
+        time,
+        `${s.maxLaps} ${s.maxLaps === 1 ? 'lap' : 'laps'}`,
+        s.qualifying ? `Quali ${out}+${timed}` : 'Quali off',
+        `Collisions ${s.collisions === false ? 'off' : 'on'}`,
+        `Limits ${s.trackLimits === false ? 'off' : 'on'}`,
+        s.botCar ? '1 Bot' : 'No bots'
+    ].map((text) => Object.assign(document.createElement('span'), { textContent: text })));
 };
 window.updateSettingsUI();
 
@@ -465,6 +701,7 @@ window.handleStatusChange = (status) => {
         screenLobby.classList.remove('hidden');
         screenGame.classList.add('hidden');
         [cdOverlay, spOverlay, results, lights].forEach(el => el.classList.add('hidden')); // the race classification stays up over the lobby
+        standingsBubbleBtn?.classList.remove('hidden');
         return;
     }
 
@@ -473,6 +710,8 @@ window.handleStatusChange = (status) => {
 
     screenLobby.classList.add('hidden');
     screenGame.classList.remove('hidden');
+    standingsBubbleBtn?.classList.add('hidden');
+    toggleStandings(false);
     spOverlay.classList.toggle('hidden', !me.isSpectating);
     cdOverlay.classList.add('hidden');
     results.classList.toggle('hidden', status !== 'QUALI_RESULTS');
@@ -486,3 +725,170 @@ window.handleStatusChange = (status) => {
         document.getElementById('countdown-text').innerText = 'FINISH!';
     }
 };
+
+// LAST RACE STANDINGS WIDGET
+const standingsBubbleBtn = document.getElementById('standings-bubble-btn');
+const standingsBadge = document.getElementById('standings-badge');
+const standingsPopup = document.getElementById('standings-popup');
+const btnCloseStandings = document.getElementById('btn-close-standings');
+const standingsList = document.getElementById('standings-list');
+const standingsEmptyState = document.getElementById('standings-empty-state');
+const standingsTrackBadge = document.getElementById('standings-track-badge');
+const headerStandingsBtn = document.getElementById('header-standings-btn');
+const hudStandingsBtn = document.getElementById('hud-standings-btn');
+
+function formatStdLapTime(s) {
+    if (s === null || s === undefined || isNaN(s)) return '—';
+    const m = Math.floor(s / 60);
+    return `${m}:${(s - m * 60).toFixed(3).padStart(6, '0')}`;
+}
+
+function formatStdTotalOrGap(r) {
+    if (r.dnf) return 'DNF';
+    if (r.position === 1 || r.gap === null || r.gap === undefined) return formatStdLapTime(r.total);
+    return `+${Number(r.gap).toFixed(3)}`;
+}
+
+function renderStandingsPopup() {
+    if (!standingsList) return;
+    let data = null;
+    try {
+        const stored = localStorage.getItem('laneracer_last_race_results');
+        if (stored) data = JSON.parse(stored);
+    } catch (e) {}
+
+    if (!data || !Array.isArray(data.rows) || data.rows.length === 0) {
+        standingsList.innerHTML = '';
+        standingsEmptyState?.classList.remove('hidden');
+        if (standingsTrackBadge) standingsTrackBadge.textContent = 'NO RACE YET';
+        return;
+    }
+
+    standingsEmptyState?.classList.add('hidden');
+    if (standingsTrackBadge) standingsTrackBadge.textContent = (data.track || 'RACE').toUpperCase();
+    standingsList.innerHTML = '';
+
+    for (const r of data.rows) {
+        const li = document.createElement('li');
+        if (r.id === clientState.me) li.classList.add('me');
+        if (r.position <= 3 && !r.dnf) li.classList.add(`podium-${r.position}`);
+
+        const posSpan = document.createElement('span');
+        posSpan.className = 'std-pos';
+        posSpan.textContent = r.position;
+
+        const teamBar = document.createElement('span');
+        teamBar.className = 'std-team';
+        const teamObj = teams.find(t => t.id === r.teamId);
+        teamBar.style.background = teamObj?.chatColor || '#888';
+
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'std-name';
+        nameSpan.textContent = r.username || '—';
+
+        const lapsSpan = document.createElement('span');
+        lapsSpan.className = 'std-laps';
+        lapsSpan.textContent = r.laps ?? '0';
+
+        const bestSpan = document.createElement('span');
+        const isFastest = r.id === data.fastestLapId;
+        bestSpan.className = 'std-best' + (isFastest ? ' fl' : '');
+        bestSpan.textContent = (isFastest ? '⚡ ' : '') + formatStdLapTime(r.bestLap);
+
+        const penSpan = document.createElement('span');
+        penSpan.className = 'std-pen';
+        penSpan.textContent = r.penalties || '—';
+
+        const timeSpan = document.createElement('span');
+        timeSpan.className = 'std-time' + (r.dnf ? ' dnf' : '');
+        timeSpan.textContent = formatStdTotalOrGap(r);
+
+        li.append(posSpan, teamBar, nameSpan, lapsSpan, bestSpan, penSpan, timeSpan);
+        standingsList.appendChild(li);
+    }
+}
+
+function toggleStandings(open) {
+    if (!standingsPopup) return;
+    const shouldOpen = open !== undefined ? open : standingsPopup.classList.contains('hidden');
+    if (shouldOpen) {
+        renderStandingsPopup();
+        standingsPopup.classList.remove('hidden');
+        standingsBadge?.classList.add('hidden');
+    } else {
+        standingsPopup.classList.add('hidden');
+    }
+}
+
+standingsBubbleBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleStandings();
+});
+headerStandingsBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleStandings();
+});
+hudStandingsBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleStandings();
+});
+btnCloseStandings?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleStandings(false);
+});
+
+// Close popup on outside click
+document.addEventListener('click', (e) => {
+    if (standingsPopup && !standingsPopup.classList.contains('hidden')) {
+        if (!standingsPopup.contains(e.target) && !standingsBubbleBtn?.contains(e.target) && !headerStandingsBtn?.contains(e.target) && !hudStandingsBtn?.contains(e.target)) {
+            toggleStandings(false);
+        }
+    }
+});
+
+// Close popup on Escape key
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && standingsPopup && !standingsPopup.classList.contains('hidden')) {
+        toggleStandings(false);
+    }
+});
+
+// Called when race_results arrives from socket
+window.updateLastRaceStandings = (res) => {
+    if (!res || !Array.isArray(res.rows)) return;
+    const payload = {
+        track: clientState.trackData?.name || res.track || 'Race',
+        fastestLapId: res.fastestLapId,
+        rows: res.rows.map(r => {
+            const lp = clientState.players[r.id] || clientState.gameState?.[r.id];
+            let pen = '';
+            if (r.penaltySeconds) pen = `+${r.penaltySeconds}s`;
+            else if (r.penalty) pen = `+${r.penalty}s`;
+            else if (r.penalties) pen = r.penalties;
+            return {
+                id: r.id,
+                position: r.position,
+                username: lp?.username || r.username || '—',
+                teamId: lp?.teamId || r.teamId || null,
+                laps: r.laps,
+                bestLap: r.bestLap,
+                penalties: pen,
+                gap: r.gap,
+                total: r.total,
+                dnf: !!r.dnf
+            };
+        })
+    };
+    try {
+        localStorage.setItem('laneracer_last_race_results', JSON.stringify(payload));
+    } catch (e) {}
+    standingsBadge?.classList.remove('hidden');
+    renderStandingsPopup();
+};
+
+// Initial check on load: if saved results exist, badge can show or list be ready
+try {
+    if (localStorage.getItem('laneracer_last_race_results')) {
+        renderStandingsPopup();
+    }
+} catch (e) {}

@@ -68,13 +68,14 @@ function step(car, input, dt, scale, offTrack = false, assist = 'off') {
 
     // Longitudinal tyre force: traction/power-limited drive, grip-limited brakes, slow reverse
     let ft = 0;
+    const allowReverse = input.explicitReverse !== undefined ? input.explicitReverse === true : true;
     if (vf >= -0.5) {
         ft += input.throttle * Math.min(C.POWER / Math.max(vf, 1), C.TRACTION * grip, offTrack ? C.GRASS_DRIVE_G * C.G * C.MASS : Infinity);
         if (vf > 0.5) ft -= input.brake * (1 - C.BRAKE_STEER_GIVE * Math.abs(input.steer)) * grip;
-        else if (input.brake > 0 && input.throttle === 0) ft -= input.brake * C.REVERSE_FORCE;
+        else if (input.brake > 0 && input.throttle === 0 && allowReverse) ft -= input.brake * C.REVERSE_FORCE;
     } else if (input.throttle > 0) {
         ft += input.throttle * grip; // throttle while rolling backwards acts as a brake
-    } else if (input.brake > 0) {
+    } else if (input.brake > 0 && allowReverse) {
         ft -= input.brake * C.REVERSE_FORCE;
     }
     ft = Math.max(-grip, Math.min(grip, ft));
@@ -103,8 +104,10 @@ function step(car, input, dt, scale, offTrack = false, assist = 'off') {
     const drag = 0.5 * C.RHO * C.CDA * (car.dragMul ?? 1) * v * v; // dragMul: DRS / slipstream
     const before = vf;
     vf += (ft / C.MASS - (drag / C.MASS + roll) * Math.sign(vf) - C.G * grade) * dt; // gravity along the slope
+    if (input.brake > 0 && (vf <= 0 || (before > 0 && vf < 0)) && !allowReverse) { vf = 0; vl = 0; } // auto-brakes stop, don't reverse
     if (input.brake > 0 && before > 0 && vf < 0) vf = 0;                                         // brakes stop, don't reverse
     if (input.throttle === 0 && input.brake === 0 && Math.sign(vf) !== Math.sign(before)) vf = 0; // coasting stops at zero
+    if (!allowReverse && vf < 0) { vf = 0; vl = 0; }
     if (vf < -C.REVERSE_MAX) vf = -C.REVERSE_MAX;
 
     vx = vf * fx - vl * fy;

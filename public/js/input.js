@@ -15,14 +15,23 @@ export function liftOffBrake(brakeAssist, speedMs) {
     return speedMs > LIFT_MIN_MS ? Math.max(0, Math.min(1, 1 - brakeAssist)) : 0;
 }
 
-// keys: { up, down, left, right, drs } booleans; liftBrake: brake while neither W nor S is held (liftOffBrake)
+// keys: { up, down, left, right, drs, handbrake } booleans; liftBrake: brake while neither W nor S is held (liftOffBrake or autoBrake)
 export function keyboardStep(prev, keys, dt, liftBrake = 0) {
     const steerTarget = (keys.right ? 1 : 0) - (keys.left ? 1 : 0);
+    let targetBrake = 0;
+    if (keys.down) {
+        targetBrake = 1;
+    } else if (!keys.up) {
+        if (typeof liftBrake === 'number') targetBrake = liftBrake;
+        else if (liftBrake) targetBrake = 1;
+    }
     return {
         steer: approach(prev.steer, steerTarget, steerTarget === 0 ? RATES.steerOut : RATES.steerIn, dt),
         throttle: approach(prev.throttle, keys.up ? 1 : 0, RATES.throttle, dt),
-        brake: approach(prev.brake, keys.down ? 1 : keys.up ? 0 : liftBrake, RATES.brake, dt),
+        brake: approach(prev.brake, targetBrake, RATES.brake, dt),
         drs: !!keys.drs,
+        handbrake: !!keys.handbrake,
+        explicitReverse: !!keys.down
     };
 }
 

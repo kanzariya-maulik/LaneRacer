@@ -6,6 +6,8 @@ const RacingLine = require('./RacingLine');
 const Elevation = require('../../public/js/sim/elevation.js'); // shared with the browser
 
 const TRACK_IDS = ['monza', 'spa', 'silverstone', 'suzuka', 'sakhir', 'interlagos', 'cota', 'zandvoort', 'spielberg', 'montreal', 'hungaroring', 'monaco', 'imola', 'buddh'];
+const CUSTOM_TRACK_IDS = ['oval', 'oval-x', 'ring', 'ring-x', 'track-x', 'bone-x'];
+const ALL_TRACK_IDS = [...TRACK_IDS, ...CUSTOM_TRACK_IDS];
 const DATA_DIR = path.join(__dirname, '..', '..', 'data', 'tracks');
 const CHECKPOINT_COUNT = 16;
 const GRID_SLOTS = 22; // 11 teams x 2 drivers
@@ -337,10 +339,11 @@ function load(id) {
     return build(JSON.parse(fs.readFileSync(file, 'utf8')), circuits[id]);
 }
 
-function loadAll() {
+function loadAll(all = false) {
+    const ids = all ? ALL_TRACK_IDS : TRACK_IDS;
     const tracks = {};
-    for (const id of TRACK_IDS) tracks[id] = load(id);
+    for (const id of ids) tracks[id] = load(id);
     return tracks;
 }
 
-module.exports = { TRACK_IDS, GARAGE_ORDER, load, loadAll, build, pointAt, edgeAt, fair };
+module.exports = { TRACK_IDS, ALL_TRACK_IDS, CUSTOM_TRACK_IDS, GARAGE_ORDER, load, loadAll, build, pointAt, edgeAt, fair };

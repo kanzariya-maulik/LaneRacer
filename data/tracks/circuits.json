@@ -514,5 +514,77 @@
         296
       ]
     ]
+  },
+  "oval": {
+    "startLineM": 0,
+    "poleSide": "right",
+    "sector2M": 1442,
+    "sector3M": 2913,
+    "drs": [
+      [3800, 50, 450],
+      [1400, 1500, 2400]
+    ],
+    "sources": ["Custom speedway oval circuit (semicircle + 2 parallel straights + semicircle)"],
+    "unconfirmed": []
+  },
+  "oval-x": {
+    "startLineM": 0,
+    "poleSide": "right",
+    "sector2M": 1442,
+    "sector3M": 2913,
+    "drs": [
+      [3800, 50, 450],
+      [1400, 1500, 2400]
+    ],
+    "sources": ["Custom speedway oval circuit - X (semicircle + 2 parallel straights + semicircle)"],
+    "unconfirmed": []
+  },
+  "ring": {
+    "startLineM": 0,
+    "poleSide": "right",
+    "sector2M": 1047,
+    "sector3M": 2094,
+    "drs": [
+      [3050, 100, 900],
+      [1550, 1650, 2450]
+    ],
+    "sources": ["Custom circular ring circuit (full circle)"],
+    "unconfirmed": []
+  },
+  "ring-x": {
+    "startLineM": 0,
+    "poleSide": "right",
+    "sector2M": 1047,
+    "sector3M": 2094,
+    "drs": [
+      [3050, 100, 900],
+      [1550, 1650, 2450]
+    ],
+    "sources": ["Custom circular ring circuit - X (full circle)"],
+    "unconfirmed": []
+  },
+  "track-x": {
+    "startLineM": 0,
+    "poleSide": "right",
+    "sector2M": 1834,
+    "sector3M": 3668,
+    "drs": [
+      [5350, 50, 550],
+      [2500, 2700, 3300]
+    ],
+    "sources": ["Custom 6-turn symmetrical circuit - X (exact match to user sketch)"],
+    "unconfirmed": []
+  },
+  "bone-x": {
+    "startLineM": 0,
+    "poleSide": "right",
+    "sector2M": 1834,
+    "sector3M": 3668,
+    "drs": [
+      [5350, 50, 550],
+      [2500, 2700, 3300]
+    ],
+    "sources": ["Custom 6-turn symmetrical circuit - X (alias)"],
+    "unconfirmed": []
   }
 }

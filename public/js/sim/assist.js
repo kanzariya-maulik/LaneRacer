@@ -50,7 +50,7 @@ function brakeAssist(car, input, track, near, brakeStrength = 1) {
             // Partial brake assist: blend between driver's input and full brake based on strength
             const assistBrake = Math.max(input.brake, brakeStrength);
             const assistThrottle = brakeStrength >= 1 ? 0 : input.throttle * (1 - brakeStrength);
-            return { throttle: assistThrottle, brake: assistBrake, steer: input.steer };
+            return { ...input, throttle: assistThrottle, brake: assistBrake, steer: input.steer };
         }
     }
     return input;

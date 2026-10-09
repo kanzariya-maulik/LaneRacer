@@ -1,0 +1,14 @@
+1 : in all maps on the left and right boundarybs show arrow  <<<< >>>>> when there are turn so we can know in advance that many times its missed that there are turns as its hard too look at also if its sharp turn use red <<< if its mid use yellow also if very less turn use white also you can adjust number of  << >>>> based on the turn so we can know there is turn in adwance also dont make it style like billboard but make it as glowing flikering likght like if its <<< then the most right start then light goes to left so there is clear what is next
+
+
+2 : give host setting to show the panelty or hide from all players untill the resulet came so in race plaeyer can focus on the actual race insted of panelty  (show warning in all case)
+
+
+P0 : when player reastant curruntl it goes in lobby or speactate everytime plz this is p0 plz make hanges so that if that player is in tha game and do restant it stays in game or even if they close browser an came back they joitn the race where they have left as crurruntl even a accidental refresh leae them from game also give player a options (when pressed esc to leave the game (then there is no came back ))
+
+
+4 : in the main scren remove this big map that you are displyinh show it in the top row whre you sre showing the host setting there show the map name and a little big mini map 
+
+5 : curruntly the bubble move to mcuh rapidly (we are not able to read the dist) so smooth it also make it like if its too far away 150-200m its very small dot like no name no dist nothign just small dot as the car come closed it grow and if very clow it grows too much like about 1.35 x of currunt max with great animations and all 
+
+6 : make car ui changes so when appliyinh race or brake it really titl front or back like how really it happen dalso when drs it on show reals wing move change in the car model ,aalso add smoke to tire when it slips or like heated and like with reisst to road and all 

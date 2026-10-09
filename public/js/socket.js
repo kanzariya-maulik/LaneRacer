@@ -336,6 +336,7 @@ socket.on('session', ({ phase, endsInMs }) => {
 socket.on('race_results', (res) => {
     clientState.raceResults = res;
     if (window.showRaceResults) window.showRaceResults(res);
+    if (window.updateLastRaceStandings) window.updateLastRaceStandings(res);
 });
 
 socket.on('quali_results', (list) => {

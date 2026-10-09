@@ -16,6 +16,7 @@
             <header class="lobby-header">
                 <h1 class="glow-title">LAN RACE</h1>
                 <div id="session-summary" class="session-summary"></div>
+                <button id="header-standings-btn" class="header-standings-btn" type="button" title="View Last Race Results">🏁 Results</button>
                 <span class="lobby-ping">PING <span class="ping-val" id="lobby-ping">—</span> ms</span>
             </header>
 
@@ -30,7 +31,7 @@
                         </div>
                         <div class="hero-join">
                             <input type="text" id="username" placeholder="Driver name" maxlength="15" aria-label="Driver name">
-                            <button id="btn-join" class="btn primary">Join ▶</button>
+                            <button id="btn-join" class="btn primary hidden" style="display:none">Join ▶</button>
                         </div>
                     </div>
 
@@ -59,16 +60,11 @@
                             </label>
                             <div class="graphics-picker assist-sliders">
                                 <div class="assist-row">
-                                    <span class="assist-label">Steering Assist</span>
-                                    <span id="assist-steer-val" class="assist-val">100%</span>
-                                </div>
-                                <input type="range" id="assist-steer-slider" min="0" max="100" value="100" class="custom-slider" aria-label="Steering assist">
-                                <div class="assist-row">
                                     <span class="assist-label">Braking Assist</span>
                                     <span id="assist-brake-val" class="assist-val">100%</span>
                                 </div>
                                 <input type="range" id="assist-brake-slider" min="0" max="100" value="100" class="custom-slider" aria-label="Braking assist">
-                                <small>Q cycles presets · gamepad View during a race</small>
+                                <small>Q toggles on/off · &lt; and &gt; adjusts ±10% during race</small>
                             </div>
                             <label class="graphics-picker">Other cars
                                 <select id="others-select">
@@ -95,8 +91,26 @@
                                     <option value="muscle">7.0L V8 Muscle (Deep Bass Rumble)</option>
                                     <option value="screamer">F1 Classic Screamer (High-RPM Howl)</option>
                                     <option value="rotary">4-Rotor Wankel (787B Shriek)</option>
-                                    <option value="boxer">Flat-6 GT3 (Throaty Boxer Rasp)</option>
                                 </select>
+                            </label>
+                            <label class="graphics-picker">Release W to Brake
+                                <select id="autobrake-select">
+                                    <option value="on" selected>On (Lift W = Brake)</option>
+                                    <option value="off">Off (Coast)</option>
+                                </select>
+                            </label>
+                            <label class="graphics-picker">Race music
+                                <select id="music-select">
+                                    <option value="off" selected>Off (Engine only)</option>
+                                    <option value="synthwave">Synthwave Velocity</option>
+                                    <option value="eurobeat">Eurobeat Rush</option>
+                                    <option value="cyberpunk">Cyberpunk Overdrive</option>
+                                    <option value="arcade">8-Bit Arcade Sprint</option>
+                                    <option value="lofi">Sunset Cruise (Chill)</option>
+                                </select>
+                            </label>
+                            <label class="graphics-picker">Music volume
+                                <input type="range" id="music-volume-range" min="0" max="100" value="50">
                             </label>
                         </div>
                     </details>
@@ -112,12 +126,19 @@
                 <section class="side">
                     <div class="panel race-panel">
                         <h2>Race settings</h2>
+                        <!-- Lobby Track Preview Minimap -->
+                        <div id="lobby-track-card" class="lobby-track-card">
+                            <canvas id="lobby-track-preview" width="220" height="135"></canvas>
+                            <div class="lobby-track-meta">
+                                <span id="lobby-track-name" class="lobby-track-name">MONZA</span>
+                            </div>
+                        </div>
                         <dl id="settings-view" class="settings-view"></dl>
                         <div id="player-controls" class="hidden">
                             <div id="host-settings" class="hidden">
                                 <div class="host-grid">
                                     <label>Track
-                                        <select id="setting-track">
+                                        <select id="setting-track" style="display:none">
                                             <option value="monza">Monza</option>
                                             <option value="spa">Spa-Francorchamps</option>
                                             <option value="silverstone">Silverstone</option>
@@ -132,7 +153,21 @@
                                             <option value="monaco">Monaco</option>
                                             <option value="imola">Imola</option>
                                             <option value="buddh">Buddh International</option>
+                                            <option value="oval-x">Speedway Oval - X</option>
+                                            <option value="ring-x">The Ring - X</option>
+                                            <option value="track-x">Track - X (6 Turns)</option>
+                                            <option value="oval" style="display:none">Speedway Oval</option>
+                                            <option value="ring" style="display:none">The Ring (Circle)</option>
                                         </select>
+                                        <!-- Custom interactive track selector dropdown with minimap previews -->
+                                        <div id="track-dropdown" class="custom-track-dropdown">
+                                            <button type="button" id="track-dropdown-trigger" class="track-dropdown-btn">
+                                                <canvas id="track-dropdown-thumb" width="46" height="30"></canvas>
+                                                <span id="track-dropdown-label">Monza</span>
+                                                <span class="track-dropdown-caret">▾</span>
+                                            </button>
+                                            <div id="track-dropdown-menu" class="track-dropdown-menu hidden"></div>
+                                        </div>
                                     </label>
                                     <label>Time
                                         <select id="setting-time" title="Night: the circuit's own night sky, under race floodlights">
@@ -167,6 +202,18 @@
                                     <label class="quali-only">Timed laps
                                         <input type="number" id="setting-qualilaps" min="1" max="10" value="2">
                                     </label>
+                                    <label>Track limits
+                                        <select id="setting-track-limits">
+                                            <option value="1" selected>On (Warnings &amp; +5s)</option>
+                                            <option value="0">Off (No Penalties)</option>
+                                        </select>
+                                    </label>
+                                    <label>AI Computer Car
+                                        <select id="setting-bot">
+                                            <option value="0" selected>Off</option>
+                                            <option value="1">On (1 AI Bot)</option>
+                                        </select>
+                                    </label>
                                 </div>
                                 <button id="btn-start" class="btn success">Start Race</button>
                             </div>
@@ -187,6 +234,44 @@
         </div>
     </div>
 
+    <!-- FLOATING LAST RACE STANDINGS WIDGET (Bottom Left) -->
+    <div id="floating-standings-container">
+        <!-- Standings Popup Window -->
+        <div id="standings-popup" class="standings-popup hidden">
+            <div class="standings-popup-header">
+                <div class="standings-popup-title">
+                    <span class="standings-flag-icon">🏁</span>
+                    <span>Last Race Standings</span>
+                    <span id="standings-track-badge" class="standings-track-badge">MONZA</span>
+                </div>
+                <button id="btn-close-standings" class="standings-popup-close-btn" type="button" title="Close Standings">✕</button>
+            </div>
+            <div class="standings-cols-header">
+                <span>POS</span>
+                <span></span>
+                <span>DRIVER</span>
+                <span>LAPS</span>
+                <span>BEST LAP</span>
+                <span>PEN</span>
+                <span>TIME / GAP</span>
+            </div>
+            <div id="standings-list-container" class="standings-list-container">
+                <ol id="standings-list" class="standings-list"></ol>
+                <div id="standings-empty-state" class="standings-empty-state">
+                    <span style="font-size: 2.2rem; margin-bottom: 6px;">🏁</span>
+                    <p style="font-weight: 700; color: #f1f5f9; margin-bottom: 4px;">No Race Results Yet</p>
+                    <small style="color: #94a3b8;">Complete a race to view the classification and fastest laps here!</small>
+                </div>
+            </div>
+        </div>
+
+        <!-- Standings Bubble Button (Bottom Left) -->
+        <button id="standings-bubble-btn" class="standings-bubble-btn" type="button" title="View Last Race Standings">
+            <span class="standings-bubble-flag"></span>
+            <span id="standings-badge" class="standings-badge hidden">NEW</span>
+        </button>
+    </div>
+
     <!-- GAME SCREEN -->
     <div id="game-screen" class="screen hidden">
         <canvas id="game-canvas"></canvas>
@@ -197,6 +282,7 @@
                 <div class="hud-stat"><span class="hs-label">POS</span><span class="hs-big" id="hud-rank">1</span><span class="hs-small">/<span id="hud-total">1</span></span></div>
                 <div class="hud-stat"><span class="hs-label">LAP</span><span class="hs-big" id="hud-lap">1</span><span class="hs-small" id="hud-laps"></span></div>
                 <div class="hud-stat"><span class="hs-label">PING</span><span class="ping-val" id="hud-ping">—</span><span class="hs-small">ms</span></div>
+                <button id="hud-standings-btn" class="hud-stat" type="button" title="View Last Race Results" style="cursor: pointer; border: 0;"><span class="hs-label">RESULTS</span><span style="font-size: 1.1rem; line-height: 1;">🏁</span></button>
                 <button id="hud-host" class="hud-stat hud-host hidden" title="Session control (Esc)"><span class="hs-label">HOST</span><span class="hc-icon" aria-hidden="true"></span></button>
             </div>
             <!-- One dash card, bottom right: shift lights; gear | speed | DRS; lap time; last / best; sectors; fastest lap -->
@@ -237,6 +323,9 @@
             <div id="lights" class="hidden">
                 <span class="light"></span><span class="light"></span><span class="light"></span><span class="light"></span><span class="light"></span>
             </div>
+
+            <!-- Dynamic Off-Screen Proximity Radar (Within 100m, off-screen only) -->
+            <div id="proximity-radar" class="proximity-radar-overlay hidden"></div>
 
             <!-- Leaderboard (top right) -->
             <div id="leaderboard">

@@ -39,6 +39,8 @@ export const NIGHTS = {
     monaco:      night('#0e1222', '#3e2f2a', 0.1, 0.85, { hemi: 0.6 }),        // the harbour city lit all around the streets
     imola:       night('#090d1a', '#25242c', 0.45, 0.55),                      // town and the Santerno valley
     buddh:       night('#13111a', '#4a3324', 0.05, 0.6, { hemi: 0.55 }),       // Greater Noida, Delhi's orange glow to the north-west
+    oval:        night('#0b1020', '#2c2a33', 0.4, 0.5),
+    ring:        night('#0a1226', '#3a2c26', 0.5, 0.4),
 };
 export const nightOf = (id) => NIGHTS[id] || night('#090d1a', '#25242c', 0.4, 0.5);
 
@@ -58,6 +60,8 @@ export const THEMES = {
     monaco:      { land: 'city',   sky: 'clear',    trees: { palm: 1 }, density: 0.6, city: 2, sea: true, mountains: true },
     imola:       { land: 'park',   sky: 'hazy',     trees: { broad: 0.8, pine: 0.2 }, density: 1.3, city: 1 },
     buddh:       { land: 'dry',    sky: 'hazy',     trees: { broad: 1 }, density: 0.8, city: 1 },     // the Yamuna plain, Greater Noida's towers
+    oval:        { land: 'park',   sky: 'clear',    trees: { broad: 0.8, pine: 0.2 }, density: 1.0, city: 1 },
+    ring:        { land: 'dry',    sky: 'evening',  trees: { broad: 0.5, pine: 0.5 }, density: 1.0, city: 0 },
 };
 export const DEFAULT_THEME = { land: 'park', sky: 'clear', trees: { pine: 1 }, density: 1, city: 0 };
 export const themeOf = (id) => THEMES[id] || DEFAULT_THEME;

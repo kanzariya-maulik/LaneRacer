@@ -1,6 +1,8 @@
 const Physics = require('./Physics');
 const netlog = require('../netlog');
+const Logger = require('../logger');
 const Drive = require('../../public/js/sim/drive.js');
+const RacingLine = require('./RacingLine');
 const Ticker = require('../ticker');
 const { pointAt, edgeAt } = require('./Track');
 
@@ -71,6 +73,7 @@ class Game {
                 username: p.username,
                 teamId: p.teamId,
                 assist: p.assist || 'off',
+                isBot: !!p.isBot,
                 x: slot.x, y: slot.y, angle: slot.angle,
                 vx: 0, vy: 0, speed: 0, steer: 0,
                 inPit: false, limiter: false, pitS: 0,
@@ -332,11 +335,126 @@ class Game {
     }
 
     // In the pit lane = on pit asphalt and off the track's (where they overlap, it's track)
-    updatePit(p, near = Physics.nearestOnTrack(p.x, p.y, this.track), nearPit = Physics.nearestOnPath(p.x, p.y, this.track.pit.path, false)) {
+    updatePit(p, near, nearPit) {
+        if (!this.track.pit) return;
+        near = near || Physics.nearestOnTrack(p.x, p.y, this.track);
+        nearPit = nearPit || Physics.nearestOnPath(p.x, p.y, this.track.pit.path, false);
         const wasLimited = p.limiter;
         Drive.updatePitState(p, this.track, near, nearPit);
         // Crossing the pit entry line ends a timed lap
         if (this.mode === 'quali' && p.limiter && !wasLimited) p.lapStart = p.sectorStart = null;
+    }
+
+    updateBotInput(p) {
+        const t = this.track;
+        let targetX, targetY, targetSpeedMs;
+        const speedMs = Math.abs(p.speed) / t.scale;
+
+        let inPit = false;
+        if (t.pit) {
+            const nearPit = Physics.nearestOnPath(p.x, p.y, t.pit.path, false);
+            const curPitS = t.pit.cum[nearPit.i] + nearPit.t * (t.pit.cum[nearPit.i + 1] - t.pit.cum[nearPit.i]);
+            const nearTrack = Physics.nearestOnTrack(p.x, p.y, t);
+
+            // Car is inside pit lane if marked inPit/limiter, or near pit lane path before the exit merge
+            if ((p.inPit || p.limiter || nearPit.dist <= t.pit.width * 1.2) && curPitS < t.pit.len - 15 * t.scale && (p.inPit || nearTrack.dist > t.width / 2.5)) {
+                inPit = true;
+                p.pitS = curPitS;
+
+                // Lookahead along pit lane
+                const pitLookAheadDist = Math.max(10, 8 + speedMs * 0.2) * t.scale;
+                const targetPitS = Math.min(t.pit.len, curPitS + pitLookAheadDist);
+
+                let pIdx = 0;
+                while (pIdx < t.pit.path.length - 1 && t.pit.cum[pIdx + 1] < targetPitS) pIdx++;
+                const pSpan = Math.max(1, t.pit.cum[pIdx + 1] - t.pit.cum[pIdx]);
+                const ptRatio = Math.max(0, Math.min(1, (targetPitS - t.pit.cum[pIdx]) / pSpan));
+                const pp1 = t.pit.path[pIdx], pp2 = t.pit.path[Math.min(t.pit.path.length - 1, pIdx + 1)];
+                targetX = pp1.x + ptRatio * (pp2.x - pp1.x);
+                targetY = pp1.y + ptRatio * (pp2.y - pp1.y);
+
+                const pitLimitMs = ((t.pit.limitKmh || 80) / 3.6);
+                if (curPitS > t.pit.limEnd) {
+                    const exitFraction = (curPitS - t.pit.limEnd) / Math.max(1, t.pit.len - t.pit.limEnd);
+                    targetSpeedMs = pitLimitMs + exitFraction * 35;
+                } else {
+                    targetSpeedMs = pitLimitMs * 0.95;
+                }
+            }
+        }
+
+        if (!inPit) {
+            if (!t._racingLinePoints && t.racingLine?.offset) {
+                t._racingLinePoints = RacingLine.linePoints(t.path, t.racingLine.offset);
+            }
+            const rlPoints = t._racingLinePoints || t.path;
+            const near = Physics.nearestOnTrack(p.x, p.y, t);
+            const curS = t.cum[near.i] + near.t * (t.cum[near.i + 1] - t.cum[near.i]);
+
+            // Speed-sensitive lookahead: 14m at low speed, up to 26m at high speed
+            const lookAheadM = Math.max(14, Math.min(26, 12 + speedMs * 0.15));
+            const lookAheadDist = lookAheadM * t.scale;
+            const totalS = t.cum[t.path.length];
+            const targetS = (((curS + lookAheadDist) % totalS) + totalS) % totalS;
+
+            // Interpolate target point along the optimal racing line
+            const n = t.path.length;
+            let idx = 0;
+            for (let i = 0; i < n; i++) {
+                if (t.cum[i + 1] >= targetS) { idx = i; break; }
+            }
+            const span = Math.max(1, t.cum[idx + 1] - t.cum[idx]);
+            const tRatio = Math.max(0, Math.min(1, (targetS - t.cum[idx]) / span));
+            const p1 = rlPoints[idx], p2 = rlPoints[(idx + 1) % n];
+            targetX = p1.x + tRatio * (p2.x - p1.x);
+            targetY = p1.y + tRatio * (p2.y - p1.y);
+
+            // Speed target from racing line speed profile
+            targetSpeedMs = t.racingLine?.speed ? t.racingLine.speed[near.i] : Infinity;
+        }
+
+        const targetAngle = Math.atan2(targetY - p.y, targetX - p.x);
+        let angleDiff = targetAngle - p.angle;
+        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+        while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+
+        const steerTarget = Math.max(-1, Math.min(1, angleDiff * 3.0));
+
+        // Stuck detection & recovery
+        if (!p._botStuckTicks) p._botStuckTicks = 0;
+        if (!this.frozen && speedMs < 0.6 && p.input?.throttle > 0) {
+            p._botStuckTicks++;
+        } else {
+            p._botStuckTicks = Math.max(0, p._botStuckTicks - 2);
+        }
+
+        if (p._botStuckTicks > 35 && p._botStuckTicks < 75) {
+            p.assist = { steer: 1, brake: 0 };
+            p.input = {
+                throttle: 0,
+                brake: 1,
+                explicitReverse: true,
+                steer: -steerTarget,
+                drs: false,
+                isBot: true
+            };
+            return;
+        }
+
+        const needBrake = !this.frozen && speedMs > targetSpeedMs * 1.02;
+
+        p.assist = { steer: 1, brake: 1 };
+        p.input = {
+            throttle: this.frozen ? 0 : (needBrake ? 0 : 1.0),
+            brake: this.frozen ? 0 : (needBrake ? Math.min(1, (speedMs - targetSpeedMs) / 5) : 0),
+            steer: steerTarget,
+            drs: !inPit,
+            isBot: true
+        };
+
+        if (this.seq % 30 === 0 && Logger.bot) {
+            Logger.bot(`status: ${this.frozen ? 'FROZEN' : (inPit ? 'PIT' : 'RACING')} | pos: (${p.x.toFixed(1)}, ${p.y.toFixed(1)}) | speed: ${(speedMs * 3.6).toFixed(1)} km/h (target: ${(targetSpeedMs * 3.6).toFixed(1)} km/h) | steer: ${steerTarget.toFixed(2)} | throttle: ${p.input.throttle} | brake: ${p.input.brake.toFixed(2)} | lap: ${p.lap} | cp: ${p.checkpoint} | limits: ${p.limits}`);
+        }
     }
 
     update() {
@@ -347,6 +465,10 @@ class Game {
             // The client resends every 100 ms; silence (hidden tab, dropped link) means let go, not full throttle forever
             for (const id of ids) {
                 const p = this.players[id];
+                if (p.isBot) {
+                    this.updateBotInput(p);
+                    continue;
+                }
                 if (p.inputAt !== undefined && this.clock - p.inputAt > INPUT_TIMEOUT_S) p.input = { throttle: 0, brake: 0, steer: 0, drs: false };
                 // One input slot per tick. A missing input is guessed (last one repeated) in its own slot and its late copy
                 // dropped, so the server never runs an extra tick the client didn't: corrections stay input-sized, not a tick of travel
@@ -500,6 +622,7 @@ class Game {
     // All four wheels past the real white line (t.limit), once per excursion; pit lane, quali out-lap exempt, and so is
     // rejoining from the pit exit until the car is first back inside the line
     checkLimits(p, near) {
+        if (this.settings.trackLimits === false) return;
         const t = this.track;
         if (p.inPit) p.fromPit = true;
         const line = edgeAt(t, near, p.x, p.y); // the real white line on this side, here

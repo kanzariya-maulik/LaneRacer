@@ -4,6 +4,9 @@ import { pickVoices } from './voices.js';
 import { doppler, pickLoops, engineFx } from './mix.js';
 import { V8Synth, ENGINE_PROFILES } from './v8.js';
 import * as S from './sfx.js';
+import { music, TRACKS } from './music.js';
+
+export { music, TRACKS };
 
 const VALID_PROFILES = Object.keys(ENGINE_PROFILES);
 const MAX_OTHERS = 4, MAX_DIST_M = 300, REF_M = 15, PICK_EVERY_S = 0.25;
@@ -32,7 +35,7 @@ export function init() {
         if (!ctx) return;
         if (document.hidden || muted) ctx.suspend(); else ctx.resume();
     });
-    window.lanraceAudio = { init, unlock, update, event, setVolume, setMode, setEngineType, toggleMute, debug };
+    window.lanraceAudio = { init, unlock, update, event, setVolume, setMode, setEngineType, setMusicTrack, setMusicVolume, toggleMute, debug, music };
 }
 
 // Browsers only start audio from a user gesture: the first click/key (Join counts) creates the context
@@ -51,6 +54,7 @@ export function unlock() {
     master.connect(limiter).connect(ctx.destination);
     noise = S.makeNoise(ctx);
     wind = S.makeWind(ctx, master, noise);
+    music.init(ctx, master);
     starting = (async () => {
         // AudioWorklet needs a secure context (https or localhost): LAN players on http://<ip> get the same V8 synth
         // through a ScriptProcessor instead
@@ -275,6 +279,14 @@ export function setEngineType(type) {
             ownVoice = null;
         }
     }
+}
+
+export function setMusicTrack(trackId) {
+    music.setTrack(trackId);
+}
+
+export function setMusicVolume(vol) {
+    music.setVolume(vol);
 }
 
 export function toggleMute() {

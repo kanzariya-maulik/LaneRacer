@@ -4,7 +4,7 @@ const lobby = require('./lobby');
 const { withNetSim } = require('./netsim');
 const netlog = require('./netlog');
 
-const TRACKS = Track.loadAll(); // throws at startup if track data is missing
+const TRACKS = Track.loadAll(true); // throws at startup if track data is missing
 const RESULTS_MS = 8000;
 const FINISH_MS = 15000; // results screen time before everyone returns to the lobby
 
@@ -51,9 +51,9 @@ function removePlayer(io, id) {
     io.emit('player_left', id);
 
     if (id === state.hostId) {
-        const remaining = Object.keys(state.players);
-        if (remaining.length > 0) {
-            state.hostId = remaining[0];
+        const remainingHumans = Object.values(state.players).filter(p => !p.isBot);
+        if (remainingHumans.length > 0) {
+            state.hostId = remainingHumans[0].id;
             io.emit('lobby_state_sync', lobbySnapshot());
         } else {
             state.hostId = null;
@@ -65,6 +65,17 @@ function removePlayer(io, id) {
             state.status = 'LOBBY';
         }
     }
+
+    const activeHumans = Object.values(state.players).filter(p => !p.isSpectating && !p.isBot);
+    if (activeHumans.length === 0 && state.status !== 'LOBBY') {
+        clearTimers();
+        if (gameInstance) {
+            gameInstance.stop();
+            gameInstance = null;
+        }
+        setStatus(io, 'LOBBY');
+    }
+    io.emit('lobby_state_sync', lobbySnapshot());
 }
 
 function lobbySnapshot() {
@@ -106,7 +117,7 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
                 teamId: check.team.id,
                 color: check.team.chatColor,
                 assist: lobby.sanitizeAssist(data.assist), // each player's own choice, changeable any time
-                isReady: false,
+                isReady: true,
                 isSpectating: state.status !== 'LOBBY'
             };
             if (isFirstPlayer) state.hostId = socket.id;
@@ -172,6 +183,14 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
         });
         socket.on('kick_player', (id) => {
             if (!isHost() || id === socket.id || !state.players[id]) return;
+            if (state.players[id].isBot) {
+                state.settings.botCar = false;
+                netlog.log(`[KICK] Bot (${id}) removed by host`);
+                removePlayer(io, id);
+                io.emit('settings_updated', state.settings);
+                io.emit('lobby_state_sync', lobbySnapshot());
+                return;
+            }
             netlog.log(`[KICK] ${state.players[id].username} (${id}) by host`);
             sockets[id]?.emit('kicked');
             removePlayer(io, id); // their connection stays open: they're back on the join screen and may join again
@@ -191,17 +210,42 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
             io.emit('player_ready_sync', { id: socket.id, isReady: !!isReady });
         });
 
+const BOT_ID = 'bot-ai-1';
+function syncBotPlayer(io) {
+    if (state.settings.botCar) {
+        if (!state.players[BOT_ID]) {
+            const botTeam = lobby.TEAMS.find(t => Object.values(state.players).filter(p => p.teamId === t.id).length < t.maxPlayers) || lobby.TEAMS[0];
+            state.players[BOT_ID] = {
+                id: BOT_ID,
+                username: 'AI Bot (Computer)',
+                teamId: botTeam.id,
+                color: botTeam.chatColor || '#a855f7',
+                isReady: true,
+                isSpectating: false,
+                isBot: true,
+                assist: { steer: 1, brake: 1 }
+            };
+            io.emit('lobby_state_sync', lobbySnapshot());
+        }
+    } else if (state.players[BOT_ID]) {
+        delete state.players[BOT_ID];
+        io.emit('lobby_state_sync', lobbySnapshot());
+    }
+}
+
         socket.on('update_settings', (settings) => {
             if (socket.id !== state.hostId || state.status !== 'LOBBY') return;
-            state.settings = lobby.sanitizeSettings(state.settings, settings, Track.TRACK_IDS);
+            state.settings = lobby.sanitizeSettings(state.settings, settings, Track.ALL_TRACK_IDS);
+            syncBotPlayer(io);
             io.emit('settings_updated', state.settings);
+            io.emit('lobby_state_sync', lobbySnapshot());
         });
 
         socket.on('start_game', () => {
             if (socket.id !== state.hostId || state.status !== 'LOBBY') return;
 
             const notReady = Object.values(state.players)
-                .some(p => p.id !== state.hostId && !p.isReady && !p.isSpectating);
+                .some(p => p.id !== state.hostId && !p.isReady && !p.isSpectating && !p.isBot);
             if (notReady) {
                 socket.emit('chat_msg', { username: 'SYSTEM', color: '#ff0000', msg: 'Not all players are ready!' });
                 return;
@@ -290,7 +334,7 @@ function finishRace(io) {
     later(() => {
         state.status = 'LOBBY';
         for (const id in state.players) {
-            state.players[id].isReady = false;
+            state.players[id].isReady = true;
             state.players[id].isSpectating = false;
         }
         io.emit('lobby_state_sync', lobbySnapshot());

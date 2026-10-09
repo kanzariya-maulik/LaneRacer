@@ -147,9 +147,19 @@ window.addEventListener('resize', resize);
 resize();
 
 // ---------- input ----------
-const keys = { up: false, down: false, left: false, right: false, drs: false };
-const KEYMAP = { w: 'up', arrowup: 'up', s: 'down', arrowdown: 'down', a: 'left', arrowleft: 'left', d: 'right', arrowright: 'right', e: 'drs' };
-let input = { throttle: 0, brake: 0, steer: 0, drs: false };
+const keys = { up: false, down: false, left: false, right: false, drs: false, handbrake: false };
+const KEYMAP = {
+    w: 'up', arrowup: 'up',
+    s: 'down', arrowdown: 'down',
+    a: 'left', arrowleft: 'left',
+    d: 'right', arrowright: 'right',
+    e: 'drs',
+    ' ': 'handbrake',
+    space: 'handbrake',
+    b: 'handbrake',
+    x: 'handbrake'
+};
+let input = { throttle: 0, brake: 0, steer: 0, drs: false, handbrake: false };
 let touchInput = null;
 let predictor = null, simAcc = 0, inputSeq = 0, sentInputs = []; // client-side prediction (own car)
 let spectateId = null; // spectators follow this driver
@@ -174,29 +184,71 @@ function toggleLine() {
 
 // Assist on/off for your own car, any time (lobby select or Q / gamepad View): server and prediction switch together
 let padView = false;
+let savedBrakeAssist = 100;
+try {
+    const saved = store.get('lanrace.assist') || '100,100';
+    const parts = String(saved).split(',');
+    const b = parseInt(parts[1] ?? parts[0], 10);
+    if (b > 0) savedBrakeAssist = b;
+} catch (e) {}
+
 function toggleAssist() {
     if (isSpectator()) return;
-    // Cycle: Full (100,100) → Steer only (100,0) → Brake only (0,100) → Off (0,0) → Full
     const cur = store.get('lanrace.assist') || '100,100';
-    const cycle = { '100,100': '100,0', '100,0': '0,100', '0,100': '0,0', '0,0': '100,100',
-                    'full': '100,0', 'off': '100,100' };
-    window.setAssist?.(cycle[cur] ?? '0,0', true); // instant: the server must switch the same tick the predictor does
+    const parts = String(cur).split(',');
+    const curB = parseInt(parts[1] ?? (cur === 'off' ? 0 : 100), 10);
+
+    if (curB > 0) {
+        // Toggle OFF: save current brake assist and set to 0%
+        savedBrakeAssist = curB;
+        window.setAssist?.('100,0', true);
+    } else {
+        // Toggle ON: restore previous setting (defaulting to 100%)
+        const target = savedBrakeAssist > 0 ? savedBrakeAssist : 100;
+        window.setAssist?.(`100,${target}`, true);
+    }
 }
+
+let brakeAssistHoldTimer = null;
+let brakeAssistRepeatTimer = null;
+
+function adjustBrakeAssist(delta) {
+    if (isSpectator()) return;
+    const cur = store.get('lanrace.assist') || '100,100';
+    const parts = String(cur).split(',');
+    const curB = parseInt(parts[1] ?? (cur === 'off' ? 0 : 100), 10);
+    const newB = Math.max(0, Math.min(100, Math.round(curB / 10) * 10 + delta));
+    if (newB === curB) return;
+
+    if (newB > 0) savedBrakeAssist = newB;
+    window.setAssist?.(`100,${newB}`, true);
+}
+
+function startBrakeAssistHold(delta) {
+    stopBrakeAssistHold();
+    adjustBrakeAssist(delta);
+    brakeAssistHoldTimer = setTimeout(() => {
+        brakeAssistRepeatTimer = setInterval(() => {
+            adjustBrakeAssist(delta);
+        }, 120);
+    }, 280);
+}
+
+function stopBrakeAssistHold() {
+    if (brakeAssistHoldTimer) { clearTimeout(brakeAssistHoldTimer); brakeAssistHoldTimer = null; }
+    if (brakeAssistRepeatTimer) { clearInterval(brakeAssistRepeatTimer); brakeAssistRepeatTimer = null; }
+}
+
 window.onAssistChange = (v) => {
     if (predictor) { predictor.assist = v; if (predictor.car) predictor.car.assist = v; }
     if (clientState.status !== 'LOBBY') {
-        // Build a short human-readable label for the banner
-        let label = 'ASSIST: ';
-        if (v === 'off' || v === '0,0') { label += 'OFF'; }
-        else if (v === 'full' || v === '100,100') { label += 'FULL'; }
-        else {
-            const parts = String(v).split(',');
-            const s = parseFloat(parts[0] ?? 100), b = parseFloat(parts[1] ?? 100);
-            if (Number.isFinite(s) && Number.isFinite(b)) {
-                label += `STEER ${Math.round(s)}%  BRAKE ${Math.round(b)}%`;
-            } else { label += v.toUpperCase(); }
+        const parts = String(v).split(',');
+        const b = parseInt(parts[1] ?? (v === 'off' ? 0 : 100), 10);
+        if (b === 0) {
+            window.showBanner?.('BRAKE ASSIST: OFF (0%)', true);
+        } else {
+            window.showBanner?.(`BRAKE ASSIST: ${b}%`, true);
         }
-        window.showBanner?.(label, true);
     }
 };
 
@@ -207,8 +259,12 @@ function watchingAfterFinish() {
     const gs = clientState.gameState, me = gs?.[clientState.me];
     if (!me || !me.finished || isSpectator()) { finishedAt = null; ownView = false; return false; }
     finishedAt ??= performance.now();
-    if (ownView || performance.now() - finishedAt < WATCH_DELAY_MS) return false;
-    spectateId = watchTarget(rankedCarIds(), clientState.me, (id) => !!gs[id]?.finished, spectateId);
+    if (ownView || (clientState.status !== 'FINISHED' && performance.now() - finishedAt < WATCH_DELAY_MS)) return false;
+    const ranked = rankedCarIds();
+    spectateId = watchTarget(ranked, clientState.me, (id) => !!gs[id]?.finished, spectateId);
+    if (!spectateId && ranked.length) {
+        spectateId = ranked.find(id => id !== clientState.me) || null;
+    }
     return spectateId !== null; // nobody left running: stay on your own car
 }
 const watching = () => isSpectator() || watchingAfterFinish();
@@ -223,13 +279,18 @@ function onKey(e, down) {
     if (down && key === 't' && !e.repeat && clientState.status !== 'LOBBY') toggleTower();
     if (down && key === 'r' && !e.repeat && clientState.status !== 'LOBBY') toggleLine();
     if (down && key === 'q' && !e.repeat && clientState.status !== 'LOBBY') toggleAssist();
+    if (down && (e.key === '<' || e.key === ',') && !e.repeat && clientState.status !== 'LOBBY') startBrakeAssistHold(-10);
+    if (down && (e.key === '>' || e.key === '.') && !e.repeat && clientState.status !== 'LOBBY') startBrakeAssistHold(10);
+    if (!down && (e.key === '<' || e.key === ',' || e.key === '>' || e.key === '.')) stopBrakeAssistHold();
     if (down && key === 'escape' && !e.repeat) toggleHostPanel();
     if (down && key === 'm' && !e.repeat) window.showBanner?.(Sound.toggleMute() ? 'SOUND: MUTED' : 'SOUND: ON', true);
     if (down && e.key === 'F3') { e.preventDefault(); netstatsOn = !netstatsOn; netstatsEl.classList.toggle('hidden', !netstatsOn); }
-    if (down && clientState.status !== 'LOBBY' && watching()) {
+    if (down && clientState.status !== 'LOBBY' && (watching() || clientState.gameState?.[clientState.me]?.finished)) {
         const others = rankedCarIds().filter((id) => id !== clientState.me); // finished: every car but your own
-        if (key === 'arrowleft') spectateId = stepFollow(others, spectateId, -1);
-        if (key === 'arrowright') spectateId = stepFollow(others, spectateId, 1);
+        if (others.length) {
+            if (key === 'arrowleft') spectateId = stepFollow(others, spectateId, -1);
+            if (key === 'arrowright') spectateId = stepFollow(others, spectateId, 1);
+        }
     }
     if (down && key === 'v' && !e.repeat && clientState.gameState?.[clientState.me]?.finished && !isSpectator()) {
         ownView = !ownView;
@@ -245,8 +306,9 @@ window.addEventListener('keydown', (e) => onKey(e, true));
 window.addEventListener('keyup', (e) => onKey(e, false));
 // A keyup missed while the window lost focus (alt-tab, tab switch) must not leave throttle or steering held
 function releaseKeys() {
+    stopBrakeAssistHold();
     for (const k in keys) keys[k] = false;
-    input = { throttle: 0, brake: 0, steer: 0, drs: false };
+    input = { throttle: 0, brake: 0, steer: 0, drs: false, handbrake: false };
     simStep(false); // the release goes out now, not at the next frame (a hidden tab has none)
 }
 window.addEventListener('blur', releaseKeys);
@@ -256,10 +318,22 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) relea
 function simStep(sample = true) {
     if (sample) {
         const pad = gamepadInput((navigator.getGamepads ? [...navigator.getGamepads()] : []).find(Boolean));
-        const car = predictor?.car, lift = car ? liftOffBrake(parseAssist(predictor.assist).brake, (car.speed || 0) / predictor.track.scale) : 0;
-        input = hostPanel ? { throttle: 0, brake: 0, steer: 0, drs: false } : pad || touchInput || keyboardStep(input, keys, STEP_S, lift); // menu open: hands off
+        const autoBrakeSetting = (window.lanraceMem?.['lanrace.autobrake'] ?? (typeof localStorage !== 'undefined' ? localStorage.getItem('lanrace.autobrake') : null) ?? 'on') === 'on';
+        const car = predictor?.car;
+        const carSpeed = car ? Math.hypot(car.vx, car.vy) / scale : 0;
+        // When autobrake is on (default), releasing W brakes when rolling forward. At standstill, lift = 0 (no reverse).
+        const lift = autoBrakeSetting && carSpeed > 0.5 ? 1.0 : 0;
+        input = hostPanel ? { throttle: 0, brake: 0, steer: 0, drs: false, handbrake: false, explicitReverse: false } : pad || touchInput || keyboardStep(input, keys, STEP_S, lift); // menu open: hands off
     }
-    const stamped = { seq: ++inputSeq, steer: input.steer, throttle: input.throttle, brake: input.brake, drs: !!input.drs };
+    const stamped = {
+        seq: ++inputSeq,
+        steer: input.steer,
+        throttle: input.throttle,
+        brake: input.brake,
+        drs: !!input.drs,
+        handbrake: !!input.handbrake,
+        explicitReverse: input.explicitReverse === true
+    };
     if (predictor && predictor.car) predictor.step(stamped);
     sentInputs.push(stamped);
     if (sentInputs.length > 6) sentInputs.shift();
@@ -555,6 +629,90 @@ function startLine(start, width) {
 const side = (p, angle, off) => ({ x: p.x - Math.sin(angle) * off, y: p.y + Math.cos(angle) * off });
 // Rotation that turns a plane's +z normal to face against heading a (toward an approaching car)
 const facing = (a) => Math.atan2(-Math.cos(a), -Math.sin(a));
+
+let drsBillboardTex = null;
+function getDrsBillboardTexture() {
+    if (!drsBillboardTex) {
+        const c = document.createElement('canvas');
+        c.width = 512; c.height = 256;
+        const g = c.getContext('2d');
+        g.fillStyle = '#064e3b';
+        g.fillRect(0, 0, 512, 256);
+        g.strokeStyle = '#22c55e';
+        g.lineWidth = 14;
+        g.strokeRect(7, 7, 498, 242);
+        g.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+        g.lineWidth = 2;
+        g.strokeRect(18, 18, 476, 220);
+        g.fillStyle = '#22c55e';
+        g.fillRect(20, 20, 472, 42);
+        g.fillStyle = '#022c22';
+        g.font = '900 24px Outfit, sans-serif';
+        g.textAlign = 'center';
+        g.textBaseline = 'middle';
+        g.fillText('FIA DRS ZONE', 256, 41);
+        g.fillStyle = '#ffffff';
+        g.font = '900 112px Outfit, sans-serif';
+        g.fillText('DRS', 256, 138);
+        g.fillStyle = '#22c55e';
+        g.font = '800 22px Outfit, sans-serif';
+        g.fillText('▶▶ ACTIVATION ▶▶', 256, 216);
+        drsBillboardTex = new THREE.CanvasTexture(c);
+        drsBillboardTex.colorSpace = THREE.SRGBColorSpace;
+    }
+    return drsBillboardTex;
+}
+
+function buildDrsBoards(t) {
+    if (!t.drsZones || !t.drsZones.length) return;
+    const g = new THREE.Group();
+    const half = t.width / 2;
+    const total = t.cum[t.path.length];
+    const tex = getDrsBillboardTexture();
+    const w = 3.6 * scale, h = 1.8 * scale, postH = 1.4 * scale;
+
+    const boardMat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.6 });
+    const backMat = new THREE.MeshStandardMaterial({ color: 0x1f2937, roughness: 0.8 });
+    const postMat = new THREE.MeshStandardMaterial({ color: 0x374151, metalness: 0.6, roughness: 0.4 });
+
+    for (const z of t.drsZones) {
+        const absS = (((z.startS + (t.startS || 0)) % total) + total) % total;
+        let i = 0;
+        while (i < t.path.length && t.cum[i + 1] < absS) i++;
+        const p1 = t.path[i], p2 = t.path[(i + 1) % t.path.length];
+        const segLen = t.cum[i + 1] - t.cum[i] || 1;
+        const frac = (absS - t.cum[i]) / segLen;
+        const px = p1.x + (p2.x - p1.x) * frac;
+        const py = p1.y + (p2.y - p1.y) * frac;
+        const ang = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+
+        for (const dir of [1, -1]) {
+            const bPos = side({ x: px, y: py }, ang, dir * (half + 2.5 * scale));
+            const baseY = roadY(bPos.x, bPos.y, ang);
+            const centerH = baseY + postH + h / 2;
+
+            const unit = new THREE.Group();
+            unit.position.set(bPos.x, centerH, bPos.y);
+            unit.rotation.y = facing(ang);
+
+            const front = new THREE.Mesh(new THREE.PlaneGeometry(w, h), boardMat);
+            front.position.z = 0.05 * scale;
+            unit.add(front);
+
+            const back = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.08 * scale), backMat);
+            unit.add(back);
+
+            for (const legSide of [-0.35, 0.35]) {
+                const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.06 * scale, 0.06 * scale, postH + h / 2, 6), postMat);
+                leg.position.set(legSide * w, -(postH + h / 2) / 2, 0);
+                unit.add(leg);
+            }
+
+            g.add(unit);
+        }
+    }
+    world.add(g);
+}
 
 // Text on a plane: signs, boards, grid numbers
 function textPlane(text, w, h, bg, fg = '#fff') {
@@ -1286,6 +1444,7 @@ function buildWorld(t) {
     gridBoxes(t.startPositions);
     if (t.pit) buildPit(t.pit, t);
     for (const b of t.bridges || []) buildBridge(b, t);
+    buildDrsBoards(t);
     snapCamera = true;
 }
 
@@ -1446,14 +1605,52 @@ function updateCars(dt) {
             car.tag.visible = fade > 0;
             car.tag.material.opacity = fade;
         }
-        const ghost = !!s.ghost && id !== clientState.me;
-        if (ghost !== car.ghost) {
-            car.ghost = ghost;
+        const isWatch = watching();
+        const focusId = isWatch && spectateId && gs[spectateId] ? spectateId : clientState.me;
+        const meCar = gs[focusId];
+        const isFocusCar = id === focusId;
+        const noCollision = clientState.settings?.collisions === false;
+        const isGhost = !!s.ghost;
+
+        let targetOpacity = 1.0;
+        let isTransparent = false;
+
+        if (isFocusCar) {
+            // Our car stays same (solid, opaque)
+            targetOpacity = 1.0;
+            isTransparent = false;
+        } else if (noCollision || isGhost) {
+            // In no-collision mode or when ghost is on:
+            const distM = meCar ? Math.hypot(s.x - meCar.x, s.y - meCar.y) / scale : 999;
+            if (noCollision && distM < 10) {
+                // When other cars are within 10m in no-collision mode, smoothly reduce their opacity
+                // based on proximity factor so they don't visually clutter with 4-5 cars on top of each other!
+                const t = Math.max(0, Math.min(1, (distM - 1.2) / 8.8)); // 0 at ~1.2m, 1 at 10m
+                targetOpacity = Math.max(0.12, Math.min(0.60, 0.12 + 0.48 * t));
+                isTransparent = true;
+                if (distM < 5) {
+                    for (const w of car.wheels) w.userData.show = false;
+                }
+            } else if (isGhost) {
+                targetOpacity = 0.5;
+                isTransparent = true;
+            } else if (noCollision) {
+                targetOpacity = 0.85;
+                isTransparent = true;
+            }
+        }
+
+        if (car.lastOpacity !== targetOpacity) {
+            car.lastOpacity = targetOpacity;
+            car.ghost = isTransparent;
             car.root.traverse((o) => {
                 if (!o.material || o.isSprite) return;
-                o.material.transparent = ghost;
-                o.material.opacity = ghost ? 0.5 : 1;
-                o.material.needsUpdate = true; // transparency changes the shader; only runs when ghost flips
+                const mat = o.material;
+                if (mat.transparent !== isTransparent) {
+                    mat.transparent = isTransparent;
+                    mat.needsUpdate = true;
+                }
+                mat.opacity = targetOpacity;
             });
         }
     }
@@ -1784,36 +1981,56 @@ window.showBanner = (text, good = false) => {
 
 function updateHUD(withTower = true) {
     const gs = clientState.gameState;
-    const me = gs[clientState.me];
-    const racing = me && !isSpectator();
+    if (!gs) return;
+    const isWatch = watching();
+    if (isWatch && (!spectateId || !gs[spectateId])) {
+        const ranked = rankedCarIds();
+        spectateId = ranked.find(id => id !== clientState.me) || ranked[0] || null;
+    }
+    const followId = isWatch && spectateId && gs[spectateId] ? spectateId : clientState.me;
+    const target = gs[followId] || gs[clientState.me];
+    const isTargetMe = followId === clientState.me;
     const fastest = clientState.fastestLap?.time ?? Infinity; // the server's session fastest lap (kept if its holder leaves)
     const sec = (s) => sectorClass(s, clientState.sessionBest, clientState.sessionBestIds); // live: purple → green when beaten
 
     $('hud-total').innerText = Object.keys(gs).length;
-    // Finished and watching: say whose car is on screen and how to switch
-    const w = watchingAfterFinish(), wo = $('watch-overlay');
-    wo.classList.toggle('hidden', !w);
-    if (w) $('watch-name').textContent = clientState.players[spectateId]?.username || '';
-    $('hud-rank').innerText = racing ? me.rank : '--';
-    $('hud-lap').innerText = racing ? lapLabel(me.lap) : '--';
-    $('hud-laps').textContent = racing && clientState.status !== 'QUALIFYING' ? `/${clientState.settings.maxLaps}` : '';
-    $('hud-speed').innerText = racing ? kmh(me.speed) : '--';
+    // Finished or spectating: say whose car is on screen and how to switch
+    const w = isWatch, wo = $('watch-overlay'), so = $('spectator-overlay');
+    if (isSpectator()) {
+        wo.classList.add('hidden');
+        if (so) {
+            const followedName = clientState.players[followId]?.username || '';
+            const spText = so.querySelector('p');
+            if (spText) spText.textContent = followedName ? `Watching ${followedName} · ← → to switch car` : 'Race in progress · ← → to switch car';
+        }
+    } else {
+        wo.classList.toggle('hidden', !w);
+        if (w) $('watch-name').textContent = clientState.players[followId]?.username || '';
+    }
+    $('hud-rank').innerText = target ? target.rank : '--';
+    $('hud-lap').innerText = target ? lapLabel(target.lap) : '--';
+    $('hud-laps').textContent = target && clientState.status !== 'QUALIFYING' ? `/${clientState.settings.maxLaps}` : '';
+    $('hud-speed').innerText = target ? kmh(target.speed) : '--';
 
-    // Own lap times: purple while it's the session fastest, green once beaten (still your personal best)
+    // Target car lap times: purple while it's the session fastest, green once beaten (still your personal best)
     const curEl = $('lt-current');
-    curEl.innerText = racing ? fmtTime(me.curLap) : '--';
-    curEl.classList.toggle('t-red', !!racing && me.lapValid === false);
+    curEl.innerText = target && target.curLap !== null && target.curLap !== undefined ? fmtTime(target.curLap) : '--';
+    curEl.classList.toggle('t-red', !!target && target.lapValid === false);
     const lastEl = $('lt-last');
-    const deleted = !!racing && me.lastValid === false;
-    lastEl.innerText = racing ? fmtTime(me.lastLap) + (deleted ? ' DELETED' : '') : '--';
-    const lastCls = racing ? lastLapClass(me.lastLap, me.bestLap, clientState.fastestLap?.time, deleted) : '';
+    const deleted = !!target && target.lastValid === false;
+    lastEl.innerText = target && target.lastLap !== null && target.lastLap !== undefined ? fmtTime(target.lastLap) + (deleted ? ' DELETED' : '') : '--';
+    const lastCls = target ? lastLapClass(target.lastLap, target.bestLap, clientState.fastestLap?.time, deleted) : '';
     for (const c of ['t-red', 't-purple', 't-green']) lastEl.classList.toggle(c, c === lastCls);
-    $('lt-best').innerText = racing ? fmtTime(me.bestLap) : '--';
-    const delta = racing && !deleted ? lapDelta(me.lastLap, me.bestLap) : null;
+    $('lt-best').innerText = target && target.bestLap !== null && target.bestLap !== undefined ? fmtTime(target.bestLap) : '--';
+    const delta = target && !deleted ? lapDelta(target.lastLap, target.bestLap) : null;
     $('lt-delta').textContent = delta ? delta.text : '';
     $('lt-delta').className = delta ? delta.cls : '';
     for (let i = 0; i < 3; i++) {
-        const el = $(`sec-${i + 1}`), s = racing ? clientState.mySectors[i] : null;
+        const el = $(`sec-${i + 1}`);
+        let s = null;
+        if (isTargetMe) s = clientState.mySectors[i];
+        else if (liveSec[followId]?.[i]) s = liveSec[followId][i];
+        else if (target?.bestLapSectors?.[i] !== null && target?.bestLapSectors?.[i] !== undefined) s = { time: target.bestLapSectors[i], valid: true };
         el.children[1].textContent = s ? s.time.toFixed(3) : `S${i + 1}`;
         el.className = `sec ${s ? sec(s) : ''}`;
         const best = clientState.sessionBest[i]; // purple sector: the session's best and who holds it
@@ -1829,21 +2046,21 @@ function updateHUD(withTower = true) {
     let bar = '';
     if (clientState.status === 'QUALIFYING' && sess) {
         bar = `QUALIFYING ${fmtClock(sess.endsAt - (clientState.pausedAt ?? Date.now()))}`; // frozen while paused
-        if (racing) bar += me.finished ? ` · QUALIFYING COMPLETE — P${me.rank}` : me.curLap === null ? (me.inPit ? ' · PIT LANE' : ' · OUT LAP') : ` · LAP ${me.lap + 1}/${clientState.settings.qualiLaps ?? 2}`;
+        if (target) bar += target.finished ? ` · QUALIFYING COMPLETE — P${target.rank}` : target.curLap === null ? (target.inPit ? ' · PIT LANE' : ' · OUT LAP') : ` · LAP ${target.lap + 1}/${clientState.settings.qualiLaps ?? 2}`;
     } else if (clientState.status === 'RACE' || clientState.status === 'FINISHED') {
         const leader = Object.values(gs).find(p => p.rank === 1);
-        const lap = racing ? me.lap : leader ? leader.lap : 0;
-        if (!racing) bar = `LAP ${lapLabel(lap)}/${clientState.settings.maxLaps}`; // racing: it's in the LAP box
+        const lap = target ? target.lap : leader ? leader.lap : 0;
+        bar = `LAP ${lapLabel(lap)}/${clientState.settings.maxLaps}`; // racing: it's in the LAP box
     }
     $('session-bar').textContent = bar;
-    $('pit-limiter').classList.toggle('hidden', !(racing && me.limiter));
-    $('drs-badge').className = !racing ? 'drs-off' : me.drs ? 'drs-open' : me.drsAvailable ? 'drs-avail' : 'drs-off';
+    $('pit-limiter').classList.toggle('hidden', !(target && target.limiter));
+    $('drs-badge').className = !target ? 'drs-off' : target.drs ? 'drs-open' : target.drsAvailable ? 'drs-avail' : 'drs-off';
     let hint = '';
-    if (racing && clientState.trackData) {
+    if (target && clientState.trackData) {
         const t = clientState.trackData, total = t.cum[t.path.length];
-        drsIdx = trackIndex(t.path, me.x, me.y, drsIdx, t.width);
+        drsIdx = trackIndex(t.path, target.x, target.y, drsIdx, t.width);
         const lapS = (((t.cum[drsIdx] - (t.startS || 0)) % total) + total) % total;
-        hint = drsHint({ mode: clientState.status === 'QUALIFYING' ? 'quali' : 'race', inPit: me.inPit, drs: me.drs, drsAvailable: me.drsAvailable, lap: me.lap, inZone: inDrsZone(t.drsZones || [], lapS) });
+        hint = drsHint({ mode: clientState.status === 'QUALIFYING' ? 'quali' : 'race', inPit: target.inPit, drs: target.drs, drsAvailable: target.drsAvailable, lap: target.lap, inZone: inDrsZone(t.drsZones || [], lapS) });
     }
     $('drs-hint').textContent = hint;
 
@@ -1899,6 +2116,138 @@ function updateHUD(withTower = true) {
             ol.appendChild(li);
         });
     }
+    updateRadar();
+}
+
+const radarBubblesMap = new Map();
+
+function updateRadar() {
+    const gs = clientState.gameState;
+    const radarContainer = $('proximity-radar');
+    if (!radarContainer) return;
+
+    if (!gs || clientState.status === 'LOBBY' || !camera) {
+        radarContainer.classList.add('hidden');
+        for (const [id, el] of radarBubblesMap.entries()) el.remove();
+        radarBubblesMap.clear();
+        return;
+    }
+
+    const isWatch = watching();
+    const followId = isWatch && spectateId && gs[spectateId] ? spectateId : clientState.me;
+    const me = gs[followId];
+    if (!me) {
+        radarContainer.classList.add('hidden');
+        for (const [id, el] of radarBubblesMap.entries()) el.remove();
+        radarBubblesMap.clear();
+        return;
+    }
+
+    const W = window.innerWidth, H = window.innerHeight;
+    const pad = 28;
+    const minX = pad + 22, maxX = W - pad - 22;
+    const minY = pad + 22, maxY = H - pad - 22;
+    const halfW = (maxX - minX) / 2;
+    const halfH = (maxY - minY) / 2;
+    const midX = (minX + maxX) / 2;
+    const midY = (minY + maxY) / 2;
+
+    const mePos = new THREE.Vector3(me.x, cars[followId]?.root ? cars[followId].root.position.y : ROAD_DRAW_Y, me.y);
+    const activeIds = new Set();
+
+    for (const id in gs) {
+        if (id === followId) continue;
+        const p = gs[id];
+        const lp = clientState.players[id];
+        if (!lp) continue;
+
+        const carRoot = cars[id]?.root;
+        const carPos = carRoot ? carRoot.position.clone() : new THREE.Vector3(p.x, roadY ? roadY(p.x, p.y, p.angle) : ROAD_DRAW_Y, p.y);
+
+        // Distance limit: 100 meters
+        const distM = mePos.distanceTo(carPos) / scale;
+        if (distM > 100) continue;
+
+        // Transform into camera local coordinates
+        const camSpace = carPos.clone().applyMatrix4(camera.matrixWorldInverse);
+
+        // Project into screen Normalized Device Coordinates (NDC)
+        const ndc = carPos.clone().project(camera);
+
+        // Visibility check: If in front of camera and within visible viewport bounds, do not show bubble
+        const isVisible = (camSpace.z < 0 && ndc.x >= -0.92 && ndc.x <= 0.92 && ndc.y >= -0.92 && ndc.y <= 0.92);
+        if (isVisible) continue;
+
+        activeIds.add(id);
+
+        // Direction in screen space:
+        // camSpace.x: negative = left, positive = right
+        // camSpace.z: positive = behind (down towards bottom edge), negative = ahead (up towards top edge)
+        const dirX = camSpace.x;
+        const dirY = camSpace.z;
+        const len = Math.hypot(dirX, dirY) || 1e-5;
+        const ndx = dirX / len;
+        const ndy = dirY / len;
+
+        // Raycast from (midX, midY) in direction (ndx, ndy) to screen edge box
+        const absNdx = Math.abs(ndx);
+        const absNdy = Math.abs(ndy);
+        let s = 1;
+        if (absNdx * halfH > absNdy * halfW) {
+            s = halfW / (absNdx || 1e-5);
+        } else {
+            s = halfH / (absNdy || 1e-5);
+        }
+
+        const posX = Math.round(midX + ndx * s);
+        const posY = Math.round(midY + ndy * s);
+
+        // Angle in degrees for directional pointer
+        const arrowAngleDeg = Math.atan2(ndy, ndx) * (180 / Math.PI);
+
+        // 3-letter driver code uppercase
+        const shortName = (lp.username || 'CAR').trim().slice(0, 3).toUpperCase();
+        const teamColor = lp.color || '#38bdf8';
+        const isDanger = distM < 12;
+
+        let bubble = radarBubblesMap.get(id);
+        if (!bubble) {
+            bubble = document.createElement('div');
+            bubble.className = 'offscreen-bubble';
+            bubble.innerHTML = `
+                <div class="bubble-pointer"></div>
+                <div class="bubble-circle">
+                    <span class="bubble-tag"></span>
+                    <span class="bubble-dist"></span>
+                </div>
+            `;
+            radarContainer.appendChild(bubble);
+            radarBubblesMap.set(id, bubble);
+        }
+
+        bubble.style.transform = `translate3d(${posX}px, ${posY}px, 0)`;
+        bubble.style.setProperty('--team-color', teamColor);
+        bubble.classList.toggle('danger', isDanger);
+
+        const pointer = bubble.querySelector('.bubble-pointer');
+        if (pointer) pointer.style.transform = `rotate(${arrowAngleDeg}deg)`;
+
+        const tag = bubble.querySelector('.bubble-tag');
+        if (tag && tag.textContent !== shortName) tag.textContent = shortName;
+
+        const distEl = bubble.querySelector('.bubble-dist');
+        if (distEl) distEl.textContent = `${Math.round(distM)}m`;
+    }
+
+    // Remove bubbles for cars that entered the viewport or are no longer tracked
+    for (const [id, el] of radarBubblesMap.entries()) {
+        if (!activeIds.has(id)) {
+            el.remove();
+            radarBubblesMap.delete(id);
+        }
+    }
+
+    radarContainer.classList.toggle('hidden', activeIds.size === 0);
 }
 
 function drawMinimap() {
@@ -1917,31 +2266,168 @@ function drawMinimap() {
     const my = (y) => oy + (y - bounds.minY) * k;
 
     mm.clearRect(0, 0, W, H);
+
+    // Mini Legend in top-left
+    mm.font = 'bold 9px Outfit, sans-serif';
+    mm.textBaseline = 'middle';
+    const legendItems = [
+        { label: 'S1', color: '#38bdf8' },
+        { label: 'S2', color: '#fbbf24' },
+        { label: 'S3', color: '#ec4899' },
+        { label: 'DRS', color: '#22c55e' }
+    ];
+    let lx = 6;
+    for (const item of legendItems) {
+        mm.fillStyle = item.color;
+        mm.beginPath();
+        mm.arc(lx + 4, 10, 3, 0, Math.PI * 2);
+        mm.fill();
+        mm.fillStyle = 'rgba(255,255,255,0.85)';
+        mm.fillText(item.label, lx + 9, 10);
+        lx += mm.measureText(item.label).width + 16;
+    }
+
     if (t.pit) {
-        mm.strokeStyle = 'rgba(255,255,255,0.45)';
+        mm.strokeStyle = 'rgba(255,255,255,0.35)';
         mm.lineWidth = 2;
         mm.beginPath();
         t.pit.path.filter((_, i) => t.pit.cum[i] >= t.pit.closeS)
             .forEach((p, i) => (i ? mm.lineTo(mx(p.x), my(p.y)) : mm.moveTo(mx(p.x), my(p.y))));
         mm.stroke();
     }
-    mm.strokeStyle = 'rgba(255,255,255,0.85)';
-    mm.lineWidth = 4;
-    mm.lineJoin = 'round';
-    mm.beginPath();
-    t.path.forEach((p, i) => (i ? mm.lineTo(mx(p.x), my(p.y)) : mm.moveTo(mx(p.x), my(p.y))));
-    mm.closePath();
-    mm.stroke();
 
+    // Sectors: split lap into Sector 1, 2, and 3
+    const n = t.path.length;
+    const totalLap = t.cum[n];
+    const s2 = t.checkpoints && t.sectorCps ? (t.checkpoints[t.sectorCps[1]]?.s ?? totalLap / 3) : totalLap / 3;
+    const s3 = t.checkpoints && t.sectorCps ? (t.checkpoints[t.sectorCps[2]]?.s ?? (2 * totalLap) / 3) : (2 * totalLap) / 3;
+    const sectorColors = ['#38bdf8', '#fbbf24', '#ec4899'];
+    const getSector = (s) => (s < s2 ? 0 : s < s3 ? 1 : 2);
+    const inDrs = (s) => (t.drsZones || []).some(z => (z.startS <= z.endS ? s >= z.startS && s < z.endS : s >= z.startS || s < z.endS));
+
+    // Base track stroke: colored by Sector
+    mm.lineWidth = 3.5;
+    mm.lineCap = 'round';
+    mm.lineJoin = 'round';
+    for (let i = 0; i < n; i++) {
+        const nextI = (i + 1) % n;
+        const p1 = t.path[i], p2 = t.path[nextI];
+        const lapS = (((t.cum[i] - (t.startS || 0)) % totalLap) + totalLap) % totalLap;
+        const sec = getSector(lapS);
+        mm.strokeStyle = sectorColors[sec];
+        mm.beginPath();
+        mm.moveTo(mx(p1.x), my(p1.y));
+        mm.lineTo(mx(p2.x), my(p2.y));
+        mm.stroke();
+    }
+
+    // Highlight DRS Zones as a parallel neon green strip alongside the track (sectors remain 100% clear)
+    if (t.drsZones && t.drsZones.length) {
+        mm.lineWidth = 2.5;
+        mm.strokeStyle = '#22c55e';
+        mm.lineCap = 'round';
+        for (let i = 0; i < n; i++) {
+            const nextI = (i + 1) % n;
+            const p1 = t.path[i], p2 = t.path[nextI];
+            const lapS = (((t.cum[i] - (t.startS || 0)) % totalLap) + totalLap) % totalLap;
+            if (inDrs(lapS)) {
+                const sx1 = mx(p1.x), sy1 = my(p1.y);
+                const sx2 = mx(p2.x), sy2 = my(p2.y);
+                const dx = sx2 - sx1, dy = sy2 - sy1;
+                const len = Math.hypot(dx, dy) || 1;
+                const nx = -dy / len, ny = dx / len;
+                const offset = 4.5;
+                mm.beginPath();
+                mm.moveTo(sx1 + nx * offset, sy1 + ny * offset);
+                mm.lineTo(sx2 + nx * offset, sy2 + ny * offset);
+                mm.stroke();
+            }
+        }
+    }
+
+    // Start / Finish Line perpendicular hash
+    if (t.start !== undefined && t.path[t.start]) {
+        const sp = t.path[t.start];
+        const nextP = t.path[(t.start + 1) % n];
+        const dirX = nextP.x - sp.x, dirY = nextP.y - sp.y;
+        const len = Math.hypot(dirX, dirY) || 1;
+        const nx = -dirY / len, ny = dirX / len;
+        const markW = 6 / k; // ~6px in canvas units
+        mm.strokeStyle = '#ffffff';
+        mm.lineWidth = 2.5;
+        mm.beginPath();
+        mm.moveTo(mx(sp.x - nx * markW), my(sp.y - ny * markW));
+        mm.lineTo(mx(sp.x + nx * markW), my(sp.y + ny * markW));
+        mm.stroke();
+    }
+
+    const isWatch = watching();
+    const focusId = isWatch && spectateId && gs[spectateId] ? spectateId : clientState.me;
+
+    // 1) Draw opponents first with strong dark borders so they stand out clearly over any sector or DRS lines
     for (const id in gs) {
+        if (id === focusId) continue;
         const lp = clientState.players[id];
         if (!lp) continue;
-        const isMe = id === clientState.me;
+        const px = mx(gs[id].x), py = my(gs[id].y);
+        mm.fillStyle = '#000000';
+        mm.beginPath();
+        mm.arc(px, py, 5.2, 0, Math.PI * 2);
+        mm.fill();
         mm.fillStyle = lp.color;
         mm.beginPath();
-        mm.arc(mx(gs[id].x), my(gs[id].y), isMe ? 6 : 4, 0, Math.PI * 2);
+        mm.arc(px, py, 4.0, 0, Math.PI * 2);
         mm.fill();
-        if (isMe) { mm.strokeStyle = '#fff'; mm.lineWidth = 2; mm.stroke(); }
+        mm.strokeStyle = 'rgba(0, 0, 0, 0.85)';
+        mm.lineWidth = 1;
+        mm.stroke();
+    }
+
+    // 2) Draw focused car (own car or spectated car) LAST on top with radiant halo & heading pointer
+    if (focusId && gs[focusId] && clientState.players[focusId]) {
+        const fp = clientState.players[focusId];
+        const fg = gs[focusId];
+        const fx = mx(fg.x), fy = my(fg.y);
+
+        // Soft outer glowing halo
+        mm.fillStyle = 'rgba(255, 255, 255, 0.38)';
+        mm.beginPath();
+        mm.arc(fx, fy, 9.5, 0, Math.PI * 2);
+        mm.fill();
+
+        // Dark outline
+        mm.fillStyle = '#000000';
+        mm.beginPath();
+        mm.arc(fx, fy, 7.5, 0, Math.PI * 2);
+        mm.fill();
+
+        // White contrast ring
+        mm.strokeStyle = '#ffffff';
+        mm.lineWidth = 2.4;
+        mm.beginPath();
+        mm.arc(fx, fy, 6.2, 0, Math.PI * 2);
+        mm.stroke();
+
+        // Inner car color disc
+        mm.fillStyle = fp.color;
+        mm.beginPath();
+        mm.arc(fx, fy, 4.8, 0, Math.PI * 2);
+        mm.fill();
+
+        // Direction pointer (chevron pointing in car heading)
+        const dirAng = fg.angle;
+        const tipX = fx + Math.cos(dirAng) * 9.5, tipY = fy + Math.sin(dirAng) * 9.5;
+        mm.beginPath();
+        mm.moveTo(tipX, tipY);
+        mm.lineTo(fx + Math.cos(dirAng + 2.45) * 5.2, fy + Math.sin(dirAng + 2.45) * 5.2);
+        mm.lineTo(fx + Math.cos(dirAng) * 2.5, fy + Math.sin(dirAng) * 2.5);
+        mm.lineTo(fx + Math.cos(dirAng - 2.45) * 5.2, fy + Math.sin(dirAng - 2.45) * 5.2);
+        mm.closePath();
+        mm.fillStyle = '#ffffff';
+        mm.fill();
+        mm.strokeStyle = '#000000';
+        mm.lineWidth = 1;
+        mm.stroke();
     }
 }
 
@@ -1977,11 +2463,12 @@ const camDir = new THREE.Vector3();
 let lastDrs = false, hudLit = -1, hudFlash = null, hudGear = '';
 function updateSound(dt) {
     const gs = clientState.gameState, me = gs[clientState.me], racing = !!me && !isSpectator();
-    const followId = racing && !watchingAfterFinish() ? clientState.me : spectateId; // dash and engine: the car on screen
+    const isWatch = watching();
+    const followId = racing && !isWatch ? clientState.me : spectateId; // dash and engine: the car on screen
     let hud = null, hudSpeed = 0, followVx = 0, followVy = 0;
     soundOthers.length = 0;
     for (const id in gs) {
-        if (racing && id === clientState.me) continue;
+        if (racing && !isWatch && id === clientState.me) continue;
         const p = gs[id], v = p.speed / scale;
         let r = remoteBoxes.get(id);
         if (!r) { r = { box: new Gearbox(), speed: v, load: v > 30 ? 1 : 0, o: { id } }; remoteBoxes.set(id, r); } // joined mid-race: a fast car is on throttle
@@ -1995,7 +2482,7 @@ function updateSound(dt) {
     }
     for (const id of remoteBoxes.keys()) if (!gs[id]) remoteBoxes.delete(id); // left the session
     sndFrame.own = null;
-    if (racing) {
+    if (racing && !isWatch) {
         const v = me.speed / scale, g = ownBox.update(v, input.throttle, dt, !!me.limiter);
         for (const e of g.events) Sound.event(e === 'up' ? 'shift_up' : 'shift_down');
         if (!!me.drs !== lastDrs) { lastDrs = !!me.drs; Sound.event('drs'); }

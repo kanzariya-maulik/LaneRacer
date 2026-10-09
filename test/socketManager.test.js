@@ -4,6 +4,8 @@ const setupSocketManager = require('../src/socketManager');
 const Track = require('../src/game/Track');
 
 const monza = Track.load('monza');
+// Reset mock timers after each test to prevent timer leakages
+test.afterEach((t) => { try { t.mock.timers.reset(); } catch (e) {} });
 // No real WebRTC in tests: game_state goes over the fake Socket.IO
 const noNet = { setupPeer() {}, hasOpenChannel: () => false, cleanup() {}, broadcastGameState: (s, io) => io.volatile.emit('game_state', s) };
 
@@ -292,6 +294,27 @@ test('host kick: the player is removed and told why, can join again; nobody else
     assert.deepStrictEqual(Object.keys(io.events('lobby_state_sync').at(-1).players), ['a']);
     b.fire('join_lobby', { username: 'B', teamId: 'haas' });
     assert.ok(io.events('lobby_state_sync').at(-1).players.b.isSpectating, 'rejoins as a spectator mid-race');
+    a.fire('disconnect'); b.fire('disconnect');
+});
+
+test('host kick: can kick bot player, setting botCar to false and removing bot', (t) => {
+    t.mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
+    const io = fakeIo();
+    setupSocketManager(io, noNet);
+    const a = join(io, 'a', 'ferrari', 0);
+    a.fire('update_settings', { botCar: true });
+    assert.strictEqual(io.events('lobby_state_sync').at(-1).settings.botCar, true);
+    assert.ok(io.events('lobby_state_sync').at(-1).players['bot-ai-1']);
+
+    const b = join(io, 'b', 'haas');
+    b.fire('kick_player', 'bot-ai-1');
+    assert.ok(io.events('lobby_state_sync').at(-1).players['bot-ai-1'], 'non-host cannot kick bot');
+
+    a.fire('kick_player', 'bot-ai-1');
+    const lob = io.events('lobby_state_sync').at(-1);
+    assert.strictEqual(lob.settings.botCar, false, 'botCar disabled');
+    assert.strictEqual(lob.players['bot-ai-1'], undefined, 'bot removed');
+    assert.ok(io.events('player_left').includes('bot-ai-1'));
     a.fire('disconnect'); b.fire('disconnect');
 });
 
