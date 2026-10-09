@@ -235,7 +235,7 @@ btnJoin.addEventListener('click', () => {
     }
     if (!selectedTeam) return window.appendChat('SYSTEM', '#f43f5e', 'Pick a team first.');
     const username = inputUser.value.trim() || `Player${Math.floor(Math.random() * 1000)}`;
-    lastJoin = { username, teamId: selectedTeam, assist: getAssistString(), compound: compoundSelect.value };
+    lastJoin = { username, teamId: selectedTeam, assist: `${helpLevels.steer},${helpLevels.brake}`, compound: compoundSelect.value };
     window.lanraceAudio?.unlock(); // the click is the gesture browsers need to start sound
     socket.emit('join_lobby', lastJoin);
     setJoinedUI(true);
