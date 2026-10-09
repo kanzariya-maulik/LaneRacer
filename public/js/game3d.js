@@ -262,7 +262,7 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) relea
 function simStep(sample = true) {
     if (sample) {
         const pad = gamepadInput((navigator.getGamepads ? [...navigator.getGamepads()] : []).find(Boolean));
-        const car = predictor?.car, lift = car ? liftOffBrake(parseAssist(predictor.assist).brake, (car.speed || 0) / predictor.track.scale) : 0;
+        const car = predictor?.car, lift = car ? liftOffBrake(parseAssist(predictor.assist).brake >= 1 ? 1 : 0, (car.speed || 0) / predictor.track.scale) : 0;
         input = hostPanel ? { throttle: 0, brake: 0, steer: 0, drs: false } : pad || touchInput || keyboardStep(input, keys, STEP_S, lift); // menu open: hands off
     }
     const stamped = { seq: ++inputSeq, steer: input.steer, throttle: input.throttle, brake: input.brake, drs: !!input.drs };

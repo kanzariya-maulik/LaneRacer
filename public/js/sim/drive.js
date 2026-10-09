@@ -163,7 +163,8 @@ export function driveCar(p, input, t, dt) {
     const road = slopeAt(t, p.x, p.y, p.angle, p.roadI); // hills: gravity, crests and compressions (flat without track z)
     p.grade = road.grade; p.vcurv = road.vcurv;
     if (road.i !== undefined) p.roadI = road.i;
-    const used = parseAssist(p.assist).brake > 0 && !p.inPit ? brakeAssist(p, input, t, before, parseAssist(p.assist).brake) : input;
+    const level = parseAssist(p.assist).brake; // braking help: 0 off, 0.5 Low, 1 High (off in the pit lane)
+    const used = level > 0 && !p.inPit ? brakeAssist(p, input, t, before, level) : input;
     p.dragMul = (p.drs ? DRS_DRAG : 1) * (1 - (p.tow || 0));
     const speed0 = p.speed || 0;
     step(p, used, dt, scale, grass, p.assist);
