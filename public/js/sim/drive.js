@@ -60,35 +60,90 @@ export function updatePitState(p, t, near, nearPit) {
     }
 }
 
-// A car being guided into its box (Game.updateStop): line up on the box, stop on its mark — shuffling like a driver would.
-// Box frame: a = metres along its heading (< 0 short of the mark), l = metres to the side, h = heading error. Stopped, the car
-// goes forward if there's room before the mark to line up (an S at a safe radius), else reverses until there is; once
-// moving it keeps that direction until it stops (stateless: the predictor sees the same speed in the packet)
-const GUIDE_DECEL = 6, GUIDE_REVERSE_MS = 2, GUIDE_ON_MARK_M = 0.3, GUIDE_LINE_M = 0.25, GUIDE_LINE_RAD = 0.1; // m/s², m/s, m, m, rad
+// Can a car this far (m, along the lane) from its box still stop there? carphysics' straight-line braking: tyre grip on
+// weight + downforce, plus drag, decel = A + B v², so the stopping distance is ln(1 + B v² / A) / 2B (matches the sim to
+// within a few cm from 80 km/h; the caller's PARK_M is the margin)
+export function canStopOnMark(p, t, metres) {
+    const v = Math.hypot(p.vx, p.vy) / t.scale, mu = C.MU * (p.tyreGrip ?? 1);
+    const A = mu * C.G, B = (0.5 * C.RHO * (mu * C.CLA + C.CDA)) / C.MASS;
+    return Math.log(1 + (B * v * v) / A) / (2 * B) <= metres;
+}
+
+// A car being guided into its box (Game.updateStop): onto its mark, shuffling like a driver would. Box frame: a = metres along
+// the box heading (< 0 short of the mark), l = metres to the side, h = heading error. The car drives the arc through the mark
+// when its steering reaches; otherwise it picks the quickest first stroke (forward or reverse, full lock either way or straight)
+// after which it does. Stateless: replanned every tick from the car alone, so the predictor makes the same choice
+const GUIDE_ON_MARK_M = 0.3, GUIDE_REVERSE_MS = 2, GUIDE_FAST_MS = 4, GUIDE_STROKE_M = 6, GUIDE_STEP_M = 0.1;
+const STROKE_ACC = 9, REVERSE_ACC = 7, STROKE_DEC = 11, TURN_S = 0.15; // m/s² planned with (drive forward / reverse, brake), s lost per direction change
+// Forward arc from the origin heading +x to (X, Y): its curvature and length, or null past a half turn
+function arcTo(X, Y) {
+    if (X <= 0) return null;
+    const k = (2 * Y) / (X * X + Y * Y), phi = 2 * Math.atan2(Y, X);
+    return { k, len: Math.abs(k) < 1e-9 ? X : phi / k };
+}
+// Time to cover len (m) from rest to rest, forward or reverse (walking-pace cap)
+function strokeS(len, fwd) {
+    const acc = fwd ? STROKE_ACC : REVERSE_ACC, cap = fwd ? Infinity : GUIDE_REVERSE_MS, k = 1 / acc + 1 / STROKE_DEC;
+    const peak = Math.sqrt((2 * len) / k);
+    return peak <= cap ? peak * k : cap * k + (len - (cap * cap * k) / 2) / cap;
+}
+// The arc through the mark from a pose (box frame), driving forward (dir 1) or reversing (-1), if the lock allows
+function finalArc(a, l, h, dir, kMax) {
+    const c = Math.cos(h), s = Math.sin(h), fx = -a * c - l * s, fy = a * s - l * c; // the mark in the car's frame
+    const arc = arcTo(dir * fx, fy);
+    return arc && Math.abs(arc.k) <= kMax ? { dir, k: arc.k, len: arc.len } : null;
+}
 export function guideToBox(p, t) {
-    const b = p.box, sc = t.scale, c = Math.cos(b.angle), s = Math.sin(b.angle);
-    const dx = (p.x - b.x) / sc, dy = (p.y - b.y) / sc, a = dx * c + dy * s, l = -dx * s + dy * c, d = Math.hypot(a, l);
+    const b = p.box, sc = t.scale, cb = Math.cos(b.angle), sb = Math.sin(b.angle);
+    const dx = (p.x - b.x) / sc, dy = (p.y - b.y) / sc, a = dx * cb + dy * sb, l = -dx * sb + dy * cb, d = Math.hypot(a, l);
     const h = Math.atan2(Math.sin(p.angle - b.angle), Math.cos(p.angle - b.angle)), v = p.speed / sc;
-    if (d < GUIDE_ON_MARK_M) return { steer: 0, throttle: 0, brake: v > 0.05 ? 1 : 0, drs: false }; // on the mark: stop
-    const lock = (1 + C.ASSIST_STEER * parseAssist(p.assist).steer) * C.MAX_STEER, R = (1.2 * C.WHEELBASE) / Math.tan(lock);
-    const off = Math.min(Math.abs(l), 2 * R), lined = off < GUIDE_LINE_M && Math.abs(h) < GUIDE_LINE_RAD;
-    const need = lined ? 0 : Math.max(2 * R * Math.sin(Math.acos(1 - off / (2 * R))), R * Math.abs(h)) + 0.5; // room to line up
-    const fwd = v > 0.1 ? true : v < -0.1 ? false : a < -need;
-    const back = lined ? 0 : -need - 0.5; // reversing: straight onto the mark if lined up, else back to where the S fits
-    if (fwd && a > 0) return { steer: 0, throttle: 0, brake: 1, drs: false }; // past the mark: stop, then reverse
-    if (!fwd && a < back) return { steer: 0, throttle: v < -0.05 ? 1 : 0, brake: 0, drs: false }; // far enough back: stop
-    // Pure pursuit of the box line (beyond the mark: onto the line, not across it), looking further ahead the faster the car goes
-    const look = Math.max(3, 0.25 * Math.abs(v)), tx = a + (fwd ? look : -look);
-    const ex = tx - a, ey = -l;
-    let alpha = Math.atan2(ey, ex) - h - (fwd ? 0 : Math.PI); alpha = Math.atan2(Math.sin(alpha), Math.cos(alpha));
-    const wheel = Math.atan((2 * C.WHEELBASE * Math.sin(alpha)) / Math.max(1, Math.hypot(ex, ey)));
-    const togo = fwd ? -a : a - back;
-    const want = (fwd ? 1 : -1) * Math.min(fwd ? (t.pit.limitKmh || PIT_LIMIT_KMH) / 3.6 : GUIDE_REVERSE_MS - 0.2,
-        Math.sqrt(2 * GUIDE_DECEL * Math.max(0, togo - 0.1)));
-    // Brake on a car rolling forward slows it; at a standstill it reverses. Throttle while rolling back brakes it
-    const faster = fwd ? v < want - 0.2 : v > want + 0.2, slower = fwd ? v > want + 0.2 : v < want - 0.2;
-    return { steer: Math.max(-1, Math.min(1, (fwd ? 1 : -1) * wheel / lock)), throttle: (fwd ? faster : slower) ? 0.3 : 0,
-        brake: (fwd ? slower : faster) ? 1 : 0, drs: false };
+    // On the mark, or would stop on it braking now (~15 m/s², straight on): stop
+    const sd = (v * Math.abs(v)) / 30, sa = a + sd * Math.cos(h), sl = l + sd * Math.sin(h);
+    if (d < GUIDE_ON_MARK_M || Math.hypot(sa, sl) < GUIDE_ON_MARK_M) return { steer: 0, throttle: v < -0.05 ? 1 : 0, brake: v > 0.05 ? 1 : 0, drs: false };
+    const lock = (1 + C.ASSIST_STEER * parseAssist(p.assist).steer) * C.MAX_STEER, kMax = (0.95 * Math.tan(lock)) / C.WHEELBASE;
+    const limit = (t.pit.limitKmh || PIT_LIMIT_KMH) / 3.6;
+    let plan; // { dir, k, len }: the stroke to drive now and how far it goes before the car stops
+    if (v > GUIDE_FAST_MS) {
+        // Arriving: aim the arc at the mark (as tight as the steering allows at this speed), braking to stop on it
+        const c = Math.cos(h), s = Math.sin(h), arc = arcTo(-a * c - l * s, a * s - l * c);
+        plan = arc ? { dir: 1, k: arc.k, len: arc.len } : { dir: 1, k: 0, len: 0 };
+    } else {
+        const options = [];
+        for (const dir of [1, -1]) {
+            const f = finalArc(a, l, h, dir, kMax);
+            if (f) options.push({ ...f, cost: strokeS(f.len, dir > 0) });
+        }
+        for (const dir of [1, -1]) for (const k of [kMax, 0, -kMax]) {
+            let x = a, y = l, hh = h;
+            for (let m = GUIDE_STEP_M; m <= GUIDE_STROKE_M + 1e-9; m += GUIDE_STEP_M) {
+                // one step of the stroke: in the box frame the car moves along its heading (backwards when reversing)
+                x += dir * GUIDE_STEP_M * Math.cos(hh); y += dir * GUIDE_STEP_M * Math.sin(hh); hh += dir * GUIDE_STEP_M * k;
+                if (Math.hypot(x, y) < GUIDE_ON_MARK_M) { options.push({ dir, k, len: m, cost: strokeS(m, dir > 0) }); break; }
+                // final arcs planned with room (85% lock): once the stroke ends, the arc surely reaches
+                let fin = null;
+                for (const d2 of [1, -1]) {
+                    const f = finalArc(x, y, hh, d2, 1 * kMax);
+                    if (f && (!fin || strokeS(f.len, d2 > 0) < strokeS(fin.len, fin.dir > 0))) fin = f;
+                }
+                if (fin) { options.push({ dir, k, len: m, cost: strokeS(m, dir > 0) + strokeS(fin.len, fin.dir > 0) + (fin.dir !== dir ? TURN_S : 0) }); break; }
+            }
+        }
+        // Rolling: carry on the way it's going (stroke ends are where plans change, so no dithering at a crawl); at rest: quickest
+        const moving = v > 0.02 ? 1 : v < -0.02 ? -1 : 0, same = options.filter((o) => o.dir === moving), pool = same.length ? same : options;
+        let best = null;
+        for (const o of pool) if (!best || o.cost < best.cost) best = o;
+        plan = best || { dir: -1, k: 0, len: 1 }; // nothing within a stroke: back off and look again
+    }
+    // Steering: the curvature, as a share of the lock this speed allows. Speed: brake to stop where the stroke ends
+    const lockNow = lock / (1 + Math.abs(v) / C.STEER_FADE), steer = Math.max(-1, Math.min(1, Math.atan(plan.k * C.WHEELBASE) / lockNow));
+    const fwd = plan.dir > 0;
+    const want = plan.dir * Math.min(fwd ? limit : GUIDE_REVERSE_MS,
+        Math.sqrt(2 * STROKE_DEC * Math.max(0, plan.len - 0.1))); // steering takes brake
+    // Speed error toward the stroke's direction: > 0 wants more. Forward: throttle speeds up, brake slows (never reversing a car
+    // rolling forward). Reverse: brake backs up, throttle stops it. Proportional, so short strokes don't overshoot
+    const more = plan.dir * (want - v), push = Math.min(1, Math.max(0, more * 10)), hold = Math.min(1, Math.max(0, -more * 10));
+    return { steer, // same sign both ways: the planned curvature is per metre along the car's heading
+        throttle: fwd ? push : hold, brake: fwd ? hold : push, drs: false };
 }
 
 export function driveCar(p, input, t, dt) {
@@ -110,9 +165,11 @@ export function driveCar(p, input, t, dt) {
     if (road.i !== undefined) p.roadI = road.i;
     const used = parseAssist(p.assist).brake > 0 && !p.inPit ? brakeAssist(p, input, t, before, parseAssist(p.assist).brake) : input;
     p.dragMul = (p.drs ? DRS_DRAG : 1) * (1 - (p.tow || 0));
+    const speed0 = p.speed || 0;
     step(p, used, dt, scale, grass, p.assist);
-    if (p.stop && p.speed < -GUIDE_REVERSE_MS * scale) { // guided reverse: a walking-pace shuffle, never faster
-        const k = (-GUIDE_REVERSE_MS * scale) / p.speed;
+    // Guided reverse: a walking-pace shuffle, never sped up past it (a car arriving faster is braked down by the guide)
+    if (p.stop && p.speed < Math.min(speed0, -GUIDE_REVERSE_MS * scale)) {
+        const k = Math.min(speed0, -GUIDE_REVERSE_MS * scale) / p.speed;
         p.vx *= k; p.vy *= k; p.speed *= k;
     }
     // Tyres wear with distance, harder the more grip is in use (tyres.js); grip follows

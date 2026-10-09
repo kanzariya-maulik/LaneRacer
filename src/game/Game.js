@@ -172,7 +172,8 @@ class Game {
             const done = this.mode === 'quali' ? p.servicedVisit === p.pitVisits : p.servicedLap === p.lap;
             // Already on the mark (a quali car starting in its box) is not arriving at it
             if (done || ahead < PARK_M * sc || ahead > STOP_TRIGGER_M * sc) return;
-            if (braking || (!p.stopRetry && kmh < STOP_SLOW_KMH)) { p.stopRetry = null; p.stop = { phase: 'guide', t: STOP_S + this.rng() * STOP_SPREAD_S, age: 0 }; }
+            // Too late to stop on the mark: a missed box, the driver keeps the car
+            if ((braking || (!p.stopRetry && kmh < STOP_SLOW_KMH)) && Drive.canStopOnMark(p, t, (ahead + PARK_M * sc) / sc)) { p.stopRetry = null; p.stop = { phase: 'guide', t: STOP_S + this.rng() * STOP_SPREAD_S, age: 0 }; }
             return;
         }
         if (p.stop.phase === 'guide') {
