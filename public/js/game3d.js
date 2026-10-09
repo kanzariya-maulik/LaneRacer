@@ -382,7 +382,7 @@ function heights(path) {
     if (!h) {
         h = elev && path === elev.path && elev.z ? elev.z.map((z) => z * scale * ELEVATION_SCALE)
             : elev && elev.pit && path === elev.pit.path ? pathHeights(elev, path).map((z) => z * scale * ELEVATION_SCALE) // its own road's height
-            : elev && elev.pit && (path === elev.pit.wall || path === elev.pit.closeWall) ? path.map((p) => pitY(p.x, p.y)) // on the pit lane
+            : elev && elev.pit && path === elev.pit.wall ? path.map((p) => pitY(p.x, p.y)) // on the pit lane
             : path.map((p) => roadY(p.x, p.y));
         heightCache.set(path, h);
     }
@@ -633,21 +633,21 @@ function gridBoxes(slots) {
 }
 
 function buildPit(pit, t) {
-    const n = pit.path.length, ph = pit.width / 2, s = pit.trackSide;
+    const n = pit.path.length, ph = pit.width / 2, s = pit.trackSide, line = 0.3 * scale;
+    const W = pit.widthAt, half = W.map((w) => w / 2), neg = (A) => A.map((v) => -v);
     const inner = (i) => i >= 1 && i <= n - 3; // end segments would use wrapped normals
-    const open = (i) => inner(i) && pit.cum[i] >= pit.closeS; // nothing drawn on the closed pit entry
-    world.add(strip(pit.path, -ph, ph, 0.55, inner, solid('#3a3f47'))); // the closed entry too: a road, barred (not grass)
-    const line = 0.3 * scale;
-    // Edge lines only off the track: where the pit lane merges, they'd be painted across the racing surface
-    const offTrack = (off) => offsetPoints(pit.path, off).map((q) => distToPath(q, t.path) > t.width / 2);
-    const outL = offTrack(ph - line / 2), outR = offTrack(-ph + line / 2);
-    world.add(strip(pit.path, ph - line, ph, 0.85, (i) => open(i) && outL[i] && outL[i + 1], solid('#f2f2f2')));
-    world.add(strip(pit.path, -ph, -ph + line, 0.85, (i) => open(i) && outR[i] && outR[i + 1], solid('#f2f2f2')));
+    const fullAt = (i) => W[i] >= pit.width - 1e-6;
+    // The lane: per-point width, 0 where it joins the road edge, so it never lies over the racing surface
+    world.add(strip(pit.path, neg(half), half, 0.55, inner, solid('#3a3f47')));
+    // White edges: the outer one all along; the track-side one is the blend line in the mouths and the pit-wall line beside it
+    const inL = half.map((h) => h - line), inR = half.map((h) => -h + line);
+    world.add(strip(pit.path, inL, half, 0.85, (i) => inner(i) && W[i] > line, solid('#f2f2f2')));
+    world.add(strip(pit.path, neg(half), inR, 0.85, (i) => inner(i) && W[i] > line, solid('#f2f2f2')));
 
     // Pit wall on the track side; outer wall behind the lane except where the garages open onto it
     world.add(wall(pit.wall, 0, 1 * scale, (i) => i < pit.wall.length - 1, solid('#9aa0a6')));
-    const [lo, hi] = pit.garageSpan, back = ph + PIT_RUNOFF_M * scale;
-    world.add(wall(pit.path, -s * back, 1 * scale, (i) => open(i) && (pit.cum[i + 1] < lo || pit.cum[i] > hi), solid('#9aa0a6')));
+    const [lo, hi] = pit.garageSpan, back = ph + PIT_RUNOFF_M * scale, backOff = half.map((h) => -s * (h + PIT_RUNOFF_M * scale));
+    world.add(wall(pit.path, backOff, 1 * scale, (i) => inner(i) && fullAt(i) && fullAt(i + 1) && (pit.cum[i + 1] < lo || pit.cum[i] > hi), solid('#9aa0a6')));
 
     const at = (s0) => {
         const i = Math.max(1, pit.cum.findIndex((c) => c >= s0));
@@ -661,13 +661,11 @@ function buildPit(pit, t) {
         m.rotation.y = facing(p.angle);
         world.add(m);
     };
-    board(pit.closeS - 15 * scale, 'PIT CLOSED', '#d62828'); // ahead of the limiter board, seen first
-    board(Math.max(pit.limStart, pit.closeS), `PIT LIMIT ${pit.limitKmh || 80}`, '#1e5bd8');
+    board(pit.limStart, `PIT LIMIT ${pit.limitKmh || 80}`, '#1e5bd8');
     $('pit-limiter').textContent = `PIT LIMITER ${pit.limitKmh || 80}`;
     board(pit.limEnd, 'END LIMIT', '#1e5bd8');
     board(pit.cum[n - 3], 'PIT OUT', '#2a9d3f');
-    world.add(wall(pit.closeWall, 0, 1.2 * scale, (i) => i === 0, solid('#d62828')));
-    for (const s0 of [Math.max(pit.limStart, pit.closeS), pit.limEnd]) {
+    for (const s0 of [pit.limStart, pit.limEnd]) {
         const p = at(s0), m = flat(0.5 * scale, pit.width, 0xf2f2f2);
         m.position.set(p.x, 0.9 + pitY(p.x, p.y), p.y);
         m.rotation.y = -p.angle;
@@ -1921,7 +1919,7 @@ function drawMinimap() {
         mm.strokeStyle = 'rgba(255,255,255,0.45)';
         mm.lineWidth = 2;
         mm.beginPath();
-        t.pit.path.filter((_, i) => t.pit.cum[i] >= t.pit.closeS)
+        t.pit.path
             .forEach((p, i) => (i ? mm.lineTo(mx(p.x), my(p.y)) : mm.moveTo(mx(p.x), my(p.y))));
         mm.stroke();
     }
