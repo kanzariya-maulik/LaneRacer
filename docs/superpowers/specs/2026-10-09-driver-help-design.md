@@ -43,7 +43,7 @@ Unchanged string `'steer,brake'` in percent, parsed by `parseAssist`. Levels: st
 ### Braking help (`assist.js` `brakeAssist`)
 Same scan ahead as today, judged against `lineLimit` instead of `safeSpeed`:
 - **High** (`brake = 1`): target `0.95 × limit`; brake (full brake, throttle cut) when reaching the target needs more than `0.9` of the braking grip available at the target speed. Smooth, early enough to never miss a corner.
-- **Low** (`brake = 0.5`): target `0.90 × limit`; intervene only when reaching the full `1.0 × limit` would need more than `1.0` of the braking grip (the driver can no longer make the corner), then brake fully until under the target. A safety net that costs time when it triggers.
+- **Low** (`brake = 0.5`): target `0.90 × limit`; brake only when reaching that target needs more than `1.0` of the braking grip available at the target speed, i.e. at the last possible moment with the car's full braking. Stateless (no memory between ticks, so the client predictor matches). Does nothing until the driver could no longer make the corner, then brakes hard and leaves the car 10 % under the corner speed: a safety net that costs time when it triggers.
 - **Off**: no intervention.
 - Driver braking harder than the help, steering, and the pit lane (help off in the lane) behave as today. Grade (uphill/downhill) is accounted for as today.
 - Tuning constants (`HIGH_AIM 0.95`, `HIGH_MARGIN 0.9`, `LOW_AIM 0.90`, `LOW_MARGIN 1.0`) are named at the top of `assist.js`; the lap-time test below pins their effect.
@@ -59,7 +59,7 @@ Same scan ahead as today, judged against `lineLimit` instead of `safeSpeed`:
 - **Lobby, Race settings (host):** "Driver help: Each driver chooses / Same for all", and with "Same for all" the two level pickers. Non-hosts see it read-only like other settings.
 - **Q key in a session** (today it cycles Full → Steer only → Brake only → Off): steps braking help Off → Low → High → Off with a banner "BRAKING HELP: LOW"; does nothing (banner "SET BY HOST") when fixed.
 - **Racing line:** `RacingLine.compute` speed profile uses real grip (no assist grip, no assist cap), so its red zones start at the real-limit braking point. Modes, R key and recolouring from the player's own speed are unchanged.
-- **Tower and results:** `B` badge when braking help is Low or High, `S` when steering help is On, from the player's `assist` (added to `META_FIELDS` so changes reach every client).
+- **Tower and results:** `B` badge when braking help is Low or High, `S` when steering help is On, from each lobby player's `assist` (`clientState.players[id].assist`, already re-sent in `lobby_state_sync` whenever it changes).
 
 ## 3. Edge cases
 
