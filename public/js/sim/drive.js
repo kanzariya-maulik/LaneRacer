@@ -112,7 +112,9 @@ export function driveCar(p, input, t, dt) {
 
     // Barrier: outside both the track's run-off and the pit lane's
     const wallDist = t.width / 2 + (t.wallOffset ?? WALL_OFFSET);
-    const pitDist = (n) => pitHalf(pit, n) + PIT_RUNOFF_M * scale;
+    // The pit barrier stands off the full lane width even where the asphalt tapers into a mouth: a car turning in late
+    // (Monaco: barrier 1.5 m off the road) crosses that corridor, not the narrow asphalt
+    const pitDist = pit && pit.width / 2 + PIT_RUNOFF_M * scale;
     const after = Physics.nearestOnTrack(p.x, p.y, t, p.roadI), afterPit = nearPit(p.x, p.y);
     if (afterPit && afterPit !== FAR_PIT) p.pitI = afterPit.i;
     // No barrier where the track opens between two nearby legs (Track.js openWalls: the infield of a hairpin)
@@ -121,9 +123,9 @@ export function driveCar(p, input, t, dt) {
         const a = t.path[n.i], b = t.path[(n.i + 1) % t.path.length];
         return !!t.openWall[-(b.y - a.y) * (p.x - n.px) + (b.x - a.x) * (p.y - n.py) > 0 ? 0 : 1][n.i];
     };
-    const overTrack = open(after) ? -Infinity : after.dist - wallDist, overPit = afterPit ? afterPit.dist - pitDist(afterPit) : Infinity;
+    const overTrack = open(after) ? -Infinity : after.dist - wallDist, overPit = afterPit ? afterPit.dist - pitDist : Infinity;
     if (overTrack > 0 && overPit > 0) {
-        const [near, lim] = overPit < overTrack ? [afterPit, pitDist(afterPit)] : [after, wallDist];
+        const [near, lim] = overPit < overTrack ? [afterPit, pitDist] : [after, wallDist];
         const nx = (p.x - near.px) / near.dist, ny = (p.y - near.py) / near.dist;
         p.x = near.px + nx * (lim - 1);
         p.y = near.py + ny * (lim - 1);
@@ -133,8 +135,8 @@ export function driveCar(p, input, t, dt) {
     const edge = Physics.nearestOnTrack(p.x, p.y, t, p.roadI), edgePit = nearPit(p.x, p.y);
     const reach = (n) => n.dist > 1e-9 ? Physics.carReach(p, (p.x - n.px) / n.dist, (p.y - n.py) / n.dist, scale) : 0;
     const inTrack = edge.dist + reach(edge) <= wallDist || open(edge);
-    const inPitLane = edgePit && edgePit.dist + reach(edgePit) <= pitDist(edgePit);
-    if (!inTrack && !inPitLane && edge.dist <= wallDist && !(edgePit && edgePit.dist <= pitDist(edgePit))) {
+    const inPitLane = edgePit && edgePit.dist + reach(edgePit) <= pitDist;
+    if (!inTrack && !inPitLane && edge.dist <= wallDist && !(edgePit && edgePit.dist <= pitDist)) {
         const nx = (p.x - edge.px) / edge.dist, ny = (p.y - edge.py) / edge.dist;
         const lim = wallDist - reach(edge);
         p.x = edge.px + nx * lim; p.y = edge.py + ny * lim;

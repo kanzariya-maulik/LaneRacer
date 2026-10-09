@@ -1319,3 +1319,30 @@ test('tyres: the next compound is validated and sent as meta', () => {
     g.setNextCompound('a', 'X'); assert.strictEqual(g.players.a.nextCompound, 'H');
     for (const f of ['compound', 'nextCompound', 'stops', 'compoundsUsed', 'wearPerM']) assert.ok(Game.META_FIELDS.includes(f), f);
 });
+
+// From the road into the pit lane at its entry mouth: follow the middle of the road, turn in at the mouth, at pit-entry speeds
+for (const id of Track.TRACK_IDS) {
+    test(`${id}: a car turns off the road into the pit entry and drives into the lane without a dead stop`, () => {
+        const tr = Track.load(id), pit = tr.pit, sc = tr.scale, T = tr.cum[tr.path.length];
+        for (const want of [10, 20]) for (const aim of [6, 8, 12]) { // m/s; metres the pilot looks ahead down the lane
+            const g = new Game(io, [lp('a')], tr, RACE, () => {}), p = g.players.a;
+            const q = Track.pointAt(tr.path, tr.cum, pit.entryS - 80 * sc), v = want * sc;
+            Object.assign(p, { x: q.x, y: q.y, angle: q.angle, vx: Math.cos(q.angle) * v, vy: Math.sin(q.angle) * v, speed: v });
+            let onLane = false, s = 0;
+            for (let k = 0; k < 60 * 30 && s < 80 * sc; k++) {
+                const nt = Physics.nearestOnTrack(p.x, p.y, tr), sTr = tr.cum[nt.i] + nt.t * (tr.cum[nt.i + 1] - tr.cum[nt.i]);
+                const np = Physics.nearestOnPath(p.x, p.y, pit.path, false);
+                s = pit.cum[np.i] + np.t * (pit.cum[np.i + 1] - pit.cum[np.i]);
+                const toMouth = (((pit.entryS - sTr) % T) + T) % T;
+                onLane ||= toMouth > T / 2; // down the middle of the road until level with the mouth, then turn in (late and sharp)
+                const ah = onLane ? Track.pointAt(pit.path, pit.cum, Math.min(pit.len, s + aim * sc), false) : Track.pointAt(tr.path, tr.cum, sTr + 15 * sc);
+                let d = Math.atan2(ah.y - p.y, ah.x - p.x) - p.angle; d = Math.atan2(Math.sin(d), Math.cos(d));
+                const vms = p.speed / sc, before = p.speed;
+                p.input = { throttle: vms < want ? 1 : 0, brake: vms > want + 2 ? 0.5 : 0, steer: Math.max(-1, Math.min(1, d * 2)) };
+                g.drive(p);
+                assert.ok(p.speed > before / 2, `${want} m/s, aim ${aim} m: dead stop ${(s / sc).toFixed(0)} m into the lane`);
+            }
+            assert.ok(s >= 80 * sc && p.inPit, `${want} m/s, aim ${aim} m: not in the pit lane (${(s / sc).toFixed(0)} m along)`);
+        }
+    });
+}

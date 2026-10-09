@@ -5,6 +5,7 @@ const CAR_CENTER_OFFSET_M = 0.18;
 const CAR_HALF_WIDTH_M = 1.0;
 const RESTITUTION = 0.3;
 const HINT_SPAN = 10; // segments (~100 m) either side of a car's last road point
+const HINT_FAR = 180;  // world units (3 pit-lane widths of 10 m at scale 6): a windowed answer farther off than this is a stale hint
 
 class Physics {
     // ponytail: linear scan over all segments; add a grid/spatial index if 20-car ticks get slow
@@ -85,6 +86,7 @@ class Physics {
             if (d2 < bd2) { bd2 = d2; bi = k; bt = t; bx = px; by = py; }
         }
         if (bi === Math.max(0, hint - HINT_SPAN) || bi === Math.min(m - 1, hint + HINT_SPAN)) return this.nearestOnPath(x, y, path, closed); // at the window's edge: may be outside it
+        if (bd2 > HINT_FAR * HINT_FAR) return this.nearestOnPath(x, y, path, closed); // far off the window: a reset or teleport
         return { dist: Math.sqrt(bd2), px: bx, py: by, i: bi, t: bt };
     }
 
