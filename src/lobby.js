@@ -1,5 +1,6 @@
 // Pure lobby rules — no sockets, so they can be unit tested.
 const TEAMS = require('../public/teams.json');
+const { snapAssist } = require('./game/CarPhysics');
 
 const MAX_RACERS = 22; // grid slots per track (src/game/Track.js GRID_SLOTS)
 
@@ -65,24 +66,13 @@ function sanitizeInputs(payload) {
         .map((i) => ({ seq: i.seq, ...sanitizeInput(i) }));
 }
 
-// Each player's own driving assist.
-// Accepts the legacy 'full'/'off' strings OR the new numeric 'steerPct,brakePct' format (0–100 each).
-// Normalised to an object { steer: 0–1, brake: 0–1 } used by carphysics / drive.
+// Each player's own driving help, snapped to the levels (see carphysics.snapAssist).
+// Accepts the legacy 'full'/'off' strings or 'steerPct,brakePct'; anything else is full help.
 function sanitizeAssist(a) {
-    if (typeof a === 'string') {
-        // Legacy: 'full' → 100% both, 'off' → 0% both
-        if (a === 'off') return { steer: 0, brake: 0 };
-        if (a === 'full') return { steer: 1, brake: 1 };
-        // New numeric format: 'steerPct,brakePct'
-        const parts = a.split(',');
-        if (parts.length === 2) {
-            const s = parseFloat(parts[0]), b = parseFloat(parts[1]);
-            if (Number.isFinite(s) && Number.isFinite(b)) {
-                return { steer: clamp(s / 100, 0, 1), brake: clamp(b / 100, 0, 1) };
-            }
-        }
-    }
-    return { steer: 1, brake: 1 }; // safe default: full assist
+    if (a === 'off') return { steer: 0, brake: 0 };
+    const parts = typeof a === 'string' ? a.split(',').map(Number) : [];
+    if (parts.length === 2 && parts.every(Number.isFinite)) return snapAssist(parts[0] / 100, parts[1] / 100);
+    return { steer: 1, brake: 1 }; // safe default: full help
 }
 
 // Start / next tyre compound: S, M or H (medium unless valid)

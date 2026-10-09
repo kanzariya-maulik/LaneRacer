@@ -21,8 +21,7 @@ const C = {
     GRASS_MU: 0.9,
     GRASS_DRAG: 0.25,      // 1/s: grass slows the car by this × speed (stuck-free, unlike a flat drag)
     GRASS_DRIVE_G: 0.3,    // drive force on grass, in g (wheelspin)
-    ASSIST_STEER: 0.6,     // steering assist: extra lock…
-    ASSIST_GRIP: 0.3,      // …and extra cornering grip, full below ASSIST_FULL_KMH, none above ASSIST_OFF_KMH
+    ASSIST_STEER: 0.6,     // steering help: extra lock, full below ASSIST_FULL_KMH, none above ASSIST_OFF_KMH
     ASSIST_FULL_KMH: 150,
     ASSIST_OFF_KMH: 250,
     REVERSE_FORCE: 6000,   // N
@@ -30,22 +29,19 @@ const C = {
     WALL_KEEP: 0.4,        // share of speed kept after hitting the barrier
 };
 
-// Parse an assist value into a normalised { steer: 0–1, brake: 0–1 } object.
-// Accepts: legacy 'off'/'full' strings, the new '0,0'–'100,100' string, or a pre-parsed object.
+// Help levels: steering Off/On, braking Off/Low/High (fractions of 1; old slider values snap to the nearest level)
+function snapAssist(steer, brake) {
+    return { steer: steer >= 0.5 ? 1 : 0, brake: brake < 0.25 ? 0 : brake < 0.75 ? 0.5 : 1 };
+}
+
+// Parse an assist value into { steer: 0|1, brake: 0|0.5|1 }.
+// Accepts: legacy 'off'/'full' strings, the 'steerPct,brakePct' string, or a pre-parsed object (server-sanitised).
 function parseAssist(assist) {
     if (assist && typeof assist === 'object') return assist;
     if (assist === 'off') return { steer: 0, brake: 0 };
-    if (assist === 'full' || assist == null) return { steer: 1, brake: 1 };
-    // '50,75' format
-    const parts = String(assist).split(',');
-    if (parts.length === 2) {
-        const s = parseFloat(parts[0]) / 100, b = parseFloat(parts[1]) / 100;
-        if (Number.isFinite(s) && Number.isFinite(b)) {
-            const cl = (v) => Math.max(0, Math.min(1, v));
-            return { steer: cl(s), brake: cl(b) };
-        }
-    }
-    return { steer: 1, brake: 1 };
+    const parts = String(assist).split(',').map(Number);
+    if (parts.length === 2 && parts.every(Number.isFinite)) return snapAssist(parts[0] / 100, parts[1] / 100);
+    return { steer: 1, brake: 1 }; // 'full', null and anything unknown
 }
 
 function step(car, input, dt, scale, offTrack = false, assist = 'off') {
@@ -80,7 +76,7 @@ function step(car, input, dt, scale, offTrack = false, assist = 'off') {
     ft = Math.max(-grip, Math.min(grip, ft));
 
     // Friction circle: what braking/drive uses is not available for cornering
-    const latAccel = ((1 + C.ASSIST_GRIP * k) * C.LAT_ASSIST * Math.sqrt(Math.max(0, grip * grip - ft * ft))) / C.MASS;
+    const latAccel = (C.LAT_ASSIST * Math.sqrt(Math.max(0, grip * grip - ft * ft))) / C.MASS; // every car corners on the same grip
     const slip = Math.atan2(Math.abs(-vx * fy + vy * fx), Math.abs(vf));
 
     // Steering (bicycle model), yaw capped by available grip → understeer when overdriven
@@ -119,4 +115,4 @@ function step(car, input, dt, scale, offTrack = false, assist = 'off') {
     car.speed = vf * scale;
 }
 
-export { C, step, parseAssist };
+export { C, step, parseAssist, snapAssist };

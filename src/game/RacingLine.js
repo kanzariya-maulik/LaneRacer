@@ -31,9 +31,8 @@ function curvatures(L, scale) {
     });
 }
 
-// Cornering acceleration with the (always-on) steering assist's extra grip below 250 km/h
-const assistK = (v) => Math.max(0, Math.min(1, (C.ASSIST_OFF_KMH - v * 3.6) / (C.ASSIST_OFF_KMH - C.ASSIST_FULL_KMH)));
-const latMax = (v) => (1 + C.ASSIST_GRIP * assistK(v)) * C.LAT_ASSIST * C.MU * (C.G + DOWN * v * v);
+// Cornering acceleration (no extra grip from the steering help)
+const latMax = (v) => C.LAT_ASSIST * C.MU * (C.G + DOWN * v * v);
 const drag = (v) => (0.5 * C.RHO * C.CDA * v * v) / C.MASS + C.ROLL_G * C.G;
 
 function cornerSpeed(k) {

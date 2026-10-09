@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { step, C } = require('../src/game/CarPhysics');
+const { step, C, parseAssist } = require('../src/game/CarPhysics');
 
 const DT = 1 / 60, S = 6;
 const mk = (v = 0) => ({ x: 0, y: 0, angle: 0, vx: v * S, vy: 0, speed: v * S, steer: 0 });
@@ -139,9 +139,10 @@ test('grass: full throttle levels off below 110 km/h, and a stopped car can stil
     assert.ok(kmh(stopped) > 20, `${kmh(stopped).toFixed(0)} km/h after 5 s from rest`);
 });
 
-test('steering assist: chicane at 100 km/h ≤ 16 m, hairpin at 60 km/h ≤ 10 m', () => {
+test('steering assist: chicane at 100 km/h ≤ 22.2 m, hairpin at 60 km/h ≤ 10 m', () => {
     const chicane = pathRadius(100 / 3.6, 0.5, { throttle: 0.3, brake: 0, steer: 1 }, 'steering');
-    assert.ok(chicane <= 16, `chicane radius ${chicane} m`);
+    assert.ok(chicane <= 22.2, // no extra grip from the steering help since 2026-10-09 (measured 20.14 m)
+        `chicane radius ${chicane} m`);
     const hairpin = pathRadius(60 / 3.6, 0.5, COAST_LOCK, 'steering');
     assert.ok(hairpin <= 10, `hairpin radius ${hairpin} m`);
 });
@@ -192,4 +193,29 @@ test('step reports grip use and slip', () => {
     assert.ok(car.latUse < 0.01 && car.slip < 0.01);
     for (let k = 0; k < 30; k++) step(car, { throttle: 0, brake: 0, steer: 1 }, 1 / 60, 6);
     assert.ok(car.latUse > 0.5 && car.latUse <= 1);
+});
+
+test('parseAssist snaps to the help levels', () => {
+    assert.deepStrictEqual(parseAssist('35,80'), { steer: 0, brake: 1 });
+    assert.deepStrictEqual(parseAssist('100,50'), { steer: 1, brake: 0.5 });
+    assert.deepStrictEqual(parseAssist('off'), { steer: 0, brake: 0 });
+    assert.deepStrictEqual(parseAssist(null), { steer: 1, brake: 1 });
+});
+
+test('steering help gives no extra grip: at the grip limit both cars corner alike', () => {
+    // Steady full-lock circle at 120 km/h (both cars saturate their grip there), 4 s to settle
+    const lat = (assist) => {
+        const v = 120 / 3.6 * 6;
+        const car = { x: 0, y: 0, angle: 0, vx: v, vy: 0, speed: v, steer: 0 };
+        let a = 0;
+        for (let k = 0; k < 240; k++) {
+            const before = car.angle;
+            step(car, { throttle: 0.6, brake: 0, steer: 1 }, 1 / 60, 6, false, assist);
+            if (k > 180) a = Math.max(a, Math.abs(car.angle - before) * 60 * (car.speed / 6)); // yaw rate × speed
+        }
+        return { a, use: car.latUse };
+    };
+    const on = lat('100,0'), off = lat('0,0');
+    assert.ok(on.use > 0.98 && off.use > 0.98, `not at the limit: ${on.use} / ${off.use}`);
+    assert.ok(Math.abs(on.a - off.a) / off.a < 0.01, `on ${on.a.toFixed(2)} vs off ${off.a.toFixed(2)} m/s²`);
 });

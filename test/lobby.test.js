@@ -104,12 +104,16 @@ test('sanitizeSettings: day or night, nothing else', () => {
     assert.strictEqual(lobby.sanitizeSettings({ ...DEFAULTS, timeOfDay: 'night' }, { timeOfDay: 'dusk' }, TRACK_IDS).timeOfDay, 'night');
 });
 
-test('sanitizeAssist: full or off, anything else falls back to full', () => {
-    assert.deepStrictEqual(lobby.sanitizeAssist('off'),   { steer: 0, brake: 0 });
-    assert.deepStrictEqual(lobby.sanitizeAssist('full'),  { steer: 1, brake: 1 });
-    assert.deepStrictEqual(lobby.sanitizeAssist('turbo'), { steer: 1, brake: 1 }); // unknown → full
-    assert.deepStrictEqual(lobby.sanitizeAssist('75,50'), { steer: 0.75, brake: 0.5 });
-    assert.deepStrictEqual(lobby.sanitizeAssist('0,100'), { steer: 0, brake: 1 });
+test('sanitizeAssist: levels snap (steer Off/On, brake Off/Low/High), anything else is full help', () => {
+    assert.deepStrictEqual(lobby.sanitizeAssist('off'),    { steer: 0, brake: 0 });
+    assert.deepStrictEqual(lobby.sanitizeAssist('full'),   { steer: 1, brake: 1 });
+    assert.deepStrictEqual(lobby.sanitizeAssist('turbo'),  { steer: 1, brake: 1 }); // unknown → full
+    assert.deepStrictEqual(lobby.sanitizeAssist('75,50'),  { steer: 1, brake: 0.5 });
+    assert.deepStrictEqual(lobby.sanitizeAssist('0,100'),  { steer: 0, brake: 1 });
+    assert.deepStrictEqual(lobby.sanitizeAssist('35,80'),  { steer: 0, brake: 1 });   // old slider values snap
+    assert.deepStrictEqual(lobby.sanitizeAssist('60,20'),  { steer: 1, brake: 0 });
+    assert.deepStrictEqual(lobby.sanitizeAssist('50,25'),  { steer: 1, brake: 0.5 });
+    assert.deepStrictEqual(lobby.sanitizeAssist('x,y'),    { steer: 1, brake: 1 });
 });
 
 test('sanitizeSettings: out-laps 1–3 and timed quali laps 1–10, whole numbers, junk ignored', () => {
