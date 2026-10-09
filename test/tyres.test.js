@@ -35,3 +35,11 @@ test('next harder compound, and compound names', () => {
     assert.deepStrictEqual(['S', 'M', 'H'].map(T.nextHarder), ['M', 'H', 'M']);
     assert.ok(T.isCompound('S') && !T.isCompound('X') && !T.isCompound(undefined));
 });
+
+test('calibrated: a clean lap wears each circuit at its typical rate (±15 %)', async () => {
+    const { execFileSync } = require('node:child_process');
+    const out = execFileSync('node', ['scripts/calibrate-tyres.js'], { encoding: 'utf8' });
+    const per = out.split('\n').filter((l) => /^\w+\s+\d/.test(l)).map((l) => +l.trim().split(/\s+/)[1]);
+    assert.strictEqual(per.length, 14);
+    for (const v of per) assert.ok(Math.abs(v / T.LOAD_TYPICAL - 1) < 0.15, `${v} vs ${T.LOAD_TYPICAL}`);
+});

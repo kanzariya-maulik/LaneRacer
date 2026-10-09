@@ -3,7 +3,7 @@
 export const COMPOUNDS = { S: { grip: 1.06, life: 0.40 }, M: { grip: 1.00, life: 0.65 }, H: { grip: 0.95, life: 0.90 } };
 const FADE = 0.0375, CLIFF_FROM = 0.8, CLIFF = 0.09;
 // Mean raw load of a clean racing lap (Task 3 calibration), so typical driving wears at exactly 1 / life
-export const LOAD_TYPICAL = 1;
+export const LOAD_TYPICAL = 1.11;
 
 export const isCompound = (c) => c === 'S' || c === 'M' || c === 'H';
 

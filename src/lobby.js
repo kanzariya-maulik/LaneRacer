@@ -27,6 +27,7 @@ function sanitizeSettings(current, incoming, trackIds) {
     // Qualifying run: untimed out-laps (1 = the drive from the pits to the line), then timed laps
     if (Number.isFinite(incoming.outLaps)) next.outLaps = clamp(Math.round(incoming.outLaps), 1, 3);
     if (Number.isFinite(incoming.qualiLaps)) next.qualiLaps = clamp(Math.round(incoming.qualiLaps), 1, 10);
+    if (typeof incoming.tyreWear === 'boolean') next.tyreWear = incoming.tyreWear;
     return next;
 }
 
@@ -84,4 +85,7 @@ function sanitizeAssist(a) {
     return { steer: 1, brake: 1 }; // safe default: full assist
 }
 
-module.exports = { TEAMS, MAX_RACERS, sanitizeUsername, sanitizeChat, sanitizeSettings, sanitizeInput, sanitizeInputs, sanitizeAssist, canJoinTeam, pickRacers };
+// Start / next tyre compound: S, M or H (medium unless valid)
+const sanitizeCompound = (c) => (c === 'S' || c === 'M' || c === 'H' ? c : 'M');
+
+module.exports = { sanitizeCompound, TEAMS, MAX_RACERS, sanitizeUsername, sanitizeChat, sanitizeSettings, sanitizeInput, sanitizeInputs, sanitizeAssist, canJoinTeam, pickRacers };

@@ -30,12 +30,20 @@ export class Predictor {
         c.x = e[1]; c.y = e[2]; c.angle = e[3]; c.speed = e[4]; c.steer = e[5];
         c.inPit = !!(e[6] & 1); c.limiter = !!(e[6] & 2); c.drs = !!(e[6] & 4);
         c.vx = e[7] ?? Math.cos(e[3]) * e[4]; c.vy = e[8] ?? Math.sin(e[3]) * e[4]; c.tow = e[9] || 0;
+        c.wear = e[11] ?? c.wear ?? 0;
         c.lastSafeX = c.x; c.lastSafeY = c.y;
         this.finished = !!(e[6] & FIN);
     }
 
+    // Compound and wear rate from the server's meta: the predicted car wears and grips exactly like the server's
+    setTyres({ compound, wearPerM }) {
+        this.tyres = { compound, wearPerM };
+        if (this.car) Object.assign(this.car, this.tyres);
+    }
+
     reset(e) {
         this.car = { assist: this.assist };
+        if (this.tyres) Object.assign(this.car, this.tyres);
         this.load(e);
         this.prev = { x: this.car.x, y: this.car.y, angle: this.car.angle };
         this.pending = [];

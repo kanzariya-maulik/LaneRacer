@@ -1,5 +1,6 @@
 const Physics = require('./Physics');
 const netlog = require('../netlog');
+const Tyres = require('../../public/js/sim/tyres.js');
 const Drive = require('../../public/js/sim/drive.js');
 const Ticker = require('../ticker');
 const { pointAt, edgeAt } = require('./Track');
@@ -27,7 +28,7 @@ const SLIP_MAX = 0.2;         // drag cut right behind another car…
 const SLIP_MIN_M = 5, SLIP_RANGE_M = 40, SLIP_LAT_M = 3; // …fading out by 40 m behind, only roughly in line
 
 const FLAGS = { inPit: 1, limiter: 2, drs: 4, drsAvailable: 8, finished: 16, lapValid: 32, ghost: 64 };
-const META_FIELDS = ['lap', 'checkpoint', 'rank', 'gap', 'lapsDown', 'lastLap', 'bestLap', 'lapStart', 'bestLapSectors', 'lastValid', 'penalty'];
+const META_FIELDS = ['lap', 'checkpoint', 'rank', 'gap', 'lapsDown', 'lastLap', 'bestLap', 'lapStart', 'bestLapSectors', 'lastValid', 'penalty', 'compound', 'nextCompound', 'stops', 'compoundsUsed', 'wearPerM'];
 const META_EVERY = 6; // ticks: info updates at 10 Hz
 const r1 = (v) => Math.round(v * 10) / 10;
 
@@ -77,6 +78,11 @@ class Game {
                 limits: 0, penalty: 0, offLimits: false, finishTime: null,
                 lastSafeX: slot.x, lastSafeY: slot.y, gridX: slot.x, gridY: slot.y, jumpStart: false, reacted: false,
                 drs: false, drsAvailable: false, drsEligible: [], tow: 0, lapS: null,
+                ...(() => {
+                    const compound = Tyres.isCompound(p.compound) ? p.compound : 'M';
+                    return { compound, nextCompound: null, wear: 0, wearPerM: Game.tyreWearPerM(settings, track, compound),
+                        tyreGrip: Tyres.gripOf(compound, 0), stops: 0, compoundsUsed: [compound] };
+                })(),
                 lap: 0,
                 // Race cars sit behind the line having "passed" checkpoint 0; quali cars must cross it to start a lap
                 checkpoint: mode === 'quali' ? cpCount - 1 : 0,
@@ -127,6 +133,12 @@ class Game {
         });
     }
 
+    // Wear per metre for a compound in this session (0 with tyre wear off)
+    static tyreWearPerM(settings, track, compound) {
+        if (settings.tyreWear === false) return 0;
+        return Tyres.wearPerM(compound, track.cum[track.path.length] / track.scale, settings.maxLaps || 1);
+    }
+
     // Each driver's box in their team's garage; unknown teams use the first garage
     // ponytail: a third driver on one team reuses box 0; the lobby caps teams at 2
     static garageSlots(players, track) {
@@ -154,7 +166,7 @@ class Game {
                 | (p.drsAvailable && FLAGS.drsAvailable) | (p.finished && FLAGS.finished)
                 | (p.lapValid && FLAGS.lapValid) | ((this.mode === 'quali' || this.settings.collisions === false) && FLAGS.ghost);
             c.push([this.index[id], r1(p.x), r1(p.y), +p.angle.toFixed(4), r1(p.speed), +p.steer.toFixed(3), flags,
-                    r1(p.vx), r1(p.vy), +(p.tow || 0).toFixed(2), p.lastSeq]);
+                    r1(p.vx), r1(p.vy), +(p.tow || 0).toFixed(2), p.lastSeq, +(p.wear || 0).toFixed(4)]);
         }
         return { s: this.seq, t: +this.clock.toFixed(3), g: +this.time.toFixed(3), c };
     }
@@ -185,6 +197,11 @@ class Game {
         if (!p) return;
         p.input = input; // kept while frozen, applies at lights out
         p.inputAt = this.clock;
+    }
+
+    setNextCompound(id, c) {
+        const p = this.players[id];
+        if (p && Tyres.isCompound(c)) p.nextCompound = c;
     }
 
     // Prediction clients: each tick applies exactly one queued input, in sequence order

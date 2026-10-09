@@ -89,3 +89,17 @@ test('median: a car on either leg swerving across at the Fairmont median is stop
         assert.strictEqual(side(p), 1, `car from the leg at ${(t.cum[i] / t.scale).toFixed(0)} m crossed the median`);
     }
 });
+
+test('tyre wear is identical on the server and the client copy of the track', () => {
+    const t = Track.load('suzuka'), wire = JSON.parse(JSON.stringify(t));
+    const a = { ...JSON.parse(JSON.stringify(t.startPositions[0])), vx: 0, vy: 0, speed: 0, steer: 0, assist: 'full', tow: 0,
+        compound: 'S', wear: 0, wearPerM: 1 / 3000, tyreGrip: 1.06 };
+    a.lastSafeX = a.x; a.lastSafeY = a.y;
+    const b = { ...a };
+    for (let k = 0; k < 900; k++) {
+        const input = { steer: Math.sin(k / 40), throttle: 1, brake: k % 200 > 180 ? 1 : 0, drs: false };
+        D.driveCar(a, input, t, 1 / 60); D.driveCar(b, input, wire, 1 / 60);
+    }
+    assert.ok(a.wear > 0);
+    for (const f of ['x', 'y', 'wear', 'tyreGrip']) assert.strictEqual(b[f], a[f], f);
+});

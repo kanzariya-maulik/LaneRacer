@@ -13,7 +13,7 @@ function trace() {
     const out = {};
     for (const id of Track.TRACK_IDS) {
         const t = Track.load(id), rand = rng(1234 + id.length);
-        const g = new Game(io, [{ id: 'a', username: 'A', teamId: 'redbull', assist: 'full' }], t, { maxLaps: 99, qualifying: false }, () => {});
+        const g = new Game(io, [{ id: 'a', username: 'A', teamId: 'redbull', assist: 'full' }], t, { maxLaps: 99, qualifying: false, tyreWear: false }, () => {});
         g.frozen = false;
         const p = g.players.a, rows = [];
         let wild = null;

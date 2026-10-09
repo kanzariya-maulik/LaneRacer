@@ -121,3 +121,11 @@ test('sanitizeSettings: out-laps 1–3 and timed quali laps 1–10, whole number
     assert.strictEqual(s({ qualiLaps: 2.6 }).qualiLaps, 3);
     assert.deepStrictEqual([s({ outLaps: '2', qualiLaps: null }).outLaps, s({ outLaps: '2', qualiLaps: null }).qualiLaps], [1, 2]);
 });
+
+test('tyreWear setting and compound choice are sanitised', () => {
+    const s = lobby.sanitizeSettings({ tyreWear: true }, { tyreWear: false }, ['monza']);
+    assert.strictEqual(s.tyreWear, false);
+    assert.strictEqual(lobby.sanitizeSettings({ tyreWear: true }, { tyreWear: 'no' }, ['monza']).tyreWear, true);
+    assert.strictEqual(lobby.sanitizeCompound('S'), 'S');
+    assert.strictEqual(lobby.sanitizeCompound('Z'), 'M');
+});

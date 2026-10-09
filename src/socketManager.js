@@ -12,7 +12,7 @@ const state = {
     status: 'LOBBY', // LOBBY, QUALIFYING, QUALI_RESULTS, COUNTDOWN, RACE, FINISHED
     players: {},
     hostId: null,
-    settings: { trackId: 'monza', maxLaps: 3, qualifying: true, collisions: true, contactPenalties: true, timeOfDay: 'day', outLaps: 1, qualiLaps: 2 }
+    settings: { trackId: 'monza', maxLaps: 3, qualifying: true, collisions: true, tyreWear: true, contactPenalties: true, timeOfDay: 'day', outLaps: 1, qualiLaps: 2 }
 };
 
 let gameInstance = null;
@@ -106,6 +106,7 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
                 teamId: check.team.id,
                 color: check.team.chatColor,
                 assist: lobby.sanitizeAssist(data.assist), // each player's own choice, changeable any time
+                compound: lobby.sanitizeCompound(data.compound),
                 isReady: false,
                 isSpectating: state.status !== 'LOBBY'
             };
@@ -214,6 +215,15 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
             if (state.settings.qualifying) startQuali(io, racers);
             else startRace(io, racers);
         });
+
+        socket.on('set_compound', (c) => {
+            const player = state.players[socket.id];
+            if (!player) return;
+            player.compound = lobby.sanitizeCompound(c); // start compound for the next session
+            io.emit('lobby_state_sync', lobbySnapshot());
+        });
+
+        socket.on('tyre_next', (c) => gameInstance?.setNextCompound(socket.id, c));
 
         socket.on('set_assist', (assist) => {
             const player = state.players[socket.id];

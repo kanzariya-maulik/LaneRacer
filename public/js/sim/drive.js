@@ -3,6 +3,7 @@
 import { C, step, parseAssist } from './carphysics.js';
 import Physics from './physics.js';
 import { brakeAssist } from './assist.js';
+import { gripOf, wearLoad } from './tyres.js';
 import { slopeAt, roadAt } from './elevation.js';
 
 export const WALL_OFFSET = 80;     // world units past the track edge, unless the track sets wallOffset; Track.js uses the same
@@ -71,6 +72,12 @@ export function driveCar(p, input, t, dt) {
     const used = parseAssist(p.assist).brake > 0 && !p.inPit ? brakeAssist(p, input, t, before, parseAssist(p.assist).brake) : input;
     p.dragMul = (p.drs ? DRS_DRAG : 1) * (1 - (p.tow || 0));
     step(p, used, dt, scale, grass, p.assist);
+    // Tyres wear with distance, harder the more grip is in use (tyres.js); grip follows
+    if (p.compound) {
+        const metres = Math.hypot(p.x - x0, p.y - y0) / scale;
+        p.wear = Math.min(1, (p.wear || 0) + metres * (p.wearPerM || 0) * wearLoad(p.latUse || 0, used.brake || 0, grass ? 0 : (p.slip || 0)));
+        p.tyreGrip = gripOf(p.compound, p.wear);
+    }
 
     // Pit wall: a move across it is undone
     const hit = pit && (Physics.crossWall(x0, y0, p.x, p.y, pit.wall) || Physics.crossWall(x0, y0, p.x, p.y, pit.closeWall));

@@ -323,6 +323,8 @@ socket.on('game_state', onFastPacket);
 
 socket.on('game_meta', (diff) => {
     for (const id in diff) if (clientState.gameState && clientState.gameState[id]) Object.assign(clientState.gameState[id], diff[id]);
+    const mine = diff[clientState.me];
+    if (mine && ('compound' in mine || 'wearPerM' in mine)) window.syncTyres?.();
 });
 
 socket.on('lights', ({ count }) => {

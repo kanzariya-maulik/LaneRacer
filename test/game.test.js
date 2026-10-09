@@ -214,7 +214,7 @@ test('no limiter on the track', () => {
 });
 
 test('pit lane is asphalt, not grass', () => {
-    const g = new Game(io, [lp('a')], flatMonza, RACE, () => {}); // surfaces, not hills: compared with a flat-road step
+    const g = new Game(io, [lp('a')], flatMonza, { ...RACE, tyreWear: false }, () => {}); // surfaces, not hills: compared with a flat-road step
     const p = g.players.a;
     const c = monza.pit.garages[5];
     place(p, c, 0);
@@ -846,7 +846,7 @@ test('slipstream: right behind another car cuts drag; alongside or far behind do
     assert.strictEqual(b.tow, 0, 'alongside is no tow');
 });
 
-test('fast update: compact per-car arrays with flags, at most 75 bytes per car (velocity, tow, lastSeq for prediction)', () => {
+test('fast update: compact per-car arrays with flags, at most 75 bytes per car (velocity, tow, lastSeq for prediction, wear)', () => {
     let pkt = null;
     const io2 = { emit() {}, volatile: { emit(ev, d) { if (ev === 'game_state') pkt = d; } } };
     const g = new Game(io2, [lp('a'), lp('b', 'haas')], monza, QUALI, () => {}, 'quali');
@@ -855,7 +855,7 @@ test('fast update: compact per-car arrays with flags, at most 75 bytes per car (
     assert.strictEqual(typeof pkt.t, 'number');
     assert.strictEqual(pkt.c.length, 2);
     const a = pkt.c.find(e => e[0] === g.index.a);
-    assert.strictEqual(a.length, 11);
+    assert.strictEqual(a.length, 12);
     const F = Game.FLAGS;
     assert.strictEqual(a[6] & (F.inPit | F.limiter | F.ghost), F.inPit | F.limiter | F.ghost, 'garage car: in pit, limiter, ghost');
     for (const e of pkt.c) assert.ok(JSON.stringify(e).length <= 75, `${JSON.stringify(e).length} bytes`);
@@ -1030,7 +1030,7 @@ test('fast update carries velocity, tow and the last applied input for reconcili
     g.frozen = false;
     for (let k = 0; k < 30; k++) { g.handleInputs('a', [{ seq: 7 + k, steer: 0, throttle: 1, brake: 0, drs: false }]); g.update(); }
     const e = pkt.c[0];
-    assert.strictEqual(e.length, 11);
+    assert.strictEqual(e.length, 12);
     assert.ok(Math.abs(e[7]) + Math.abs(e[8]) > 0, 'velocity present');
     assert.strictEqual(e[10], 36);
     assert.ok(JSON.stringify(e).length <= 75, `${JSON.stringify(e).length} bytes`);
@@ -1308,4 +1308,38 @@ test('DRS: a car is never within 1 s of itself, and a car in the pit lane gives 
     g.time = 200; a.inPit = true; g.updateDrs(a, d - sc, d + sc);
     g.time = 200.5; g.updateDrs(b, d - sc, d + sc);
     assert.ok(!b.drsEligible[0], 'DRS from a car in the pit lane');
+});
+
+test('tyres: cars start on their chosen compound (medium by default), wear scaled to the race', () => {
+    const g = new Game(io, [{ ...lp('a'), compound: 'S' }, lp('b')], monza, { ...RACE, maxLaps: 10 }, () => {});
+    const a = g.players.a, b = g.players.b, lapM = monza.cum[monza.path.length] / monza.scale;
+    assert.strictEqual(a.compound, 'S'); assert.strictEqual(b.compound, 'M');
+    assert.deepStrictEqual(a.compoundsUsed, ['S']);
+    assert.ok(Math.abs(1 / a.wearPerM - 0.40 * lapM * 10) < 1e-6);
+    assert.strictEqual(a.wear, 0); assert.strictEqual(a.tyreGrip, 1.06);
+});
+
+test('tyres: wear builds while driving and the fast packet carries it', () => {
+    const g = new Game(io, [lp('a')], monza, RACE, () => {});
+    const p = g.players.a;
+    g.frozen = false; p.input = { throttle: 1, brake: 0, steer: 0 };
+    for (let k = 0; k < 120; k++) g.drive(p);
+    assert.ok(p.wear > 0 && p.tyreGrip < 1);
+    const e = g.fastPacket().c.find((c) => c[0] === g.index.a);
+    assert.strictEqual(e[11], +p.wear.toFixed(4));
+});
+
+test('tyres: wear off means no wear', () => {
+    const g = new Game(io, [lp('a')], monza, { ...RACE, tyreWear: false }, () => {});
+    const p = g.players.a;
+    p.input = { throttle: 1, brake: 0, steer: 0 };
+    for (let k = 0; k < 120; k++) g.drive(p);
+    assert.strictEqual(p.wear, 0); assert.strictEqual(p.tyreGrip, 1);
+});
+
+test('tyres: the next compound is validated and sent as meta', () => {
+    const g = new Game(io, [lp('a')], monza, RACE, () => {});
+    g.setNextCompound('a', 'H'); assert.strictEqual(g.players.a.nextCompound, 'H');
+    g.setNextCompound('a', 'X'); assert.strictEqual(g.players.a.nextCompound, 'H');
+    for (const f of ['compound', 'nextCompound', 'stops', 'compoundsUsed', 'wearPerM']) assert.ok(Game.META_FIELDS.includes(f), f);
 });

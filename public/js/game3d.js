@@ -2075,10 +2075,16 @@ function frame(now) {
     }
 }
 
+window.syncTyres = () => {
+    const me = clientState.gameState?.[clientState.me];
+    if (me) predictor?.setTyres({ compound: me.compound, wearPerM: me.wearPerM });
+};
+
 window.initGameVisuals = () => {
     netBuf = new SnapshotBuffer();
     // New session: predict from the new grid (reset on our first entry); spectators never get one, so never predict
     predictor = new Predictor(clientState.trackData, clientState.gameState?.[clientState.me]?.assist || 'off');
+    window.syncTyres();
     sentInputs = []; carPose.clear(); carState.clear(); renderClock.t = presentClock.t = null;
     othersMode = store.get('lanrace.others') === 'smooth' ? 'smooth' : 'present';
     ownBox.reset(); remoteBoxes.clear(); lastDrs = false;
