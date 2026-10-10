@@ -2,6 +2,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 const Track = require('../src/game/Track');
+const Physics = require('../src/game/Physics');
 const Game = require('../src/game/Game');
 const Tyres = require('../public/js/sim/tyres.js');
 const io = { emit() {}, volatile: { emit() {} } };
@@ -72,10 +73,12 @@ test('drive-through: a car that has already stopped this lap is driven straight 
     assert.strictEqual(p.stops, 0);
 });
 
-test('release: perfect within 0.2 s of green, auto at 0.5 s, jumped +0.5 s', () => {
+test('release: a fresh press within 0.2 s of green is perfect, none (or held all along) is auto at 0.5 s, jumped +0.5 s', () => {
     const t = Track.load('monza');
     const go = (pressAt) => {
-        const g = start(t, [lp('a')]), p = g.players.a;
+        const msgs = [], metas = [], sio = { emit(ev, d) { if (ev === 'chat_msg') msgs.push(d.msg); if (ev === 'game_meta' && d.a?.lastStop) metas.push(d.a.lastStop); }, volatile: { emit() {} } };
+        const g = new Game(sio, [lp('a')], t, RACE, () => {}), p = g.players.a;
+        g.frozen = false;
         enterPit(t, g, p);
         let greenAt = null, outAt = null, clock = 0;
         runStop(t, g, p, () => {
@@ -83,11 +86,17 @@ test('release: perfect within 0.2 s of green, auto at 0.5 s, jumped +0.5 s', () 
             if (p.stop?.phase === 'hold' && greenAt === null) greenAt = clock;
             if (p.stop?.phase === 'out' && outAt === null) outAt = clock;
             const svc = p.stop?.phase === 'service';
-            p.input = { throttle: pressAt === 'early' ? (svc && p.stop.t < 0.8 ? 1 : 0) : greenAt !== null && clock - greenAt >= pressAt ? 1 : 0, brake: 0, steer: 0, drs: false };
+            p.input = { throttle: pressAt === 'held' ? 1 : pressAt === 'early' ? (svc && p.stop.t < 0.8 ? 1 : 0) : greenAt !== null && clock - greenAt >= pressAt ? 1 : 0, brake: 0, steer: 0, drs: false };
         });
-        return { wait: outAt - greenAt, release: p.lastStop.release };
+        return { wait: outAt - greenAt, release: p.lastStop.release, p, msgs, metas };
     };
-    const perfect = go(0.1), auto = go(Infinity), jumped = go('early');
+    const perfect = go(0.1), auto = go(Infinity), jumped = go('early'), held = go('held');
+    assert.strictEqual(held.release, 'auto', 'throttle held the whole stop'); assert.ok(Math.abs(held.wait - 0.5) <= 2 / 60, `held left after ${held.wait}`);
+    // The stop time reaches the HUD (meta) and the chat
+    const { p, msgs, metas } = perfect;
+    assert.deepStrictEqual(metas, [{ s: p.lastStop.s, release: 'perfect' }]);
+    assert.ok(p.lastStop.s > 2.5 && p.lastStop.s < 3.2, `${p.lastStop.s}`);
+    assert.deepStrictEqual(msgs.filter((m) => m.startsWith('PIT:')), [`PIT: a ${p.lastStop.s.toFixed(2)} s (perfect release)`]);
     assert.strictEqual(perfect.release, 'perfect'); assert.ok(perfect.wait <= 0.15, `perfect left after ${perfect.wait}`);
     assert.strictEqual(auto.release, 'auto'); assert.ok(Math.abs(auto.wait - 0.5) <= 2 / 60, `auto left after ${auto.wait}`);
     assert.strictEqual(jumped.release, 'jumped'); assert.ok(jumped.wait >= 0.5 - 1 / 60, `jumped left after ${jumped.wait}`);
@@ -112,6 +121,35 @@ test('guide timeout: an unreachable mark falls back to the drive out, no service
     const r = runStop(t, g, p, () => { if (p.stop?.phase === 'guide' && !p.box.moved) { p.box = { ...p.box, x: p.box.x + 40 * t.scale, moved: true }; } });
     assert.ok(r.phases.includes('guide') && !r.phases.includes('service') && r.phases.includes('out'), r.phases.join(','));
     assert.strictEqual(p.stops, 0);
+});
+
+test('safety net: a lane car shoved out of the lane is handed back after 1 s; a wedged one is driven out after 60 s', () => {
+    const t = Track.load('monza'), sc = t.scale;
+    { // shoved 15 m sideways off the lane, at rest
+        const g = start(t, [lp('a')]), p = g.players.a;
+        enterPit(t, g, p, 30);
+        for (let k = 0; k < 60 && p.stop?.phase !== 'lane'; k++) g.update();
+        assert.strictEqual(p.stop?.phase, 'lane');
+        const n = -Math.sin(p.angle), m = Math.cos(p.angle), q = pitPoint(t, p.pitS);
+        const side = Physics.nearestOnTrack(q.x + n * 15 * sc, q.y + m * 15 * sc, t).dist < Physics.nearestOnTrack(q.x - n * 15 * sc, q.y - m * 15 * sc, t).dist ? 1 : -1;
+        Object.assign(p, { x: q.x + side * n * 15 * sc, y: q.y + side * m * 15 * sc, vx: 0, vy: 0, speed: 0 });
+        let k = 0;
+        for (; k < 120 && p.stop; k++) g.update();
+        assert.strictEqual(p.stop, null, `still ${p.stop?.phase}, inPit ${p.inPit}`);
+        assert.ok(k / 60 <= 1.2, `handed back after ${(k / 60).toFixed(2)} s`);
+    }
+    { // pinned in place in the lane: never reaches its box
+        const g = start(t, [lp('a')]), p = g.players.a;
+        enterPit(t, g, p, 30, 40);
+        const pin = { x: p.x, y: p.y, angle: p.angle };
+        let k = 0;
+        for (; k < 60 * 62 && p.stop?.phase !== 'out'; k++) { Object.assign(p, pin, { vx: 0, vy: 0, speed: 0 }); g.update(); }
+        assert.strictEqual(p.stop?.phase, 'out');
+        assert.ok(k / 60 >= 59 && k / 60 <= 60.2, `driven out after ${(k / 60).toFixed(2)} s`);
+        for (k = 0; k < 60 * 62 && p.stop; k++) { Object.assign(p, pin, { vx: 0, vy: 0, speed: 0 }); g.update(); }
+        assert.strictEqual(p.stop, null, 'still wedged: the driver gets the car back');
+        assert.strictEqual(p.stops, 0);
+    }
 });
 
 test('two cars stopping at neighbouring boxes are both serviced and released', () => {
@@ -247,6 +285,7 @@ test('quali: a fresh set every pit visit; race: one service per lap', () => {
             g.updateStop(p);
             if (p.stop?.phase !== 'lane') { p.stop = null; return false; }
             p.stop = { phase: 'service', t: 1e-6, age: 0, parkedAt: g.clock }; g.updateStop(p);
+            assert.strictEqual(p.stop.phase, mode === 'quali' ? 'wait' : 'hold', `${mode}: after the service`); // quali: back to waiting on the mark
             p.stop = null;
             return true;
         };

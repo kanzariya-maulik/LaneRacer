@@ -31,6 +31,7 @@ const STOP_S = 2.5, STOP_SPREAD_S = 0.4, RELEASE_HOLD_S = 0.5, RELEASE_GAP_M = 1
 const RELEASE_AUTO_S = 0.5, PERFECT_S = 0.2, JUMP_WINDOW_S = 1, RELEASE_JUMP_S = 0.5, RELEASE_THROTTLE = 0.5;
 const COMPOUND_PENALTY_S = 22;
 const GUIDE_MAX_S = 6; // not parked by then: the car is driven out without a service (never stranded)
+const LANE_MAX_S = 60, OFF_LANE_S = 1; // driven this long (wedged), or shoved out of the lane this long: the driver gets it back
 const STOP_CODE = { guide: 1, service: 2, hold: 3, lane: 4, out: 5, wait: 6 };
 
 const FLAGS = { inPit: 1, limiter: 2, drs: 4, drsAvailable: 8, finished: 16, lapValid: 32, ghost: 64 };
@@ -168,6 +169,9 @@ class Game {
         if (entered) p.pitVisits++; // quali: a fresh set every visit
         p.wasInPit = p.inPit;
         const thr = (p.input.throttle || 0) >= RELEASE_THROTTLE;
+        // Release presses are edge-triggered: throttle held while the game drives is neither perfect nor a jump
+        const press = thr && !p.thrWas;
+        p.thrWas = thr;
         const go = (phase, extra = {}) => { p.stop = { phase, t: 0, age: 0, ...extra }; };
         if (!p.stop) {
             if (!entered) return;
@@ -177,6 +181,13 @@ class Game {
         const st = p.stop;
         st.age += this.dt;
         if (st.phase === 'wait') { if (thr) go('out'); return; }
+        if (st.phase === 'lane' || st.phase === 'out') {
+            // Out of the lane = past its edge and runoff (a hot entry running wide along the barrier is still in it)
+            const n = p.inPit ? null : Physics.nearestOnPath(p.x, p.y, t.pit.path, false);
+            const away = n && n.dist > Drive.pitHalf(t.pit, n) + (Drive.PIT_RUNOFF_M + 1) * sc;
+            st.off = away ? (st.off || 0) + this.dt : 0;
+            if (st.age > LANE_MAX_S || st.off >= OFF_LANE_S) return st.phase === 'lane' && !away ? go('out') : void (p.stop = null);
+        }
         if (st.phase === 'lane') { if (p.box.s - p.pitS <= Drive.ASSIST_HANDOVER_M * sc) go('guide'); return; }
         if (st.phase === 'guide') {
             if (Math.hypot(p.x - p.box.x, p.y - p.box.y) < PARK_M * sc && Math.hypot(p.vx, p.vy) < PARK_MS * sc) go('service', { t: STOP_S + this.rng() * STOP_SPREAD_S, parkedAt: this.clock });
@@ -185,7 +196,7 @@ class Game {
         }
         if (st.phase === 'service') {
             st.t -= this.dt;
-            if (thr && st.t <= JUMP_WINDOW_S) st.jumped = true;
+            if (press && st.t <= JUMP_WINDOW_S) st.jumped = true;
             if (st.t > 0) return;
             this.serviceTyres(p);
             if (this.mode === 'quali') { this.recordStop(p, st.parkedAt, 'auto'); return go('wait'); }
@@ -198,7 +209,7 @@ class Game {
             if (busy && st.unsafe < RELEASE_HOLD_S) { st.unsafe += this.dt; st.greenAt += this.dt; return; }
             const since = this.clock - st.greenAt - (st.jumped ? RELEASE_JUMP_S : 0);
             if (since < 0) return;
-            const pressed = thr && !st.jumped;
+            const pressed = press && !st.jumped;
             if (!pressed && since < RELEASE_AUTO_S) return;
             this.recordStop(p, st.parkedAt, st.jumped ? 'jumped' : pressed && since <= PERFECT_S ? 'perfect' : 'auto');
             return go('out');
@@ -505,7 +516,7 @@ class Game {
         if (this.mode === 'race' && this.firstFinishAt !== undefined && this.time - this.firstFinishAt > FINISH_WINDOW_S) {
             for (const id of ids) {
                 const p = this.players[id];
-                if (!p.finished) Object.assign(p, { finished: true, dnf: true, finishTime: null, vx: 0, vy: 0, speed: 0 });
+                if (!p.finished) Object.assign(p, { finished: true, dnf: true, finishTime: null, vx: 0, vy: 0, speed: 0, stop: null });
             }
         }
         if (this.mode === 'race' && !this.classified && ids.length && ids.every(id => this.players[id]?.finished)) {
