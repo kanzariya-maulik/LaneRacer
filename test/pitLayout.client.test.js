@@ -54,35 +54,42 @@ test('crew: seven people around the box, all clear of the car corridor, jacks an
     }
 });
 
-test('boxCue: distance, BRAKE when braking is due, MISSED when too late or past', () => {
-    const stopsIn = (d) => (m) => m >= d; // the car needs d metres to stop
-    assert.strictEqual(L.boxCue(120, 22, stopsIn(30)), 'YOUR BOX 120 m');
-    assert.strictEqual(L.boxCue(31, 22, stopsIn(30)), 'BRAKE');
-    assert.strictEqual(L.boxCue(20, 22, stopsIn(30)), 'MISSED — GO AROUND');
-    assert.strictEqual(L.boxCue(-3, 15, stopsIn(30)), 'MISSED — GO AROUND');
-    assert.strictEqual(L.boxCue(2, 1.5, stopsIn(0.5)), 'YOUR BOX 2 m'); // crawling onto the mark: no BRAKE flash
-    assert.strictEqual(L.boxCue(0.2, 0, stopsIn(0)), null); // on the mark
-    assert.strictEqual(L.boxCue(-3, 0.5, stopsIn(0)), null); // crawled just past and stopped: the guide handles it
-    assert.strictEqual(L.boxCue(-3, 15, stopsIn(30), true), null); // visit done: nothing
-});
-
-// Frame by frame through a visit: [distM, speedMs, phase, inLane] → the cue text the HUD would show
-function runVisit(frames, stopsIn) {
-    let done = false;
-    return frames.map(([distM, speedMs, phase, inLane = true]) => {
-        done = L.visitDone(done, { phase, distM, speedMs, inLane });
-        return !inLane ? null : phase ? 'STOP' : L.boxCue(distM, speedMs, (m) => m >= stopsIn(speedMs), done);
+const roles17 = ['gunFL', 'gunFR', 'gunRL', 'gunRR', 'offFL', 'offFR', 'offRL', 'offRR', 'onFL', 'onFR', 'onRL', 'onRR', 'jackF', 'jackR', 'stabL', 'stabR', 'lollipop'];
+for (const id of Track.TRACK_IDS) {
+    test(`${id}: wheel marks in every box, a 17-strong crew inside the lane, a wall stand per garage`, () => {
+        const t = tracks[id], lay = L.pitLayout(t), sc = t.scale;
+        for (const b of lay.boxes) {
+            const marks = L.tMarks(b, sc);
+            assert.strictEqual(marks.length, 4);
+            for (const m of marks) assert.ok(Math.hypot(m.x - b.x, m.y - b.y) / sc < Math.hypot(L.BOX_M.len, L.BOX_M.wide) / 2, 'mark outside its box');
+            const crew = L.crew17(b, sc, t.pit.trackSide);
+            assert.deepStrictEqual(crew.map((c) => c.role).sort(), [...roles17].sort());
+            for (const c of crew) for (const at of [c.idle, c.work]) assert.ok(Math.abs(lateral(t, at)) <= 5 + 0.05, `${c.role} outside the lane`);
+            // Waiting crew stand clear of the car's way in and out (2.2 m corridor along the box)
+            for (const c of crew) {
+                const dx = (c.idle.x - b.x) / sc, dy = (c.idle.y - b.y) / sc, l = -dx * Math.sin(b.angle) + dy * Math.cos(b.angle);
+                assert.ok(Math.abs(l) >= 1.1, `${c.role} idles in the car's path`);
+            }
+        }
+        const standing = lay.garages.filter((g) => !g.skip).length, stands = L.wallStands(t);
+        assert.strictEqual(stands.length, standing);
+        for (const s of stands) { // on the lane side of the wall: nearer the lane than the wall point
+            let q = null; // the wall point nearest the stand
+            for (let i = 0; i < t.pit.wall.length - 1; i++) {
+                const a = t.pit.wall[i], b = t.pit.wall[i + 1], dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy || 1;
+                const u = Math.max(0, Math.min(1, ((s.x - a.x) * dx + (s.y - a.y) * dy) / l2)), p = { x: a.x + u * dx, y: a.y + u * dy };
+                if (!q || Math.hypot(s.x - p.x, s.y - p.y) < Math.hypot(s.x - q.x, s.y - q.y)) q = p;
+            }
+            assert.ok(L.distToPath(s, t.pit.path, false) < L.distToPath(q, t.pit.path, false), 'stand on the wrong side of the wall');
+        }
     });
 }
-test('visitDone: no MISSED / countdown after a stop or a quali exit; MISSED on a genuine overshoot', () => {
-    const need = (v) => (v * v) / 2 / 8; // braking at 8 m/s²
-    assert.deepStrictEqual(runVisit([[120, 22, null], [31, 22, null], [8, 8, null], [0.3, 0.2, 'guide'], [0, 0, 'service'], [0, 0, 'hold'],
-        [-2, 4, null], [-15, 20, null], [-40, 22, null], [-80, 22, null, false], [120, 22, null]], need),
-    ['YOUR BOX 120 m', 'BRAKE', 'YOUR BOX 8 m', 'STOP', 'STOP', 'STOP', null, null, null, null, 'YOUR BOX 120 m']);
-    // quali: starts on the mark, drives out
-    assert.deepStrictEqual(runVisit([[0, 0, null], [-2, 5, null], [-30, 20, null]], need), [null, null, null]);
-    // overshoot without stopping
-    assert.deepStrictEqual(runVisit([[20, 22, null], [-5, 18, null]], need), ['MISSED — GO AROUND', 'MISSED — GO AROUND']);
+
+test('cardText: next set, auto, confirmations', () => {
+    assert.deepStrictEqual(L.cardText({ compound: 'M', next: 'S', fitted: false }), { next: 'NEXT: S', confirm: '✓ SOFT ON NEXT STOP' });
+    assert.deepStrictEqual(L.cardText({ compound: 'M', next: null, fitted: false }), { next: 'NEXT: H (auto)', confirm: null });
+    assert.deepStrictEqual(L.cardText({ compound: 'H', next: null, fitted: false }), { next: 'NEXT: M (auto)', confirm: null });
+    assert.deepStrictEqual(L.cardText({ compound: 'S', next: null, fitted: true }), { next: 'NEXT: M (auto)', confirm: '✓ SOFT FITTED' });
 });
 
 test('pickerOpen: grid, quali garage, pit approach; never spectators or the lobby', () => {

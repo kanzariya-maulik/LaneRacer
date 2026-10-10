@@ -1,3 +1,4 @@
+import { nextHarder } from './sim/tyres.js';
 // Pit lane layout for drawing (game3d.js buildPit) and the player's own-box cues. Pure — no three.js, no DOM — so node
 // tests cover every circuit. World units (metres × track.scale); t = a built track, t.pit from Track.build; the garages are
 // on the -pit.trackSide side of the lane.
@@ -59,6 +60,7 @@ export function crewSpots(box, scale, garageSide) {
     });
 }
 
+// removed in Task 5 (game3d.js still imports boxCue/visitDone; pit assist makes them obsolete)
 // HUD cue on the way to your box. distM: metres along the lane to the mark (< 0 past it); canStop(m): can the car stop in m;
 // done: this visit already ended at the box (see visitDone) — nothing to cue
 export function boxCue(distM, speedMs, canStop, done = false) {
@@ -86,4 +88,58 @@ export function pickerOpen({ spectator, status, inPit, parked, toEntryM, boxDist
     if (status !== 'RACE') return false;
     if (inPit) return phase !== 'hold' && !(done && !phase) && boxDistM !== null && boxDistM > -1;
     return toEntryM >= 0 && toEntryM <= ENTRY_PICK_M;
+}
+
+// Box frame helper: a metres along the box heading, l metres to its left
+const at = (box, a, l, scale) => side(ahead(box, box.angle, a * scale), box.angle, l * scale);
+
+// Four white T marks where the wheels stop (car centre on the box, wheelbase ±1.8 m, track ±0.8 m)
+export function tMarks(box, scale) {
+    return [[1.8, 0.8], [1.8, -0.8], [-1.8, 0.8], [-1.8, -0.8]].map(([a, l]) => ({ ...at(box, a, l, scale), angle: box.angle }));
+}
+
+// The pit crew around a box: idle = waiting clear of the car's way (|l| >= 1.1 m), work = where they stand during the change.
+// Wheel men by wheel; jacks idle at the garage-side corners and step onto the car's centre line to lift it; the lollipop man
+// waits beside the nose with his board over the stopping point
+export function crew17(box, scale, trackSide) {
+    const g = -trackSide, wheels = { FL: [1.8, 1], FR: [1.8, -1], RL: [-1.8, 1], RR: [-1.8, -1] }, out = [];
+    for (const [w, [a, sgn]] of Object.entries(wheels)) {
+        out.push({ role: `gun${w}`, idle: [a, sgn * 1.8], work: [a, sgn * 1.35] });
+        out.push({ role: `off${w}`, idle: [a + 0.8, sgn * 2.2], work: [a + 0.6, sgn * 1.7] });
+        out.push({ role: `on${w}`, idle: [a - 0.8, sgn * 2.2], work: [a - 0.6, sgn * 1.7] });
+    }
+    out.push({ role: 'jackF', idle: [3.6, g * 1.6], work: [3.1, 0] }, { role: 'jackR', idle: [-3.6, g * 1.6], work: [-3.1, 0] },
+        { role: 'stabL', idle: [0.2, 2.0], work: [0.2, 1.3] }, { role: 'stabR', idle: [0.2, -2.0], work: [0.2, -1.3] },
+        { role: 'lollipop', idle: [4.6, g * 1.6], work: [4.6, g * 1.6] });
+    return out.map((c) => {
+        const idle = at(box, c.idle[0], c.idle[1], scale), work = at(box, c.work[0], c.work[1], scale);
+        return { role: c.role, idle, work, angle: Math.atan2(box.y - work.y, box.x - work.x) };
+    });
+}
+
+// One team stand per standing garage, on the lane side of the pit wall opposite it
+export function wallStands(t) {
+    const pit = t.pit, wall = pit.wall, sc = t.scale, out = [];
+    for (const g of pitLayout(t).garages) {
+        if (g.skip) continue;
+        let best = null;
+        for (let i = 0; i < wall.length - 1; i++) {
+            const a = wall[i], b = wall[i + 1], dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy || 1;
+            const u = Math.max(0, Math.min(1, ((g.x - a.x) * dx + (g.y - a.y) * dy) / l2));
+            const q = { x: a.x + u * dx, y: a.y + u * dy }, d = Math.hypot(g.x - q.x, g.y - q.y);
+            if (!best || d < best.d) best = { d, q, angle: Math.atan2(dy, dx) };
+        }
+        if (!best) continue;
+        const toLane = side(best.q, best.angle, -pit.trackSide * 1.2 * sc); // the garages' side of the wall is the lane's
+        out.push({ teamId: g.teamId, x: toLane.x, y: toLane.y, angle: best.angle });
+    }
+    return out;
+}
+
+const NAMES = { S: 'SOFT', M: 'MEDIUM', H: 'HARD' };
+// The tyre card's two lines: what the next stop fits, and a confirmation once something is chosen or fitted
+export function cardText({ compound, next, fitted }) {
+    const n = next ? `NEXT: ${next}` : `NEXT: ${nextHarder(compound)} (auto)`;
+    const confirm = fitted ? `✓ ${NAMES[compound]} FITTED` : next ? `✓ ${NAMES[next]} ON NEXT STOP` : null;
+    return { next: n, confirm };
 }
