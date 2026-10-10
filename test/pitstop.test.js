@@ -1,98 +1,129 @@
 // test/pitstop.test.js
-const { test, before } = require('node:test');
+const { test } = require('node:test');
 const assert = require('node:assert');
 const Track = require('../src/game/Track');
 const Game = require('../src/game/Game');
-const Physics = require('../src/game/Physics');
 const Tyres = require('../public/js/sim/tyres.js');
 const io = { emit() {}, volatile: { emit() {} } };
 const lp = (id, teamId = 'redbull', extra = {}) => ({ id, username: id, teamId, assist: 'full', ...extra });
 const RACE = { maxLaps: 3, qualifying: false, rng: () => 0.5 };
 const QUALI = { qualiLaps: 2 };
-let D;
-before(async () => { D = await import('../public/js/sim/drive.js'); });
 
 const pitPoint = (t, s) => Track.pointAt(t.pit.path, t.pit.cum, s, false);
-// The lane centre this far along, carried straight on past the exit tip
-function aheadOnLane(t, s) {
-    const end = pitPoint(t, t.pit.len), over = Math.max(0, s - t.pit.len);
-    return over ? { x: end.x + Math.cos(end.angle) * over, y: end.y + Math.sin(end.angle) * over } : pitPoint(t, s);
-}
-// Drive along the lane centre to the limiter speed, braking from 15 m before the box (as a driver stopping would)
-function lanePilot(g, p, t, brakeFor = true) {
-    const sc = t.scale;
-    let ah = aheadOnLane(t, p.pitS + 12 * sc);
-    // Leaving: merge, aiming 3 m to the road side of the lane through its last 40 m (the exit taper runs along the white line)
-    if (!brakeFor && p.pitS > t.pit.len - 40 * sc) {
-        const r = Physics.nearestOnTrack(ah.x, ah.y, t), k = Math.min(1, (3 * sc) / r.dist);
-        ah = { x: ah.x + (r.px - ah.x) * k, y: ah.y + (r.py - ah.y) * k };
-    }
-    let d = Math.atan2(ah.y - p.y, ah.x - p.x) - p.angle; d = Math.atan2(Math.sin(d), Math.cos(d));
-    const near = brakeFor && p.box.s - p.pitS < 15 * sc && p.box.s - p.pitS > 0;
-    p.input = { steer: Math.max(-1, Math.min(1, d * 2)), throttle: near ? 0 : 1, brake: near ? 1 : 0, drs: false };
-}
 function start(t, players, settings = RACE) {
     const g = new Game(io, players, t, settings, () => {});
     g.frozen = false;
     return g;
 }
 
+// From just inside the pit mouth at racing speed, no driver input: the game does the rest
+function enterPit(t, g, p, speedMs = 60, atM = 5) {
+    const q = pitPoint(t, atM * t.scale), v = speedMs * t.scale;
+    Object.assign(p, { x: q.x, y: q.y, angle: q.angle, vx: Math.cos(q.angle) * v, vy: Math.sin(q.angle) * v, speed: v });
+    p.input = { throttle: 0, brake: 0, steer: 0, drs: false };
+}
+function runStop(t, g, p, onTick = () => {}) {
+    const phases = [], sc = t.scale;
+    let still = 0, k = 0;
+    for (; k < 60 * 120; k++) {
+        onTick(k);
+        g.update();
+        const ph = p.stop?.phase || null;
+        if (phases[phases.length - 1] !== ph) phases.push(ph);
+        if (ph === 'service') still++;
+        if (ph === null && phases.includes('out')) break;
+    }
+    return { phases, still: still / 60, ticks: k };
+}
+
 for (const id of Track.TRACK_IDS) {
-    test(`${id}: a car drives in, is guided into its box, serviced and released onto the track`, () => {
-        const t = Track.load(id), g = start(t, [lp('a', 'ferrari')]), p = g.players.a;
+    test(`${id}: pit assist — entry to the limiter end with no driver input: parked, serviced, handed back`, () => {
+        const t = Track.load(id), sc = t.scale, g = start(t, [lp('a', 'ferrari')]), p = g.players.a;
         g.setNextCompound('a', 'H');
-        const q = pitPoint(t, Math.max(t.pit.limStart, p.box.s - 120 * t.scale));
-        Object.assign(p, { x: q.x, y: q.y, angle: q.angle, vx: Math.cos(q.angle) * 20 * t.scale, vy: Math.sin(q.angle) * 20 * t.scale, speed: 20 * t.scale });
-        g.updatePit(p); // pitS for lanePilot before the first drive
-        let still = 0, serviced = false;
-        for (let k = 0; k < 60 * 60 && !serviced; k++) {
-            if (!p.stop) lanePilot(g, p, t);
-            g.update();
-            if (p.stop?.phase === 'service') still++;
-            if (p.stops === 1) serviced = true;
-        }
-        assert.ok(serviced, 'never serviced');
-        assert.strictEqual(p.compound, 'H'); assert.strictEqual(p.wear, 0); assert.deepStrictEqual(p.compoundsUsed, ['M', 'H']);
-        assert.ok(still / 60 >= 2.5 && still / 60 <= 2.95, `${(still / 60).toFixed(2)} s stationary`);
-        assert.ok(Math.hypot(p.x - p.box.x, p.y - p.box.y) < 0.6 * t.scale, 'parked on the box mark');
-        // Until past the lane's tip: the tapered mouth never overlaps the road (Track.js buildPit), so the tick a car leaves
-        // the lane it is crossing the sliver between the lane's asphalt and the white line (kerb, not a limits breach: fromPit)
-        for (let k = 0; k < 60 * 40 && (p.inPit || p.stop || p.pitS < t.pit.len - 1e-6 * t.scale); k++) { if (!p.stop) lanePilot(g, p, t, false); g.update(); }
-        assert.ok(!p.inPit && !p.stop, 'released and out of the lane');
-        assert.ok(Physics.nearestOnTrack(p.x, p.y, t).dist < t.width / 2, 'back on the road');
+        enterPit(t, g, p);
+        let parked = null;
+        const r = runStop(t, g, p, () => { if (p.stop?.phase === 'service' && !parked) parked = Math.hypot(p.x - p.box.x, p.y - p.box.y); });
+        assert.deepStrictEqual(r.phases.filter((x) => x), ['lane', 'guide', 'service', 'hold', 'out']);
+        assert.ok(parked !== null && parked < 0.6 * sc, `parked ${(parked / sc).toFixed(2)} m off the mark`);
+        assert.ok(r.still >= 2.5 && r.still <= 2.95, `${r.still.toFixed(2)} s stationary`);
+        assert.strictEqual(p.compound, 'H');
+        assert.strictEqual(p.stops, 1);
+        assert.ok(p.pitS >= t.pit.limEnd - 1 * sc && p.inPit, 'handed back at the limiter end, in the lane');
+        assert.ok(p.lastStop && p.lastStop.release === 'auto' && p.lastStop.s >= 3.0 && p.lastStop.s <= 3.5, JSON.stringify(p.lastStop));
     });
 }
 
-test('drive-through without braking: no stop, no service', () => {
+test('pit assist: the same circuit, the same pit-lane time (fair)', () => {
+    const t = Track.load('spa'), times = [];
+    for (let n = 0; n < 3; n++) {
+        const g = start(t, [lp('a', 'ferrari')], { ...RACE, rng: () => 0 }), p = g.players.a;
+        enterPit(t, g, p, 50 + n * 10);
+        times.push(runStop(t, g, p).ticks / 60);
+    }
+    assert.ok(Math.max(...times) - Math.min(...times) <= 0.5, times.join(', '));
+});
+
+test('drive-through: a car that has already stopped this lap is driven straight through', () => {
     const t = Track.load('monza'), g = start(t, [lp('a')]), p = g.players.a;
-    const q = pitPoint(t, p.box.s - 100 * t.scale);
-    Object.assign(p, { x: q.x, y: q.y, angle: q.angle, vx: Math.cos(q.angle) * 20 * t.scale, vy: Math.sin(q.angle) * 20 * t.scale, speed: 20 * t.scale });
-    g.updatePit(p);
-    for (let k = 0; k < 60 * 12; k++) { lanePilot(g, p, t, false); g.update(); assert.strictEqual(p.stop, null); }
+    p.servicedLap = p.lap;
+    enterPit(t, g, p);
+    const r = runStop(t, g, p);
+    assert.deepStrictEqual(r.phases.filter((x) => x), ['out']);
     assert.strictEqual(p.stops, 0);
 });
 
-test('guided stop from 80 km/h braking late still stops on the mark', () => {
-    const t = Track.load('monza'), g = start(t, [lp('a')]), p = g.players.a, v = (80 / 3.6) * t.scale;
-    const q = pitPoint(t, p.box.s - 13 * t.scale);
-    Object.assign(p, { x: q.x, y: q.y, angle: q.angle, vx: Math.cos(q.angle) * v, vy: Math.sin(q.angle) * v, speed: v, input: { throttle: 0, brake: 1, steer: 0 } });
-    for (let k = 0; k < 60 * 6 && !(p.stop && p.stop.phase !== 'guide'); k++) g.update();
-    assert.ok(p.stop && p.stop.phase === 'service', 'not in service');
-    assert.ok(Math.hypot(p.x - p.box.x, p.y - p.box.y) < 0.6 * t.scale);
+test('release: perfect within 0.2 s of green, auto at 0.5 s, jumped +0.5 s', () => {
+    const t = Track.load('monza');
+    const go = (pressAt) => {
+        const g = start(t, [lp('a')]), p = g.players.a;
+        enterPit(t, g, p);
+        let greenAt = null, outAt = null, clock = 0;
+        runStop(t, g, p, () => {
+            clock += g.dt;
+            if (p.stop?.phase === 'hold' && greenAt === null) greenAt = clock;
+            if (p.stop?.phase === 'out' && outAt === null) outAt = clock;
+            const svc = p.stop?.phase === 'service';
+            p.input = { throttle: pressAt === 'early' ? (svc && p.stop.t < 0.8 ? 1 : 0) : greenAt !== null && clock - greenAt >= pressAt ? 1 : 0, brake: 0, steer: 0, drs: false };
+        });
+        return { wait: outAt - greenAt, release: p.lastStop.release };
+    };
+    const perfect = go(0.1), auto = go(Infinity), jumped = go('early');
+    assert.strictEqual(perfect.release, 'perfect'); assert.ok(perfect.wait <= 0.15, `perfect left after ${perfect.wait}`);
+    assert.strictEqual(auto.release, 'auto'); assert.ok(Math.abs(auto.wait - 0.5) <= 2 / 60, `auto left after ${auto.wait}`);
+    assert.strictEqual(jumped.release, 'jumped'); assert.ok(jumped.wait >= 0.5 - 1 / 60, `jumped left after ${jumped.wait}`);
+});
+
+test('quali: starts waiting on its mark; stays until throttle; then driven out', () => {
+    const t = Track.load('monaco'), g = new Game(io, [lp('a')], t, QUALI, () => {}, 'quali'), p = g.players.a;
+    assert.strictEqual(p.stop?.phase, 'wait');
+    p.input = { throttle: 0, brake: 0, steer: 0, drs: false };
+    for (let k = 0; k < 180; k++) g.update();
+    assert.strictEqual(p.stop?.phase, 'wait');
+    assert.ok(Math.hypot(p.x - p.box.x, p.y - p.box.y) < 0.01 * t.scale);
+    p.input = { throttle: 1, brake: 0, steer: 0, drs: false };
+    const r = runStop(t, g, p);
+    assert.deepStrictEqual(r.phases.filter((x) => x), ['out']); // the first tick with throttle leaves 'wait'
+    assert.ok(p.pitS >= t.pit.limEnd - 1 * t.scale);
+});
+
+test('guide timeout: an unreachable mark falls back to the drive out, no service', () => {
+    const t = Track.load('monza'), g = start(t, [lp('a')]), p = g.players.a;
+    enterPit(t, g, p);
+    const r = runStop(t, g, p, () => { if (p.stop?.phase === 'guide' && !p.box.moved) { p.box = { ...p.box, x: p.box.x + 40 * t.scale, moved: true }; } });
+    assert.ok(r.phases.includes('guide') && !r.phases.includes('service') && r.phases.includes('out'), r.phases.join(','));
+    assert.strictEqual(p.stops, 0);
+});
+
+test('two cars stopping at neighbouring boxes are both serviced and released', () => {
+    const t = Track.load('monza'), g = start(t, [lp('a', 'ferrari'), lp('b', 'ferrari')]), a = g.players.a, b = g.players.b;
+    enterPit(t, g, a, 60, 25); enterPit(t, g, b, 60, 5); // b 20 m behind a
+    for (let k = 0; k < 60 * 120 && !(a.stops && b.stops && !a.stop && !b.stop); k++) g.update();
+    assert.strictEqual(a.stops, 1); assert.strictEqual(b.stops, 1);
 });
 
 test('team-mates get different boxes', () => {
     const t = Track.load('monza'), g = start(t, [lp('a', 'mclaren'), lp('b', 'mclaren')]);
     assert.ok(Math.hypot(g.players.a.box.x - g.players.b.box.x, g.players.a.box.y - g.players.b.box.y) > 5 * t.scale);
-});
-
-test('one service per lap', () => {
-    const t = Track.load('monza'), g = start(t, [lp('a')]), p = g.players.a;
-    p.servicedLap = p.lap;
-    const q = pitPoint(t, p.box.s - 8 * t.scale);
-    Object.assign(p, { x: q.x, y: q.y, angle: q.angle, vx: 0, vy: 0, speed: 0, input: { throttle: 0, brake: 1, steer: 0 } });
-    for (let k = 0; k < 30; k++) g.update();
-    assert.strictEqual(p.stop, null);
 });
 
 test('race finish on one compound costs 22 s; two compounds none; tyre wear off none', () => {
@@ -114,67 +145,20 @@ test('the packet carries the stop state and the predictor holds the car still th
     pr.reset(e);
     for (let k = 0; k < 60; k++) pr.step({ throttle: 1, brake: 0, steer: 1, drs: false });
     assert.ok(Math.hypot(pr.car.x - e[1], pr.car.y - e[2]) < 1e-6, 'predicted car moved during service'); // from where the packet put it (x, y to 0.1)
+    for (const [phase, code] of [['guide', 1], ['service', 2], ['hold', 3], ['lane', 4], ['out', 5], ['wait', 6]]) {
+        p.stop = { phase, t: 0, age: 0 };
+        const c = g.fastPacket().c.find((x) => x[0] === g.index.a);
+        assert.strictEqual(c[12], code, phase);
+        pr.load(c);
+        assert.strictEqual(pr.car.stop.phase, phase);
+    }
 });
 
-test('quali cars sitting in their boxes at the start are not serviced', () => {
+test('quali cars sitting in their boxes at the start wait there, not serviced', () => {
     for (const id of ['monaco', 'imola']) { // their boxes land a hair (1e-12 m) short of the car's lane position
         const t = Track.load(id), g = new Game(io, [lp('a', 'ferrari'), lp('b', 'ferrari'), lp('c', 'haas'), lp('d', 'haas')], t, { qualiLaps: 2 }, () => {}, 'quali');
         for (let k = 0; k < 120; k++) g.update();
-        for (const p of Object.values(g.players)) { assert.strictEqual(p.stop, null, `${id} ${p.id}`); assert.strictEqual(p.stops, 0); }
-    }
-});
-
-// Limiter speed down the lane centre from 80 m out, full brake from `brakeAt` m before the box until the car stops
-// (as a driver would). Returns once it parks, or once it has stopped without a guide
-function approach(id, brakeAt) {
-    const t = Track.load(id), g = start(t, [lp('a', 'ferrari')]), p = g.players.a, sc = t.scale, lim = ((t.pit.limitKmh || 80) / 3.6) * sc;
-    const q = pitPoint(t, p.box.s - 80 * sc);
-    Object.assign(p, { x: q.x, y: q.y, angle: q.angle, vx: Math.cos(q.angle) * lim, vy: Math.sin(q.angle) * lim, speed: lim });
-    g.updatePit(p);
-    let trig = null, parked = null, braking = false, prevBack = 0, backUp = false;
-    for (let k = 0; k < 60 * 15 && parked === null; k++) {
-        if (!p.stop) {
-            lanePilot(g, p, t, false);
-            if (p.box.s - p.pitS < brakeAt * sc) braking = true;
-            if (braking) { if (Math.abs(p.speed) < 0.1 * sc) break; p.input = { ...p.input, throttle: 0, brake: 1 }; } // stopped: done
-        }
-        g.update();
-        if (p.stop && trig === null) trig = k;
-        const back = Math.max(0, -p.speed / sc);
-        if (p.stop?.phase === 'guide' && back > Math.max(2, prevBack) + 1e-9) backUp = true; // guided reverse sped up past 2 m/s
-        prevBack = back;
-        if (p.stop?.phase === 'service') parked = k;
-    }
-    return { t, g, p, trig, parked, backUp, dist: Math.hypot(p.x - p.box.x, p.y - p.box.y) / sc };
-}
-
-test('braking for the box from the limiter: parked on the mark within 3 s, or too late for a guide and the driver keeps the car', () => {
-    for (const id of ['monza', 'spa', 'monaco', 'zandvoort', 'buddh']) for (const brakeAt of [3, 6, 10, 14]) {
-        const r = approach(id, brakeAt), at = `${id} ${brakeAt} m`;
-        assert.ok(!r.backUp, `${at}: guided reverse past 2 m/s`);
-        if (r.trig !== null) {
-            assert.ok(r.parked !== null, `${at}: guided but never parked`);
-            assert.ok((r.parked - r.trig) / 60 <= 3, `${at}: parked ${((r.parked - r.trig) / 60).toFixed(2)} s after the trigger`);
-            assert.ok(r.dist < 0.5, `${at}: ${r.dist.toFixed(2)} m from the mark`);
-        } else {
-            // Missed box: no stop, no service, and the driver's throttle drives the car
-            assert.strictEqual(r.p.stop, null); assert.strictEqual(r.p.stops, 0);
-            const x0 = r.p.x, y0 = r.p.y;
-            for (let k = 0; k < 30; k++) { r.p.input = { throttle: 0.5, brake: 0, steer: 0, drs: false }; r.g.update(); assert.strictEqual(r.p.stop, null, `${at}: guided after a miss`); }
-            assert.ok(Math.hypot(r.p.x - x0, r.p.y - y0) > 0.3 * r.t.scale, `${at}: driver input ignored`);
-        }
-        if (brakeAt === 14) assert.ok(r.parked !== null, `${at}: braking from 14 m must make the box`);
-    }
-});
-
-test('too fast to stop on the mark: no guide (missed box), also below 40 km/h', () => {
-    const t = Track.load('monza'), sc = t.scale;
-    for (const [m, kmh, want] of [[12, 79, false], [6, 70, false], [12, 70, true], [1, 39, false], [4, 39, true]]) {
-        const g = start(t, [lp('a')]), p = g.players.a, v = (kmh / 3.6) * sc, q = pitPoint(t, p.box.s - m * sc);
-        Object.assign(p, { x: q.x, y: q.y, angle: q.angle, vx: Math.cos(q.angle) * v, vy: Math.sin(q.angle) * v, speed: v, inPit: true, pitS: p.box.s - m * sc,
-            input: { throttle: 0, brake: 1, steer: 0 } });
-        g.updateStop(p);
-        assert.strictEqual(!!p.stop, want, `${m} m out at ${kmh} km/h`);
+        for (const p of Object.values(g.players)) { assert.strictEqual(p.stop?.phase, 'wait', `${id} ${p.id}`); assert.strictEqual(p.stops, 0); }
     }
 });
 
@@ -204,54 +188,33 @@ test('at rest or crawling near the box (level with it 2.4 m out included): parke
     }
 });
 
-test('a guide that cannot park gives the car back after 6 s; holding the brake does not re-ask, a fresh press does', () => {
-    const t = Track.load('monza'), g = start(t, [lp('a')]), p = g.players.a, sc = t.scale;
-    const q = pitPoint(t, p.box.s - 8 * sc);
-    Object.assign(p, { x: q.x, y: q.y, angle: q.angle, vx: 0, vy: 0, speed: 0, input: { throttle: 0, brake: 1, steer: 0 } });
-    p.box = { ...p.box, x: p.box.x + 60 * sc }; // the mark out behind the barrier: unreachable (s unchanged, so it still triggers)
-    g.update();
-    assert.strictEqual(p.stop?.phase, 'guide');
-    let k = 1;
-    for (; k < 60 * 8 && p.stop; k++) g.update();
-    assert.ok(k / 60 >= 6 && k / 60 <= 6 + 2 / 60, `gave up after ${(k / 60).toFixed(2)} s`);
-    assert.strictEqual(p.stops, 0); assert.strictEqual(p.servicedLap, -1);
-    // The guide left it somewhere in the lane; put it back 8 m short of the box at rest, brake still held
-    Object.assign(p, { x: q.x, y: q.y, angle: q.angle, vx: 0, vy: 0, speed: 0 });
-    g.updatePit(p);
-    for (let i = 0; i < 20; i++) { p.input = { throttle: 0, brake: 1, steer: 0 }; g.updateStop(p); assert.strictEqual(p.stop, null, 'brake still held: no new guide'); }
-    p.input = { throttle: 0, brake: 0, steer: 0 }; g.updateStop(p);
-    assert.strictEqual(p.stop, null);
-    p.input = { throttle: 0, brake: 1, steer: 0 }; g.updateStop(p);
-    assert.strictEqual(p.stop?.phase, 'guide', 'a fresh brake press asks again');
-    p.stop = null; p.stopRetry = 'release';
-    p.input = { throttle: 0.5, brake: 0, steer: 0 }; // and meanwhile the driver drives
-    const x0 = p.x, y0 = p.y;
-    for (let i = 0; i < 30; i++) g.update();
-    assert.ok(Math.hypot(p.x - x0, p.y - y0) > 0.1 * sc, 'driver input moves the car again');
-});
-
-// Car a finishing its service at the box while car b sits/moves in the lane `behind` m before the box
+// Car a finishing its service at the box while car b sits/moves in the lane `behind` m before the box. Returns how much
+// longer than the 0.5 s auto release a sat in 'hold' (no throttle from a)
 function release(behind, moving) {
     const t = Track.load('monza'), g = start(t, [lp('a', 'ferrari'), lp('b', 'haas')]), a = g.players.a, b = g.players.b, sc = t.scale;
-    Object.assign(a, { x: a.box.x, y: a.box.y, angle: a.box.angle, vx: 0, vy: 0, speed: 0, stop: { phase: 'service', t: 1e-6 } });
+    Object.assign(a, { x: a.box.x, y: a.box.y, angle: a.box.angle, vx: 0, vy: 0, speed: 0, stop: { phase: 'service', t: 1e-6, age: 0, parkedAt: g.clock } });
     const q = pitPoint(t, a.box.s - behind * sc), v = moving ? 2 * sc : 0;
     Object.assign(b, { x: q.x, y: q.y, angle: q.angle, vx: Math.cos(q.angle) * v, vy: Math.sin(q.angle) * v, speed: v, servicedLap: b.lap });
+    b.box = null; // no box: pit assist off (this test drives the lane itself)
     g.updatePit(a); g.updatePit(b);
     let held = 0;
-    for (let k = 0; k < 120 && a.stop; k++) {
-        b.input = { throttle: moving ? 0.02 : 0, brake: moving ? 0 : 1, steer: 0 };
+    for (let k = 0; k < 120 && a.stop?.phase !== 'out'; k++) {
+        b.input = { throttle: moving ? 0.02 : 0, brake: 0, steer: 0 }; // not the brake: held at a standstill it backs the car up
         g.update();
         if (a.stop?.phase === 'hold') held++;
     }
-    assert.strictEqual(a.stop, null); assert.strictEqual(a.stops, 1);
-    return held / 60;
+    assert.strictEqual(a.stops, 1); assert.ok(!a.stop || a.stop.phase === 'out');
+    return held / 60 - 0.5;
 }
 
 test('unsafe release: a moving car within 10 m behind the box holds the release, for at most 0.5 s', () => {
     const near = release(7, true);
     assert.ok(near >= 0.5 - 1e-9 && near <= 0.5 + 1 / 60 + 1e-9, `held ${near.toFixed(3)} s`);
-    assert.strictEqual(release(14, true), 0, 'more than 10 m behind: no hold');
-    assert.strictEqual(release(7, false), 0, 'stationary car: no hold');
+    // No hold: the 0.5 s auto release only, give or take the tick the session clock's float sum lands on
+    for (const [behind, moving, why] of [[14, true, 'more than 10 m behind'], [7, false, 'stationary car']]) {
+        const extra = release(behind, moving);
+        assert.ok(Math.abs(extra) <= 1 / 60 + 1e-9, `${why}: held ${extra.toFixed(3)} s extra`);
+    }
 });
 
 test('race finish through the line: one compound +22 s exactly once, two compounds none; the stop is cleared', () => {
@@ -278,14 +241,16 @@ test('race finish through the line: one compound +22 s exactly once, two compoun
 test('quali: a fresh set every pit visit; race: one service per lap', () => {
     for (const mode of ['quali', 'race']) {
         const t = Track.load('monza'), g = new Game(io, [lp('a')], t, mode === 'quali' ? { qualiLaps: 2 } : RACE, () => {}, mode), p = g.players.a, sc = t.scale;
+        // In the lane: a due car is taken to its box ('lane'), otherwise driven through ('out') or left alone (same visit)
         const visit = () => {
-            Object.assign(p, { inPit: true, pitS: p.box.s - 8 * sc, vx: 0, vy: 0, input: { throttle: 0, brake: 1, steer: 0 } });
+            Object.assign(p, { inPit: true, pitS: p.box.s - 8 * sc, vx: 0, vy: 0, input: { throttle: 0, brake: 0, steer: 0 } });
             g.updateStop(p);
-            if (!p.stop) return false;
-            p.stop = { phase: 'service', t: 1e-6 }; g.updateStop(p); g.updateStop(p);
+            if (p.stop?.phase !== 'lane') { p.stop = null; return false; }
+            p.stop = { phase: 'service', t: 1e-6, age: 0, parkedAt: g.clock }; g.updateStop(p);
+            p.stop = null;
             return true;
         };
-        p.inPit = false; g.updateStop(p);
+        p.stop = null; p.inPit = false; g.updateStop(p);
         assert.ok(visit(), `${mode}: first visit`); assert.strictEqual(p.stops, 1);
         assert.ok(!visit(), `${mode}: same visit, no second service`);
         p.inPit = false; g.updateStop(p); // out on track, then back in (same lap)
@@ -328,9 +293,9 @@ test('quali parked in the box: a pick fits now and adds to the compounds used', 
 test('quali: moving, mid-stop, or stopped off the mark → next set only', () => {
     const t = Track.load('monza'), sc = t.scale;
     for (const set of [
-        (p) => { p.vx = 5 * sc; },                                  // driving away
+        (p) => { p.stop = { phase: 'out', t: 0, age: 0 }; p.vx = 5 * sc; }, // driving away
         (p) => { p.stop = { phase: 'service', t: 2 }; },            // a stop in progress
-        (p) => { p.x += Math.cos(p.angle) * 4 * sc; p.y += Math.sin(p.angle) * 4 * sc; }, // missed the mark by 4 m
+        (p) => { p.stop = null; p.x += Math.cos(p.angle) * 4 * sc; p.y += Math.sin(p.angle) * 4 * sc; }, // driving, 4 m off the mark
     ]) {
         const g = new Game(io, [lp('a')], t, QUALI, () => {}, 'quali');
         const p = g.players.a;

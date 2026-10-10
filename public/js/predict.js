@@ -34,8 +34,8 @@ export class Predictor {
         c.vx = e[7] ?? Math.cos(e[3]) * e[4]; c.vy = e[8] ?? Math.sin(e[3]) * e[4]; c.tow = e[9] || 0;
         c.wear = e[11] ?? c.wear ?? 0;
         if (c.compound) c.tyreGrip = gripOf(c.compound, c.wear); // predicted grip always from the server's wear
-        const code = e[12] || 0; // pit stop (Game.updateStop): 1 guided in, 2 service, 3 held for a safe release
-        c.stop = code ? { phase: ['', 'guide', 'service', 'hold'][code], t: e[13] || 0 } : null;
+        const code = e[12] || 0; // pit stop (Game.updateStop): 1 guided in, 2 service, 3 held, 4 along the lane, 5 out, 6 quali wait
+        c.stop = code ? { phase: ['', 'guide', 'service', 'hold', 'lane', 'out', 'wait'][code], t: e[13] || 0 } : null;
         c.lastSafeX = c.x; c.lastSafeY = c.y;
         this.finished = !!(e[6] & FIN);
     }

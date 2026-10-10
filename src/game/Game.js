@@ -27,14 +27,14 @@ const DRS_GAP_S = 1;          // race: within this of the car ahead at the detec
 const SLIP_MAX = 0.2;         // drag cut right behind another car…
 const SLIP_MIN_M = 5, SLIP_RANGE_M = 40, SLIP_LAT_M = 3; // …fading out by 40 m behind, only roughly in line
 
-const STOP_TRIGGER_M = 12, STOP_SLOW_KMH = 40, STOP_BRAKE = 0.2;
 const STOP_S = 2.5, STOP_SPREAD_S = 0.4, RELEASE_HOLD_S = 0.5, RELEASE_GAP_M = 10, PARK_M = 0.5, PARK_MS = 0.3;
+const RELEASE_AUTO_S = 0.5, PERFECT_S = 0.2, JUMP_WINDOW_S = 1, RELEASE_JUMP_S = 0.5, RELEASE_THROTTLE = 0.5;
 const COMPOUND_PENALTY_S = 22;
-const GUIDE_MAX_S = 6; // not parked by then: the guide gives the car back (no service); braking again retries
-const STOP_CODE = { guide: 1, service: 2, hold: 3 };
+const GUIDE_MAX_S = 6; // not parked by then: the car is driven out without a service (never stranded)
+const STOP_CODE = { guide: 1, service: 2, hold: 3, lane: 4, out: 5, wait: 6 };
 
 const FLAGS = { inPit: 1, limiter: 2, drs: 4, drsAvailable: 8, finished: 16, lapValid: 32, ghost: 64 };
-const META_FIELDS = ['lap', 'checkpoint', 'rank', 'gap', 'lapsDown', 'lastLap', 'bestLap', 'lapStart', 'bestLapSectors', 'lastValid', 'penalty', 'compound', 'nextCompound', 'stops', 'compoundsUsed', 'wearPerM'];
+const META_FIELDS = ['lap', 'checkpoint', 'rank', 'gap', 'lapsDown', 'lastLap', 'bestLap', 'lapStart', 'bestLapSectors', 'lastValid', 'penalty', 'compound', 'nextCompound', 'stops', 'compoundsUsed', 'wearPerM', 'lastStop'];
 const META_EVERY = 6; // ticks: info updates at 10 Hz
 const r1 = (v) => Math.round(v * 10) / 10;
 
@@ -82,7 +82,8 @@ class Game {
                 x: slot.x, y: slot.y, angle: slot.angle,
                 vx: 0, vy: 0, speed: 0, steer: 0,
                 inPit: false, limiter: false, pitS: 0,
-                box: boxes ? boxes[index] : null, stop: null, servicedLap: -1, pitVisits: 0, servicedVisit: -1, wasInPit: false, stopRetry: null,
+                box: boxes ? boxes[index] : null, stop: mode === 'quali' && boxes ? { phase: 'wait', t: 0, age: 0 } : null, lastStop: null,
+                servicedLap: -1, pitVisits: 0, servicedVisit: -1, wasInPit: false,
                 limits: 0, penalty: 0, offLimits: false, finishTime: null,
                 lastSafeX: slot.x, lastSafeY: slot.y, gridX: slot.x, gridY: slot.y, jumpStart: false, reacted: false,
                 drs: false, drsAvailable: false, drsEligible: [], tow: 0, lapS: null,
@@ -158,40 +159,58 @@ class Game {
         });
     }
 
-    // Pit stop: braking for (or crawling to) its box on the lane → guided in → serviced → released
+    // Pit assist: entering the lane hands the car to the game (drive.js) — along the lane, onto the mark, serviced, then out to
+    // the end of the limiter zone. Quali cars wait on their mark for the throttle. Driver inputs are ignored (driveCar)
     updateStop(p) {
         const t = this.track, sc = t.scale;
         if (!t.pit || !p.box || p.finished) return;
-        if (p.inPit && !p.wasInPit) p.pitVisits++; // quali: a fresh set every visit
+        const entered = p.inPit && !p.wasInPit;
+        if (entered) p.pitVisits++; // quali: a fresh set every visit
         p.wasInPit = p.inPit;
+        const thr = (p.input.throttle || 0) >= RELEASE_THROTTLE;
+        const go = (phase, extra = {}) => { p.stop = { phase, t: 0, age: 0, ...extra }; };
         if (!p.stop) {
-            const ahead = p.box.s - p.pitS, kmh = (Math.hypot(p.vx, p.vy) / sc) * 3.6, braking = (p.input.brake || 0) > STOP_BRAKE;
-            if (!p.inPit) { p.stopRetry = null; return; }
-            // After a guide gave up: only a fresh press of the brake asks again
-            if (p.stopRetry === 'release') { if (!braking) p.stopRetry = 'press'; return; }
-            const done = this.mode === 'quali' ? p.servicedVisit === p.pitVisits : p.servicedLap === p.lap;
-            // Already on the mark (a quali car starting in its box) is not arriving at it
-            if (done || ahead < PARK_M * sc || ahead > STOP_TRIGGER_M * sc) return;
-            // Too late to stop on the mark: a missed box, the driver keeps the car
-            if ((braking || (!p.stopRetry && kmh < STOP_SLOW_KMH)) && Drive.canStopOnMark(p, t, (ahead + PARK_M * sc) / sc)) { p.stopRetry = null; p.stop = { phase: 'guide', t: STOP_S + this.rng() * STOP_SPREAD_S, age: 0 }; }
+            if (!entered) return;
+            const due = this.mode === 'quali' ? p.servicedVisit !== p.pitVisits : p.servicedLap !== p.lap;
+            return go(due ? 'lane' : 'out');
+        }
+        const st = p.stop;
+        st.age += this.dt;
+        if (st.phase === 'wait') { if (thr) go('out'); return; }
+        if (st.phase === 'lane') { if (p.box.s - p.pitS <= Drive.ASSIST_HANDOVER_M * sc) go('guide'); return; }
+        if (st.phase === 'guide') {
+            if (Math.hypot(p.x - p.box.x, p.y - p.box.y) < PARK_M * sc && Math.hypot(p.vx, p.vy) < PARK_MS * sc) go('service', { t: STOP_S + this.rng() * STOP_SPREAD_S, parkedAt: this.clock });
+            else if (st.age > GUIDE_MAX_S) go('out');
             return;
         }
-        if (p.stop.phase === 'guide') {
-            if (Math.hypot(p.x - p.box.x, p.y - p.box.y) < PARK_M * sc && Math.hypot(p.vx, p.vy) < PARK_MS * sc) p.stop.phase = 'service';
-            else if ((p.stop.age += this.dt) > GUIDE_MAX_S) { p.stop = null; p.stopRetry = 'release'; }
-            return;
-        }
-        if (p.stop.phase === 'service') {
-            p.stop.t -= this.dt;
-            if (p.stop.t > 0) return;
+        if (st.phase === 'service') {
+            st.t -= this.dt;
+            if (thr && st.t <= JUMP_WINDOW_S) st.jumped = true;
+            if (st.t > 0) return;
             this.serviceTyres(p);
-            p.stop = { phase: 'hold', t: RELEASE_HOLD_S };
+            if (this.mode === 'quali') { this.recordStop(p, st.parkedAt, 'auto'); return go('wait'); }
+            return go('hold', { parkedAt: st.parkedAt, greenAt: this.clock, jumped: !!st.jumped, unsafe: 0 });
         }
-        // Unsafe release: a moving car in the lane just behind the box holds us (at most RELEASE_HOLD_S)
-        const busy = Object.values(this.players).some((q) => q !== p && q.inPit && !q.stop && Math.hypot(q.vx, q.vy) > sc
-            && q.pitS < p.box.s && p.box.s - q.pitS < RELEASE_GAP_M * sc);
-        if (busy && p.stop.t > 0) { p.stop.t -= this.dt; return; }
-        p.stop = null;
+        if (st.phase === 'hold') {
+            // Unsafe release: a moving car in the lane just behind the box holds us (at most RELEASE_HOLD_S)
+            const busy = Object.values(this.players).some((q) => q !== p && q.inPit && Math.hypot(q.vx, q.vy) > sc
+                && q.pitS < p.box.s && p.box.s - q.pitS < RELEASE_GAP_M * sc);
+            if (busy && st.unsafe < RELEASE_HOLD_S) { st.unsafe += this.dt; st.greenAt += this.dt; return; }
+            const since = this.clock - st.greenAt - (st.jumped ? RELEASE_JUMP_S : 0);
+            if (since < 0) return;
+            const pressed = thr && !st.jumped;
+            if (!pressed && since < RELEASE_AUTO_S) return;
+            this.recordStop(p, st.parkedAt, st.jumped ? 'jumped' : pressed && since <= PERFECT_S ? 'perfect' : 'auto');
+            return go('out');
+        }
+        if (st.phase === 'out' && (p.pitS >= t.pit.limEnd || !p.inPit)) p.stop = null;
+    }
+
+    // Stop time: parked on the mark to leaving the box; on the HUD (meta) and in chat
+    recordStop(p, parkedAt, release) {
+        p.lastStop = { s: Math.round((this.clock - parkedAt) * 100) / 100, release };
+        const how = release === 'perfect' ? ' (perfect release)' : release === 'jumped' ? ' (jumped the release)' : '';
+        this.io.emit('chat_msg', { username: 'SYSTEM', color: '#22c55e', msg: `PIT: ${p.username} ${p.lastStop.s.toFixed(2)} s${how}` });
     }
 
     serviceTyres(p) {
@@ -268,10 +287,8 @@ class Game {
     setNextCompound(id, c) {
         const p = this.players[id];
         if (!p || !Tyres.isCompound(c)) return;
-        const sc = this.track.scale;
         const grid = this.mode === 'race' && this.frozen;
-        const parked = this.mode === 'quali' && !p.stop && p.box && Math.hypot(p.x - p.box.x, p.y - p.box.y) < PARK_M * sc
-            && Math.hypot(p.vx, p.vy) < 0.5 * sc;
+        const parked = this.mode === 'quali' && p.stop?.phase === 'wait';
         if (!grid && !parked) { p.nextCompound = c; return; }
         p.compound = c;
         p.nextCompound = null;

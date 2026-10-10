@@ -195,7 +195,9 @@ export function driveCar(p, input, t, dt) {
     const phase = p.stop?.phase;
     if (phase === 'service' || phase === 'hold' || phase === 'wait') {
         p.vx = p.vy = p.speed = 0; p.steer = 0;
-        return Physics.nearestOnTrack(p.x, p.y, t, p.roadI);
+        const near = Physics.nearestOnTrack(p.x, p.y, t, p.roadI);
+        if (pit) updatePitState(p, t, near, Physics.nearestOnPath(p.x, p.y, pit.path, false)); // a quali car starts parked: in the lane
+        return near;
     }
     if (phase && p.box) input = phase === 'guide' ? guideToBox(p, t) : pitAssist(p, t);
     const x0 = p.x, y0 = p.y;

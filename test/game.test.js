@@ -458,6 +458,7 @@ test('pit wall: a car on the track can\'t cut into the pit lane beside the garag
 test('garage cars still drive out of the pit lane', () => {
     const g = new Game(io, [lp('a', 'redbull-suzuka')], monza, QUALI, () => {}, 'quali');
     const p = g.players.a, s0 = pitS(p);
+    p.box = null; p.stop = null; // no box: pit assist off (this test drives the lane itself); off its 'wait' too
     p.input = FULL;
     for (let k = 0; k < 120; k++) g.drive(p);
     assert.ok(pitS(p) - s0 > 10 * monza.scale, 'garage car could not drive off');
