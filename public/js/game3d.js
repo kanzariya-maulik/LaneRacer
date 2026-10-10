@@ -1482,7 +1482,7 @@ function buildWorld(t) {
     gridBoxes(t.startPositions);
     if (t.pit) buildPit(t.pit, t);
     for (const b of t.bridges || []) buildBridge(b, t);
-    snapCamera = true;
+    snapCamera = true; pitBlend = 0;
 }
 
 // ---------- cars ----------
@@ -1742,8 +1742,8 @@ function updateWheelBatch() {
 }
 
 // ---------- camera ----------
-const look = new THREE.Vector3();
-let camHeading = 0;
+const look = new THREE.Vector3(), pitCam = new THREE.Vector3();
+let camHeading = 0, pitBlend = 0; // pitBlend: 0 = chase camera, 1 = TV pit camera
 
 function rankedCarIds() {
     const gs = clientState.gameState || {};
@@ -1770,6 +1770,15 @@ function updateCamera(dt) {
     const bx = p.x - Math.cos(h) * CHASE_BACK_M * scale, bz = p.z - Math.sin(h) * CHASE_BACK_M * scale;
     camera.position.set(bx, Math.max(p.y, roadY(bx, bz, h)) + CHASE_UP_M * scale, bz);
     look.set(p.x + Math.cos(h) * LOOK_AHEAD_M * scale, p.y + 1 * scale, p.z + Math.sin(h) * LOOK_AHEAD_M * scale);
+    // TV pit camera: while your own car is serviced, ease from the chase pose to the garage side of its box
+    const own = car === cars[clientState.me] && !isSpectator(), ph = predictor?.car?.stop?.phase, box = predictor?.box, td = clientState.trackData;
+    pitBlend += ((own && box && td?.pit && (ph === 'service' || ph === 'hold' || ph === 'wait') ? 1 : 0) - pitBlend) * (1 - Math.exp(-dt * 3));
+    if (!own) pitBlend = 0;
+    if (pitBlend > 0.001 && box && td?.pit) {
+        const c = side(box, box.angle, -td.pit.trackSide * 9 * scale);
+        camera.position.lerp(pitCam.set(c.x, pitY(box.x, box.y) + 2 * scale, c.y), pitBlend);
+        look.lerp(p, pitBlend);
+    }
     camera.lookAt(look);
     // Moved in whole shadow-map texels so shadow edges don't shimmer as the car drives
     const q = snapLight({ x: p.x, y: p.y, z: p.z }, SUN_OFF, 720 / (Q.shadows || 1024));
@@ -2078,6 +2087,16 @@ function updateHUD(withTower = true) {
     $('box-msg').classList.toggle('hidden', !(racing && (st || go)));
     if (st) $('box-msg').textContent = st.phase === 'service' ? `BOX — ${Math.max(0, st.t).toFixed(1)} s` : st.phase === 'hold' ? 'HOLD' : 'BOX';
     else if (go) $('box-msg').textContent = 'GO';
+    // Pit banner: PIT ASSIST on entering lane/out, the stop time on a new lastStop, YOUR CAR when the exit drive ends
+    const ls = me?.lastStop, lsKey = ls ? `${ls.s}|${ls.release}` : null, now = performance.now(), bannerFor = (txt, ms) => { bannerText = txt; bannerUntil = now + ms; };
+    if (hudLastStop !== undefined && lsKey && lsKey !== hudLastStop) bannerFor(`PIT STOP ${ls.s.toFixed(2)} s${ls.release === 'perfect' ? '\nPERFECT RELEASE' : ls.release === 'jumped' ? '\nJUMPED +0.5 s' : ''}`, 3000);
+    hudLastStop = lsKey;
+    if (!hudPrevPhase && (phase === 'lane' || phase === 'out')) bannerFor('PIT ASSIST', 1500);
+    else if (hudPrevPhase === 'out' && !phase) bannerFor('YOUR CAR', 1200);
+    hudPrevPhase = phase;
+    const bannerOn = racing && now < bannerUntil, bt = bannerOn ? bannerText : '';
+    if ($('pit-banner').textContent !== bt) $('pit-banner').textContent = bt;
+    $('pit-banner').classList.toggle('hidden', !bannerOn);
     updateBoxRing(me, racing, toEntryM);
     $('drs-badge').className = !racing ? 'drs-off' : me.drs ? 'drs-open' : me.drsAvailable ? 'drs-avail' : 'drs-off';
     let hint = '';
@@ -2218,7 +2237,7 @@ const ownFrame = { rpm: 0, load: 0, limiter: false, pit: false, speedMs: 0 };
 const listenerFrame = { x: 0, y: 0, fx: 1, fy: 0, vx: 0, vy: 0 }, sndFrame = { own: null, others: soundOthers, listener: listenerFrame };
 const silentFrame = { own: null, others: [], listener: listenerFrame };
 const camDir = new THREE.Vector3();
-let lastDrs = false, hudLit = -1, hudFlash = null, hudGear = '', hudPick = '', pickIdx = null, hudHadStop = false, hudGoUntil = 0;
+let lastDrs = false, hudLit = -1, hudFlash = null, hudGear = '', hudPick = '', pickIdx = null, hudHadStop = false, hudGoUntil = 0, hudLastStop, hudPrevPhase = null, bannerText = '', bannerUntil = 0;
 function updateSound(dt) {
     const gs = clientState.gameState, me = gs[clientState.me], racing = !!me && !isSpectator();
     const followId = racing && !watchingAfterFinish() ? clientState.me : spectateId; // dash and engine: the car on screen
@@ -2331,6 +2350,7 @@ window.initGameVisuals = () => {
     // New session: predict from the new grid (reset on our first entry); spectators never get one, so never predict
     predictor = new Predictor(clientState.trackData, clientState.gameState?.[clientState.me]?.assist || 'off');
     predictor.box = clientState.gameState?.[clientState.me]?.box || null; // the pit stop guide drives into it
+    hudLastStop = undefined; hudPrevPhase = null; bannerUntil = 0; // the first meta seen is the baseline, not a new stop
     window.syncTyres();
     sentInputs = []; carPose.clear(); carState.clear(); renderClock.t = presentClock.t = null;
     othersMode = store.get('lanrace.others') === 'smooth' ? 'smooth' : 'present';
