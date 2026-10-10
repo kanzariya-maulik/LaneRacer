@@ -687,7 +687,7 @@ function newCrew() {
     root.visible = false;
     world.add(root);
     const pos = Array.from({ length: 17 }, () => ({ x: 0, y: 0 })), tpos = Array.from({ length: 8 }, () => ({ x: 0, y: 0 }));
-    return { id: null, root, mesh, tyres, group, mast, brake, go, pos, tpos, spotsFor: null, spots: null, phase: '', outAt: -1, goUntil: 0, fresh: true, serviceAt: 0, marks: null, compound: null };
+    return { id: null, root, mesh, tyres, group, mast, brake, go, pos, tpos, spotsFor: null, spots: null, phase: '', outAt: -1, goUntil: 0, fresh: true, serviceAt: 0, served: false, marks: null, compound: null };
 }
 const lerpTo = (p, x, y, k) => { p.x += (x - p.x) * k; p.y += (y - p.y) * k; };
 // Crew slots are keyed by car id: cars already holding one keep it, free slots go to new stoppers, slots of cars gone are freed
@@ -700,16 +700,16 @@ function assignCrews() {
         for (const c of crews) { if (c.id === id) have = true; else if (c.id === null && !free) free = c; }
         if (have) continue;
         if (!free && crews.length < CREWS) { free = newCrew(); crews.push(free); }
-        if (free) { free.id = id; free.spots = null; free.phase = ''; free.outAt = -1; }
+        if (free) { free.id = id; free.spots = null; free.phase = ''; free.outAt = -1; free.goUntil = 0; free.served = false; }
     }
 }
 // Who needs a crew, best first: you, then cars in a stop (guide/service/hold/lane/out), then cars merely in the lane or parked in quali
 function pickCrewCars(gs) {
     wantedIds.length = 0;
     for (let pass = 0; pass < 3 && wantedIds.length < CREWS; pass++) {
-        for (const id in gs) {
+        for (let held = 1; held >= 0; held--) for (const id in gs) { // cars already holding a crew first: a new stopper never takes one mid-stop
             const p = gs[id];
-            if (!p.box || !cars[id] || (!p.inPit && !p.stopPhase)) continue;
+            if (!p.box || !cars[id] || (!p.inPit && !p.stopPhase) || crews.some((c) => c.id === id) !== !!held) continue;
             if ((pass === 0 && id === clientState.me) || (pass === 1 && id !== clientState.me && p.stopPhase && p.stopPhase !== 'wait') || (pass === 2 && id !== clientState.me && !(p.stopPhase && p.stopPhase !== 'wait'))) {
                 if (wantedIds.length < CREWS) wantedIds.push(id);
             }
@@ -742,7 +742,8 @@ function updateCrews(dt) {
             c.tyres.instanceColor.needsUpdate = true;
         }
         if (phase !== c.phase) {
-            if (phase === 'service') c.serviceAt = now;
+            if (phase === 'service') { c.serviceAt = now; c.served = true; }
+            if (phase === 'lane') c.served = false;
             if (phase === 'out' && c.phase) { c.outAt = now; c.goUntil = now + GO_BOARD_S * 1000; } else if (phase !== 'out') c.outAt = -1;
             c.phase = phase;
         }
@@ -777,7 +778,7 @@ function updateCrews(dt) {
         // Lollipop: red BRAKE until the service, lowered during it, green GO for 1 s after release
         const goOn = now < c.goUntil;
         c.mast.rotation.z = working ? -Math.PI / 2.2 : 0;
-        c.brake.visible = !working && !goOn && phase !== 'out';
+        c.brake.visible = !goOn && (phase === 'lane' || phase === 'guide' || phase === 'wait' || (!phase && !c.served)); // only while the car arrives
         c.go.visible = goOn;
         c.fresh = false;
     }
