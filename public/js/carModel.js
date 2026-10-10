@@ -34,7 +34,7 @@ function lathe(profile, segs, colour) {
     return toGeometry({ pos, nrm, idx, col });
 }
 // Tyre at unit width (each wheel's scale.z makes it 305 / 405 mm): flat tread, rounded shoulders, sidewall with the
-// Pirelli compound band; the wheel cover a shallow dish inside it
+// Pirelli compound band, coloured per car by the wheel batch's instance colour; the wheel cover a shallow dish inside it
 export function wheelGeometries(segs = 40) {
     const R = WHEEL_RADIUS, sh = 0.075, prof = [];
     const side = (z) => [0.262, 0.27, 0.281, 0.282, 0.298, 0.299, 0.31, R - sh].map((r) => [r, z]); // band: crisp edges
@@ -42,7 +42,7 @@ export function wheelGeometries(segs = 40) {
     for (let k = 1; k <= 6; k++) { const a = (Math.PI / 2) * (k / 6); prof.push([R - sh + sh * Math.sin(a), 0.5 - 0.12 * (1 - Math.cos(a))]); }
     for (let k = 0; k <= 6; k++) { const a = (Math.PI / 2) * (k / 6); prof.push([R - sh + sh * Math.cos(a), -0.5 + 0.12 * (1 - Math.sin(a))]); }
     prof.push(...side(-0.5).reverse());
-    const tyre = lathe(prof, segs, (r) => (r >= 0.2815 && r <= 0.2985 ? [1.0, 0.82, 0.0] : [0.02, 0.02, 0.022]));
+    const tyre = lathe(prof, segs, (r) => (r >= 0.2815 && r <= 0.2985 ? [1.0, 1.0, 1.0] : [0.02, 0.02, 0.022]));
     const cover = lathe([[0.262, -0.52], [0.24, -0.5], [0.04, -0.47], [0, -0.47], [0, 0.47], [0.04, 0.47], [0.24, 0.5], [0.262, 0.52]], segs, () => [0.11, 0.11, 0.12]);
     return { tyre, cover };
 }

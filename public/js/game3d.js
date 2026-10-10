@@ -15,7 +15,7 @@ import { estimateLoad } from './audio/mix.js';
 import * as Sound from './audio/audio.js';
 import { gapText, driverCode, lapDelta, stepFollow, watchTarget, inDrsZone, drsHint, liveSectors, resultCells, sectorClass, lastLapClass } from './timing.js';
 import { MODES, segmentColor, cornerMask, aheadM, trackIndex, nextMode } from './racingline.js';
-import { distToPath, pitLayout, pickerOpen, BOX_M, crewSpots, boxCue } from './pitLayout.js';
+import { distToPath, pitLayout, pickerOpen, BOX_M, crewSpots, boxCue, COMPOUND_COLORS } from './pitLayout.js';
 import { canStopOnMark } from './sim/drive.js';
 
 // World units per metre come from the track JSON (track.scale = 6).
@@ -1609,6 +1609,7 @@ function applyNet(nowS, dt) {
 }
 
 // All wheels of all cars in two instanced draws (tyre, rim); each frame copies every wheel part's world matrix
+const compoundColor = Object.fromEntries(Object.entries(COMPOUND_COLORS).map(([c, hex]) => [c, new THREE.Color(hex)]));
 let wheelBatch = null; // [{ mesh: InstancedMesh }] per wheel sub-mesh, built from the car model
 function updateWheelBatch() {
     if (!carTemplate) return;
@@ -1633,11 +1634,16 @@ function updateWheelBatch() {
             w.traverse((o) => {
                 if (!o.isMesh || k >= wheelBatch.length) return;
                 const mesh = wheelBatch[k++];
-                if (counts[k - 1] < mesh.instanceMatrix.count) mesh.setMatrixAt(counts[k - 1]++, o.matrixWorld);
+                const i = counts[k - 1];
+                if (i >= mesh.instanceMatrix.count) return;
+                mesh.setMatrixAt(i, o.matrixWorld);
+                counts[k - 1]++;
+                if (k === 1) mesh.setColorAt(i, compoundColor[clientState.gameState?.[id]?.compound] || compoundColor.M); // tyre part carries the compound
             });
         }
     }
     wheelBatch.forEach((mesh, k) => { mesh.count = counts[k]; mesh.instanceMatrix.needsUpdate = true; });
+    if (wheelBatch[0].instanceColor) wheelBatch[0].instanceColor.needsUpdate = true;
 }
 
 // ---------- camera ----------
