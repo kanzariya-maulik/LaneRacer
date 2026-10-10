@@ -646,7 +646,7 @@ function buildBoxCues(box, teamId, name) {
     const lol = spots.find((p) => p.role === 'lollipop'), mast = new THREE.Group(), board = new THREE.Group();
     mast.add(pole, brake, go); board.add(mast); // board: yawed to the box heading (local +x = forward); mast: tilts so the pole lowers forward, away from the arriving car
     pole.position.y = 1.1 * scale; brake.position.y = go.position.y = 2.3 * scale;
-    brake.rotation.y = go.rotation.y = facing(box.angle) + Math.PI + box.angle; // facing the arriving car
+    brake.rotation.y = go.rotation.y = facing(box.angle) + box.angle; // net yaw = facing(): normal = -heading, toward the arriving car
     board.rotation.y = -box.angle;
     board.position.set(lol.x, h, lol.y);
     lane.add(crew, tyres, board);
@@ -671,8 +671,10 @@ function placeCrew(p, k) {
 }
 let cueCar = null, cueTd = null;
 const cueCanStop = (m) => canStopOnMark(cueCar, cueTd, m);
+function hideBoxCue() { const el = $('box-cue'); el.classList.add('hidden', 'brake', 'missed'); el.classList.remove('brake', 'missed'); el.textContent = ''; }
 function disposeCues(c) {
     world?.remove(c.g);
+    hideBoxCue();
     c.g.traverse((o) => { o.geometry?.dispose(); const m = o.material; if (m) { m.map?.dispose(); m.dispose(); } });
 }
 function updateBoxCues(me, racing, toEntryM) {
@@ -683,7 +685,7 @@ function updateBoxCues(me, racing, toEntryM) {
     const inLane = !!(boxCues && racing && me?.inPit && car && td);
     const near = !!(boxCues && racing && clientState.status === 'RACE' && toEntryM <= 500); // spec: outline + sign from 500 m before the entry
     if (boxCues) { boxCues.g.visible = inLane || near; boxCues.lane.visible = inLane; }
-    if (!inLane) { if (boxCues?.text) { boxCues.text = ''; cueEl.classList.add('hidden'); } return; }
+    if (!inLane) { missedUntil = 0; if (boxCues?.text) { boxCues.text = ''; cueEl.classList.add('hidden'); } return; }
     const st = car.stop, phase = st?.phase || null, now = performance.now(), go = now < hudGoUntil;
     boxCues.ring.material.opacity = 0.55 + 0.45 * Math.sin(now / 180);
     // Crew: lean in during the change, step back at GO
@@ -1165,7 +1167,7 @@ function buildWorld(t) {
     }
     for (const id in cars) delete cars[id];
     wheelBatch = null; // rebuilt in the new world
-    boxCues = null; missedUntil = 0;
+    boxCues = null; missedUntil = 0; hideBoxCue();
 
     scale = t.scale;
     world = new THREE.Group();
