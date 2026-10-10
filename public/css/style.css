@@ -787,19 +787,23 @@ input:disabled { opacity: 0.7; }
 @keyframes count-go { 0% { transform: scale(0.6); opacity: 0; } 30% { transform: scale(1.1); opacity: 1; } 100% { transform: scale(1.4); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { #countdown-overlay.tick #countdown-text { animation: none; } }
 
-.cl-tyre { display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 44px; }
-.tp-row { display: flex; gap: 3px; }
-.tp { width: 22px; height: 22px; border-radius: 50%; border: 3px solid; background: #111; display: grid; place-items: center; font: 700 10px/1 var(--font, sans-serif); cursor: pointer; padding: 0; opacity: 0.55; position: relative; pointer-events: auto; }
-.tp small { position: absolute; bottom: -9px; font-size: 7px; color: #cbd5e1; }
-.tp.fit { opacity: 1; box-shadow: 0 0 0 2px #fff; }
-.tp.next { opacity: 1; color: #111; }
-.tp.next.tyre-S { background: #e10600; } .tp.next.tyre-M { background: #ffd12e; } .tp.next.tyre-H { background: #f2f2f2; }
-#tyre-picker-big { position: absolute; right: 6%; top: 42%; display: flex; flex-direction: column; align-items: center; gap: 3px; transform: scale(1.9); transform-origin: right center; background: rgba(0,0,0,0.65); padding: 10px 12px 14px; border-radius: 8px; z-index: 5; }
-.tyre-S { border-color: #e10600; color: #e10600; } .tyre-M { border-color: #ffd12e; color: #ffd12e; } .tyre-H { border-color: #f2f2f2; color: #f2f2f2; }
-#tyre-wear { width: 40px; height: 4px; background: #333; border-radius: 2px; overflow: hidden; }
-#tyre-wear i { display: block; height: 100%; width: 100%; background: #3ecf6e; transform-origin: left; }
-#tyre-wear.worn i { background: #e10600; }
-#tyre-next { font-size: 8px; letter-spacing: 0.04em; margin-top: 6px; }
+.tyre-S { --c: #e10600; } .tyre-M { --c: #ffd12e; } .tyre-H { --c: #f2f2f2; }
+/* Bottom left, above the fastest-lap card: the timing tower (top left) and the map (top right) stay clear, and so does the road */
+#tyre-card { position: absolute; left: 16px; bottom: calc(var(--pad) + 4.5em); pointer-events: auto; background: rgba(0,0,0,0.6); border-radius: 10px; padding: 10px 12px; color: #fff; min-width: 120px; max-width: 220px; }
+.tc-head { display: flex; align-items: center; gap: 10px; }
+.tc-head > div:last-child { display: flex; flex-direction: column; }
+.tc-head small { font-size: 10px; letter-spacing: 0.04em; color: #cbd5e1; }
+.tc-tyre { --wear: 100; width: 44px; height: 44px; flex: none; box-sizing: border-box; border-radius: 50%; border: 5px solid var(--c); display: grid; place-items: center;
+    font: 800 16px/1 var(--font, sans-serif); color: var(--c); position: relative; isolation: isolate; background: #111; }
+.tc-tyre::before { content: ''; position: absolute; inset: -9px; border-radius: 50%; z-index: -1; background: conic-gradient(#3ecf6e calc(var(--wear) * 1%), #333 0); -webkit-mask: radial-gradient(circle, transparent 20px, #000 21px); mask: radial-gradient(circle, transparent 20px, #000 21px); }
+.tc-tyre.worn::before { background: conic-gradient(#e10600 calc(var(--wear) * 1%), #333 0); }
+.tc-tyre { margin: 4px; }
+.tc-title { margin: 10px 0 6px; font-size: 11px; font-weight: 800; letter-spacing: 0.1em; color: #cbd5e1; }
+.tc-btn { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; width: 100%; min-height: 44px; margin-top: 6px; padding: 6px 10px; box-sizing: border-box; text-align: left;
+    background: rgba(255,255,255,0.08); color: #fff; border: 0; border-left: 6px solid var(--c); border-radius: 6px; font: 800 13px/1.2 var(--font, sans-serif); cursor: pointer; }
+.tc-btn small { flex-basis: 100%; font-size: 10px; font-weight: 600; opacity: 0.8; }
+.tc-btn.on { background: var(--c); color: #111; }
+#tc-confirm { margin-top: 8px; font-size: 11px; font-weight: 800; color: #3ecf6e; }
 #box-msg { position: absolute; top: 38%; left: 50%; transform: translateX(-50%); font: 800 28px/1 var(--font, sans-serif); color: #fff; background: rgba(0,0,0,0.6); padding: 10px 18px; border-radius: 6px; }
 #pit-banner { position: absolute; top: 22%; left: 50%; transform: translateX(-50%); font: 800 44px/1.2 var(--font, sans-serif); letter-spacing: 0.04em; color: #fff; text-align: center; white-space: pre; background: rgba(0,0,0,0.6); padding: 12px 28px; border-radius: 6px; pointer-events: none; }
 .tt-tyre { font-size: 10px; margin-left: 4px; border: 2px solid; border-radius: 8px; padding: 0 4px; }

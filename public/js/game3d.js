@@ -15,7 +15,7 @@ import { estimateLoad } from './audio/mix.js';
 import * as Sound from './audio/audio.js';
 import { gapText, driverCode, lapDelta, stepFollow, watchTarget, inDrsZone, drsHint, liveSectors, resultCells, sectorClass, lastLapClass } from './timing.js';
 import { MODES, segmentColor, cornerMask, aheadM, trackIndex, nextMode } from './racingline.js';
-import { distToPath, pitLayout, tMarks, wallStands, pickerOpen, crew17, BOX_M, COMPOUND_COLORS } from './pitLayout.js';
+import { distToPath, pitLayout, tMarks, wallStands, pickerOpen, cardText, crew17, BOX_M, COMPOUND_COLORS } from './pitLayout.js';
 
 // World units per metre come from the track JSON (track.scale = 6).
 const WHEEL_RADIUS_M = WHEEL_RADIUS; // carShape.js
@@ -213,8 +213,7 @@ function pickTyre(c) {
     socket.emit('tyre_next', c);
     window.showBanner?.(`TYRES: ${{ S: 'SOFT', M: 'MEDIUM', H: 'HARD' }[c]}`, true);
 }
-const tpRow = document.querySelector('#tyre-picker .tp-row'), tpChips = [...tpRow.children];
-tpRow.addEventListener('click', (e) => { const b = e.target.closest('.tp'); if (b) { b.blur(); pickTyre(b.dataset.c); } }); // blur: Space/Enter must not re-fire the pick
+$('tc-pick').addEventListener('click', (e) => { const b = e.target.closest('.tc-btn'); if (b) { b.blur(); pickTyre(b.dataset.c); } }); // blur: Space/Enter must not re-fire the pick
 
 function onKey(e, down) {
     if (e.target?.matches?.('input, textarea, select')) return; // typing a name or a chat line, not driving
@@ -2055,8 +2054,6 @@ function updateHUD(withTower = true) {
     $('session-bar').textContent = bar;
     $('pit-limiter').classList.toggle('hidden', !(racing && me.limiter));
     const wear = predictor?.car?.wear ?? 0;
-    $('tyre-wear').firstElementChild.style.transform = `scaleX(${(1 - wear).toFixed(3)})`;
-    $('tyre-wear').classList.toggle('worn', wear > 0.8);
     const comp = me?.compound || 'M', next = me?.nextCompound || '';
     const car = predictor?.car, box = predictor?.box, td = clientState.trackData;
     let toEntryM = Infinity;
@@ -2069,16 +2066,22 @@ function updateHUD(withTower = true) {
     const parked = !!car && !!box && !!td && !!me?.inPit && Math.abs((box.s - (car.pitS || 0)) / td.scale) < 0.5 && speedMs < 0.5; // server PARK_M 0.5 m
     const spectator = isSpectator();
     const open = pickerOpen({ spectator, status: clientState.status, inPit: !!me?.inPit, parked, toEntryM, phase });
-    const pickKey = `${comp}${next}${open}${spectator}`;
+    const fitted = !!comp && comp === next && (clientState.status === 'COUNTDOWN' || phase === 'wait'), wearPct = Math.round((1 - wear) * 100);
+    const pickKey = `${comp}${next}${open}${fitted}${spectator}${wearPct}`;
     if (pickKey !== hudPick) {
         hudPick = pickKey;
-        tpChips.forEach((b) => { b.classList.toggle('fit', b.dataset.c === comp); b.classList.toggle('next', b.dataset.c === next); });
-        // Enlarged: the row and its line move to a #hud-level box (#cluster's backdrop-filter traps position:fixed children)
-        const big = $('tyre-picker-big'), small = $('tyre-picker'), tpNext = $('tyre-next');
-        if (open) big.append(tpRow, tpNext); else { small.prepend(tpRow); small.append(tpNext); }
-        big.classList.toggle('hidden', !open);
-        tpNext.classList.toggle('hidden', !open);
-        small.classList.toggle('hidden', spectator); // spectators: no picker
+        const t = cardText({ compound: comp, next, fitted });
+        $('tyre-card').classList.toggle('hidden', spectator);
+        $('tc-tyre').className = `tc-tyre tyre-${comp}${wearPct < 20 ? ' worn' : ''}`;
+        $('tc-tyre').style.setProperty('--wear', wearPct);
+        $('tc-tyre').firstElementChild.textContent = comp;
+        $('tc-wear').textContent = `${wearPct} %`;
+        $('tc-next').textContent = t.next;
+        $('tc-pick').classList.toggle('hidden', !open);
+        $('tc-confirm').textContent = t.confirm || '';
+        $('tc-confirm').classList.toggle('hidden', !t.confirm);
+        const on = fitted ? comp : next;
+        document.querySelectorAll('#tc-pick .tc-btn').forEach((b) => b.classList.toggle('on', b.dataset.c === on));
     }
     const st = predictor?.car?.stop;
     if (hudHadStop && !st && racing) { hudGoUntil = performance.now() + 800; } // released: flash GO
