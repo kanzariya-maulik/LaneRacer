@@ -1332,6 +1332,7 @@ test('tyres: wear off means no wear', () => {
 
 test('tyres: the next compound is validated and sent as meta', () => {
     const g = new Game(io, [lp('a')], monza, RACE, () => {});
+    g.frozen = false; // under way a pick sets the next stop's set (on the grid it fits at once)
     g.setNextCompound('a', 'H'); assert.strictEqual(g.players.a.nextCompound, 'H');
     g.setNextCompound('a', 'X'); assert.strictEqual(g.players.a.nextCompound, 'H');
     for (const f of ['compound', 'nextCompound', 'stops', 'compoundsUsed', 'wearPerM']) assert.ok(Game.META_FIELDS.includes(f), f);

@@ -4,9 +4,11 @@ const assert = require('node:assert');
 const Track = require('../src/game/Track');
 const Game = require('../src/game/Game');
 const Physics = require('../src/game/Physics');
+const Tyres = require('../public/js/sim/tyres.js');
 const io = { emit() {}, volatile: { emit() {} } };
 const lp = (id, teamId = 'redbull', extra = {}) => ({ id, username: id, teamId, assist: 'full', ...extra });
 const RACE = { maxLaps: 3, qualifying: false, rng: () => 0.5 };
+const QUALI = { qualiLaps: 2 };
 let D;
 before(async () => { D = await import('../public/js/sim/drive.js'); });
 
@@ -290,4 +292,66 @@ test('quali: a fresh set every pit visit; race: one service per lap', () => {
         assert.strictEqual(visit(), mode === 'quali', `${mode}: next visit`);
         assert.strictEqual(p.stops, mode === 'quali' ? 2 : 1);
     }
+});
+
+test('grid: a tyre pick before lights out fits a fresh set and replaces the start set', () => {
+    const t = Track.load('monza'), g = new Game(io, [lp('a')], t, RACE, () => {});
+    const p = g.players.a;
+    assert.ok(g.frozen, 'race starts frozen');
+    p.wear = 0.3;
+    g.setNextCompound('a', 'S');
+    assert.strictEqual(p.compound, 'S');
+    assert.strictEqual(p.wear, 0);
+    assert.strictEqual(p.nextCompound, null);
+    assert.deepStrictEqual(p.compoundsUsed, ['S']);
+    assert.strictEqual(p.tyreGrip, Tyres.gripOf('S', 0));
+    assert.strictEqual(p.wearPerM, Game.tyreWearPerM(g.settings, t, 'S'));
+});
+
+test('race under way: a pick only sets the next stop\'s set', () => {
+    const g = new Game(io, [lp('a')], Track.load('monza'), RACE, () => {});
+    g.frozen = false;
+    g.setNextCompound('a', 'H');
+    assert.strictEqual(g.players.a.compound, 'M');
+    assert.strictEqual(g.players.a.nextCompound, 'H');
+});
+
+test('quali parked in the box: a pick fits now and adds to the compounds used', () => {
+    const g = new Game(io, [lp('a')], Track.load('monza'), QUALI, () => {}, 'quali');
+    const p = g.players.a;
+    assert.ok(Math.hypot(p.x - p.box.x, p.y - p.box.y) < 1, 'quali car starts on its box');
+    g.setNextCompound('a', 'S');
+    assert.strictEqual(p.compound, 'S');
+    assert.deepStrictEqual(p.compoundsUsed.sort(), ['M', 'S']);
+});
+
+test('quali: moving, mid-stop, or stopped off the mark → next set only', () => {
+    const t = Track.load('monza'), sc = t.scale;
+    for (const set of [
+        (p) => { p.vx = 5 * sc; },                                  // driving away
+        (p) => { p.stop = { phase: 'service', t: 2 }; },            // a stop in progress
+        (p) => { p.x += Math.cos(p.angle) * 4 * sc; p.y += Math.sin(p.angle) * 4 * sc; }, // missed the mark by 4 m
+    ]) {
+        const g = new Game(io, [lp('a')], t, QUALI, () => {}, 'quali');
+        const p = g.players.a;
+        set(p);
+        g.setNextCompound('a', 'H');
+        assert.strictEqual(p.compound, 'M');
+        assert.strictEqual(p.nextCompound, 'H');
+    }
+});
+
+test('tyre picks: unknown driver or compound are ignored', () => {
+    const g = new Game(io, [lp('a')], Track.load('monza'), RACE, () => {});
+    assert.doesNotThrow(() => g.setNextCompound('ghost', 'S'));
+    g.setNextCompound('a', 'X');
+    assert.strictEqual(g.players.a.compound, 'M');
+    assert.strictEqual(g.players.a.nextCompound, null);
+});
+
+test('grid change to softs, then no stop: still a one-compound finisher (+22 s)', () => {
+    const g = new Game(io, [lp('a')], Track.load('monza'), RACE, () => {});
+    g.setNextCompound('a', 'S');
+    g.finishCar(g.players.a);
+    assert.strictEqual(g.players.a.penalty, 22);
 });

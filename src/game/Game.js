@@ -263,9 +263,22 @@ class Game {
         p.inputAt = this.clock;
     }
 
+    // A tyre pick (keys 1/2/3 or the HUD): fitted at once on the grid (lights on) or parked in the quali box, otherwise the
+    // set for the next stop
     setNextCompound(id, c) {
         const p = this.players[id];
-        if (p && Tyres.isCompound(c)) p.nextCompound = c;
+        if (!p || !Tyres.isCompound(c)) return;
+        const sc = this.track.scale;
+        const grid = this.mode === 'race' && this.frozen;
+        const parked = this.mode === 'quali' && !p.stop && p.box && Math.hypot(p.x - p.box.x, p.y - p.box.y) < PARK_M * sc
+            && Math.hypot(p.vx, p.vy) < 0.5 * sc;
+        if (!grid && !parked) { p.nextCompound = c; return; }
+        p.compound = c;
+        p.nextCompound = null;
+        p.wear = 0;
+        p.wearPerM = Game.tyreWearPerM(this.settings, this.track, c);
+        p.tyreGrip = Tyres.gripOf(c, 0);
+        p.compoundsUsed = grid ? [c] : p.compoundsUsed.includes(c) ? p.compoundsUsed : [...p.compoundsUsed, c];
     }
 
     // Prediction clients: each tick applies exactly one queued input, in sequence order
