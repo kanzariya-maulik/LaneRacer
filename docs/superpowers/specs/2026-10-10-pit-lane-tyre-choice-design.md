@@ -49,9 +49,9 @@ All geometry comes from `track.pit` (path, widthAt, garages, boxes, garageSpan, 
 
 - **Lane split:** a solid white line (0.3 m) along the lane centre over the garage span (`garageSpan` ± one box), separating the fast lane (track side) from the working lane (garage side). Boxes already sit at the working-lane centre.
 - **Garage-row edge:** a yellow line (0.3 m) along the garage-side lane edge over the garage span.
-- **Team boxes:** each box a solid rectangle 7 × 3.4 m in the team colour (opaque, slightly darkened), a white car outline inside (thin quads), and the team's three-letter code painted ahead of it toward the lane (atlas text, as the existing signs). Replaces the 45 % see-through planes.
-- **Garages:** each garage's block keeps its footprint and placement (and is still skipped where it would stand on the track's run-off), but its lane-facing side gets a dark doorway and a back wall lit in the team colour (emissive, no real light). Team name board stays above the door. A white canopy (1.5 m deep, 0.2 m thick) runs the length of each continuous run of garages at door-top height, never past the garage front line.
-- **Draw cost:** one instanced/merged mesh per kind (garage shells, interiors, canopy, box paint, outlines, codes); about +4 draw calls per track over today. `pitLayout` returns at most a fixed number of kinds, each drawn as one mesh.
+- **Team boxes:** each box a solid rectangle 7 × 3.4 m in the team colour (opaque, slightly darkened), a white car outline inside (thin quads), and the team's three-letter code painted in the 2 m gap just ahead of the box (atlas text, as the existing signs). Replaces the 45 % see-through planes.
+- **Garages:** each garage's block keeps its footprint and placement (and is still skipped where it would stand on the track's run-off), but its lane-facing side gets a dark doorway and a back wall lit in the team colour (emissive, no real light). Team name board stays above the door. A white canopy (1.5 m deep, 0.2 m thick) runs along each garage front at door-top height, reaching from the garage front line toward the lane but never over the boxes (its lane-side edge stays at least 1 m farther from the lane centre than the boxes' garage-side edge).
+- **Draw cost:** one instanced/merged mesh per kind (garage shells, interiors, canopy, box paint, outlines, codes); about +6 draw calls per track over today (split line, edge line, box paint, outlines, codes, doorways, lit interiors, canopy; the old see-through marks go). `pitLayout` returns at most a fixed number of kinds, each drawn as one mesh.
 
 ## 3. Your box, the countdown and the crew (client only)
 
@@ -84,7 +84,7 @@ The tyre geometry's band vertex colour becomes white and the batched wheel mesh 
 ## Testing
 
 - `Game.setNextCompound`: frozen race grid fits immediately and resets `compoundsUsed`; qualifying parked in box fits immediately; moving car sets `nextCompound` only; a stop in progress doesn't change the fitted set; invalid input ignored. Penalty still applies to a one-compound finisher who changed sets on the grid.
-- `pitLayout` (node test, every circuit): lane line and edge line cover the garage span; one painted box and one code per box; boxes on the working-lane side and inside the lane edges; canopy runs never past the garage front line; crew spots around the player's box inside the lane; skipped garages (run-off) still get boxes.
+- `pitLayout` (node test, every circuit): lane line and edge line cover the garage span; one painted box and one code per box; boxes on the working-lane side and inside the lane edges; canopy pieces never over the boxes (lane-side edge ≥ boxes' garage-side edge + 1 m); crew spots around the player's box inside the lane; skipped garages (run-off) still get boxes.
 - Countdown helper (pure function, client test): distance, "BRAKE" threshold and "MISSED" state from (pitS, box.s, speed, canStopOnMark).
 - Real game in a browser (visible tab): Monza and Monaco — picker pops out near pit entry and in the quali garage; click a chip; drive in: countdown, BRAKE, crew and lollipop, stop, GO, tyre band colour changes; frame rate within 10 % of before.
 
