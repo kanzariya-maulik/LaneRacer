@@ -11,7 +11,9 @@ for (const id of ['monza', 'monaco', 'spa']) {
         assert.ok(high.finished, 'High finished');
         assert.strictEqual(high.off, 0, `High left the road for ${high.off} ticks`);
         assert.strictEqual(high.walls, 0, 'High hit a wall');
-        assert.ok(r >= 1 && r <= 1.06, `High ${high.time.toFixed(2)} s vs limit ${limit.time.toFixed(2)} s (${((r - 1) * 100).toFixed(1)} %)`);
+        // r >= 1 is the fairness floor (help never beats a good driver): fix the help if it fails, do not loosen it
+        assert.ok(r >= 1, `fairness floor: High ${high.time.toFixed(2)} s faster than limit ${limit.time.toFixed(2)} s — do not loosen`);
+        assert.ok(r <= 1.06, `High ${high.time.toFixed(2)} s vs limit ${limit.time.toFixed(2)} s (${((r - 1) * 100).toFixed(1)} %)`);
     });
 
     test(`${id}: Low help saves a driver who never brakes, and costs more time than High`, () => {

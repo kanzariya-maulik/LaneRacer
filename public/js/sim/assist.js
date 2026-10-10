@@ -28,13 +28,14 @@ function safeSpeeds(path, scale, vcurv) {
 
 // Braking help, judged against the racing line's corner speeds at real grip (track.lineLimit).
 // aim: share of the corner speed to arrive at; margin: share of the braking grip (at the corner speed) the help plans
-// to use. liftM: when the car is over the target for a corner point this close ahead, the help cuts the throttle, so
-// drive doesn't take the cornering grip (friction circle) and a driver who holds the throttle still turns in.
-// High brakes early and lifts in the corner. Low brakes at the last moment, but lifts as soon as a corner it can see
-// (within its braking reach) is too fast, so leaning on it costs time.
+// to use. The help cuts the throttle (so drive doesn't take the cornering grip on the friction circle, and a driver who
+// holds the throttle still turns in) when the car is over the target for a corner point within liftM, or when the
+// braking a corner needs is over liftK × the braking it plans (braking is imminent).
+// High brakes early and lifts in the corner. Low brakes at the last moment with full grip, lifts only just before
+// (about 0.5 s at 330 km/h) and aims lower, so leaning on it costs time.
 // Tuned with test/help.test.js (flat-out driver): High a little slower than a no-help driver at the limit, Low slower still
-const HIGH = { aim: 0.90, margin: 0.7, liftM: 30 };
-const LOW = { aim: 0.90, margin: 1.0, liftM: Infinity };
+const HIGH = { aim: 0.90, margin: 0.7, liftM: 30, liftK: 1 };
+const LOW = { aim: 0.85, margin: 1.0, liftM: 30, liftK: 0.8 };
 const LOOK_EXTRA_M = 30;
 
 // level: 0 off, 0.5 Low, 1 High. Stateless (client prediction runs it too). Worn tyres: lower targets, less braking
@@ -42,24 +43,26 @@ function brakeAssist(car, input, track, near, level) {
     const { path, cum, lineLimit, scale } = track;
     const v = car.speed / scale;
     if (!(level > 0) || v < 5 || input.brake >= 1) return input;
-    const { aim, margin, liftM } = level >= 1 ? HIGH : LOW;
+    const { aim, margin, liftM, liftK } = level >= 1 ? HIGH : LOW;
     const tyre = car.tyreGrip ?? 1, mu = C.MU * tyre, corner = aim * Math.sqrt(tyre);
     const reach = (v * v) / (2 * margin * mu * C.G) + LOOK_EXTRA_M;
     const n = path.length, total = cum[n];
     const here = cum[near.i] + near.t * (cum[near.i + 1] - cum[near.i]);
-    let lift = false; // a corner point in the lift window that the car is over the target for
+    let lift = false; // cut the throttle: over the target for a corner point within liftM, or braking imminent
     for (let k = 0; k <= n; k++) {
         const j = (near.i + k) % n;
         const d = k === 0 ? 0 : ((((cum[j] - here) % total) + total) % total) / scale;
         if (d > reach) break;
         if (lineLimit[j] >= MAX_SAFE) continue; // a straight: never braked for (DRS and tow can beat the cap)
         const s = lineLimit[j] * corner;
-        if (d <= liftM && v > s) lift = true;
+        if (!(v > s)) continue;
+        if (d <= liftM) lift = true;
+        if (k === 0) continue;
         // Downforce fades as the car slows, so judge against the grip left at the corner speed
         // Downhill (grade < 0) gravity eats into the braking: brake earlier; uphill it helps
-        if (k > 0 && v > s && (v * v - s * s) / (2 * Math.max(d, 1)) > margin * mu * (C.G + DOWN * s * s) + C.G * (car.grade || 0)) {
-            return { throttle: 0, brake: 1, steer: input.steer };
-        }
+        const need = (v * v - s * s) / (2 * Math.max(d, 1)), grip = margin * mu * (C.G + DOWN * s * s) + C.G * (car.grade || 0);
+        if (need > grip) return { throttle: 0, brake: 1, steer: input.steer };
+        if (need > liftK * grip) lift = true;
     }
     return lift && input.throttle > 0 ? { throttle: 0, brake: input.brake, steer: input.steer } : input;
 }

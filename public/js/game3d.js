@@ -2005,10 +2005,11 @@ function updateSound(dt) {
     for (const id of remoteBoxes.keys()) if (!gs[id]) remoteBoxes.delete(id); // left the session
     sndFrame.own = null;
     if (racing) {
-        const v = me.speed / scale, g = ownBox.update(v, input.throttle, dt, !!me.limiter);
+        const thr = predictor?.car?.usedThrottle ?? input.throttle; // the throttle the help left (it lifts for you)
+        const v = me.speed / scale, g = ownBox.update(v, thr, dt, !!me.limiter);
         for (const e of g.events) Sound.event(e === 'up' ? 'shift_up' : 'shift_down');
         if (!!me.drs !== lastDrs) { lastDrs = !!me.drs; Sound.event('drs'); }
-        ownFrame.rpm = g.rpm; ownFrame.load = input.throttle; ownFrame.limiter = g.limiter; ownFrame.pit = g.pit; ownFrame.speedMs = v;
+        ownFrame.rpm = g.rpm; ownFrame.load = thr; ownFrame.limiter = g.limiter; ownFrame.pit = g.pit; ownFrame.speedMs = v;
         sndFrame.own = ownFrame;
         hud = g; hudSpeed = v;
         listenerFrame.vx = Math.cos(me.angle) * v; listenerFrame.vy = Math.sin(me.angle) * v;

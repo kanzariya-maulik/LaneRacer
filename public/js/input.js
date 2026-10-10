@@ -9,8 +9,8 @@ export function approach(cur, target, rate, dt) {
 
 export const LIFT_MIN_MS = 2; // m/s: below this lifting off doesn't brake (a held brake at a stop reverses)
 
-// Lift off W = brake, for the share of braking the driver took off the assist (brakeAssist 0–1).
-// At 100% the assist already brakes at the right time and amount, so lifting off just coasts.
+// Lift off W = brake. brakeAssist: 1 when braking help is High (it brakes at the right time, so lifting off just
+// coasts), 0 otherwise (Off and Low: lifting off brakes).
 export function liftOffBrake(brakeAssist, speedMs) {
     return speedMs > LIFT_MIN_MS ? Math.max(0, Math.min(1, 1 - brakeAssist)) : 0;
 }

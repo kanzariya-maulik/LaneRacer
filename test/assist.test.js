@@ -54,9 +54,9 @@ function runToChicane(useAssist) {
     throw new Error('never reached the chicane');
 }
 
-test('braking help High: flat out from 300 km/h, the car is at or below 95 % of the chicane\'s corner speed', () => {
+test(`braking help High: flat out from 300 km/h, the car is at or below ${Assist.HIGH.aim * 100} % of the chicane's corner speed`, () => {
     const { speed, safe } = runToChicane(true);
-    assert.ok(speed <= safe * 0.95 * 1.02, `${(speed * 3.6).toFixed(0)} km/h vs safe ${(safe * 3.6).toFixed(0)}`);
+    assert.ok(speed <= safe * Assist.HIGH.aim * 1.02, `${(speed * 3.6).toFixed(0)} km/h vs safe ${(safe * 3.6).toFixed(0)}`);
     const off = runToChicane(false);
     assert.ok(off.speed > off.safe * 1.5, 'without the assist the car should arrive far too fast');
 });
@@ -96,4 +96,37 @@ test('braking help: no braking on a straight even above 95 % of the speed cap (D
         const out = Assist.brakeAssist({ ...car }, FULL, { ...monza, lineLimit: monza.lineLimit.map(() => Assist.MAX_SAFE) }, near, level);
         assert.strictEqual(out, FULL, `level ${level} braked on a straight`);
     }
+});
+
+test('braking help cuts the throttle in a corner the car is over the target for, keeping brake and steering; Off never does', () => {
+    const t = { ...monza, lineLimit: monza.lineLimit.map(() => 30) }; // every point a 108 km/h corner
+    const s0 = monza.cum.findIndex(c => c >= 200 * monza.scale);
+    const p = Track.pointAt(monza.path, monza.cum, monza.cum[s0]);
+    const near = Physics.nearestOnTrack(p.x, p.y, t), input = { throttle: 1, brake: 0.3, steer: 0.4 };
+    const car = (ms) => ({ x: p.x, y: p.y, angle: p.angle, speed: ms * monza.scale });
+    for (const level of [0.5, 1]) {
+        // Just over the target (aim × 30 m/s) with the corner here: lift, no extra braking
+        const out = Assist.brakeAssist(car(30 * (level >= 1 ? Assist.HIGH.aim : Assist.LOW.aim) + 0.3), input, t, near, level);
+        assert.deepStrictEqual(out, { throttle: 0, brake: 0.3, steer: 0.4 }, `level ${level}`);
+        // Under the target: the driver's input untouched
+        assert.strictEqual(Assist.brakeAssist(car(20), input, t, near, level), input, `level ${level} under target`);
+    }
+    assert.strictEqual(Assist.brakeAssist(car(40), input, t, near, 0), input, 'Off changed the input');
+});
+
+test('braking help Low lifts only shortly before it brakes (Monza first chicane at 330 km/h)', () => {
+    let apex = 0, min = Infinity;
+    for (let i = 0; i < monza.path.length; i++) {
+        const m = monza.cum[i] / monza.scale;
+        if (m > 800 && m < 1300 && monza.lineLimit[i] < min) { min = monza.lineLimit[i]; apex = m; }
+    }
+    let lift = null, brake = null;
+    for (let m = 300; m < apex && brake === null; m++) {
+        const p = Track.pointAt(monza.path, monza.cum, m * monza.scale), v = 330 / 3.6 * monza.scale;
+        const car = { x: p.x, y: p.y, angle: p.angle, vx: Math.cos(p.angle) * v, vy: Math.sin(p.angle) * v, speed: v, steer: 0 };
+        const out = Assist.brakeAssist(car, { throttle: 1, brake: 0, steer: 0 }, monza, Physics.nearestOnTrack(p.x, p.y, monza), 0.5);
+        if (lift === null && out.throttle === 0) lift = m;
+        if (out.brake === 1) brake = m;
+    }
+    assert.ok(brake !== null && lift !== null && brake - lift <= 92, `lifts ${brake - lift} m (${((brake - lift) / (330 / 3.6)).toFixed(2)} s) before braking`);
 });

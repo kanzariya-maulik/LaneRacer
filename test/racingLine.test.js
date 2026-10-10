@@ -61,6 +61,7 @@ for (const id of Track.TRACK_IDS) {
         const r = driveLap(t, '100,0', { driver: 'limit', aim: 1 });
         assert.ok(r.finished, `${id}: no lap`);
         assert.strictEqual(r.walls, 0, `${id}: ${r.walls} wall hits`);
+        assert.strictEqual(r.off, 0, `${id}: off the road for ${r.off} ticks`);
         assert.ok(r.time <= lap * 1.1, `${id}: ${r.time.toFixed(1)} s vs profile ${lap.toFixed(1)} s`);
     });
 }
