@@ -213,7 +213,7 @@ function pickTyre(c) {
     socket.emit('tyre_next', c);
     window.showBanner?.(`TYRES: ${{ S: 'SOFT', M: 'MEDIUM', H: 'HARD' }[c]}`, true);
 }
-document.getElementById('tyre-picker').addEventListener('click', (e) => { const c = e.target.closest('.tp')?.dataset.c; if (c) pickTyre(c); });
+document.getElementById('tyre-picker').addEventListener('click', (e) => { const b = e.target.closest('.tp'); if (b) { b.blur(); pickTyre(b.dataset.c); } }); // blur: Space/Enter must not re-fire the pick
 
 function onKey(e, down) {
     if (e.target?.matches?.('input, textarea, select')) return; // typing a name or a chat line, not driving
