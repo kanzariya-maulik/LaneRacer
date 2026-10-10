@@ -15,7 +15,7 @@ import { estimateLoad } from './audio/mix.js';
 import * as Sound from './audio/audio.js';
 import { gapText, driverCode, lapDelta, stepFollow, watchTarget, inDrsZone, drsHint, liveSectors, resultCells, sectorClass, lastLapClass } from './timing.js';
 import { MODES, segmentColor, cornerMask, aheadM, trackIndex, nextMode } from './racingline.js';
-import { distToPath, pitLayout, BOX_M } from './pitLayout.js';
+import { distToPath, pitLayout, pickerOpen, BOX_M } from './pitLayout.js';
 
 // World units per metre come from the track JSON (track.scale = 6).
 const WHEEL_RADIUS_M = WHEEL_RADIUS; // carShape.js
@@ -207,6 +207,14 @@ function isSpectator() {
     return !!clientState.players[clientState.me]?.isSpectating || !clientState.gameState?.[clientState.me];
 }
 
+// A tyre pick (keys 1/2/3 or a click on the picker): fitted at once on the grid / in the quali box, else the next stop's set
+function pickTyre(c) {
+    if (isSpectator() || clientState.status === 'LOBBY') return;
+    socket.emit('tyre_next', c);
+    window.showBanner?.(`TYRES: ${{ S: 'SOFT', M: 'MEDIUM', H: 'HARD' }[c]}`, true);
+}
+document.getElementById('tyre-picker').addEventListener('click', (e) => { const c = e.target.closest('.tp')?.dataset.c; if (c) pickTyre(c); });
+
 function onKey(e, down) {
     if (e.target?.matches?.('input, textarea, select')) return; // typing a name or a chat line, not driving
     const key = e.key.toLowerCase();
@@ -225,12 +233,8 @@ function onKey(e, down) {
         ownView = !ownView;
         window.showBanner?.(ownView ? 'YOUR CAR · V TO WATCH' : 'WATCHING', true);
     }
-    // Next tyre set: 1 soft, 2 medium, 3 hard (Q, W and E are taken: assist, throttle, DRS)
-    if (down && !e.repeat && clientState.status !== 'LOBBY' && ['1', '2', '3'].includes(key)) {
-        const c = 'SMH'[+key - 1];
-        socket.emit('tyre_next', c);
-        window.showBanner?.(`NEXT TYRES: ${{ S: 'SOFT', M: 'MEDIUM', H: 'HARD' }[c]}`, true);
-    }
+    // Tyre pick: 1 soft, 2 medium, 3 hard (Q, W and E are taken: assist, throttle, DRS)
+    if (down && !e.repeat && ['1', '2', '3'].includes(key)) pickTyre('SMH'[+key - 1]);
     const k = KEYMAP[key];
     if (!k) return;
     // Presses are ignored in the lobby (typing a name), releases always count so no key stays stuck
@@ -1842,11 +1846,27 @@ function updateHUD(withTower = true) {
     }
     $('session-bar').textContent = bar;
     $('pit-limiter').classList.toggle('hidden', !(racing && me.limiter));
-    const comp = me?.compound || 'M', wear = predictor?.car?.wear ?? 0;
-    if (hudTyre !== comp) { hudTyre = comp; const chip = $('tyre-chip'); chip.textContent = comp; chip.className = `tyre-${comp}`; }
+    const wear = predictor?.car?.wear ?? 0;
     $('tyre-wear').firstElementChild.style.transform = `scaleX(${(1 - wear).toFixed(3)})`;
     $('tyre-wear').classList.toggle('worn', wear > 0.8);
-    $('tyre-next').textContent = `NEXT ${me?.nextCompound || '—'}`;
+    const comp = me?.compound || 'M', next = me?.nextCompound || '';
+    const car = predictor?.car, box = predictor?.box, td = clientState.trackData;
+    const boxDistM = car && box && td && me?.inPit ? (box.s - (car.pitS || 0)) / td.scale : null;
+    let toEntryM = Infinity;
+    if (car && td?.pit && !me?.inPit) {
+        pickIdx = trackIndex(td.path, car.x, car.y, pickIdx, td.width);
+        const total = td.cum[td.path.length];
+        toEntryM = ((((td.pit.entryS - td.cum[pickIdx]) % total) + total) % total) / td.scale;
+    }
+    const parked = boxDistM !== null && Math.abs(boxDistM) < 1 && Math.hypot(car.vx, car.vy) < 0.5 * td.scale;
+    const open = pickerOpen({ spectator: isSpectator(), status: clientState.status, inPit: !!me?.inPit, parked, toEntryM, boxDistM });
+    const pickKey = `${comp}${next}${open}`;
+    if (pickKey !== hudPick) {
+        hudPick = pickKey;
+        document.querySelectorAll('#tyre-picker .tp').forEach((b) => { b.classList.toggle('fit', b.dataset.c === comp); b.classList.toggle('next', b.dataset.c === next); });
+        $('tyre-picker').classList.toggle('open', open);
+        $('tyre-next').classList.toggle('hidden', !open);
+    }
     const st = predictor?.car?.stop;
     if (hudHadStop && !st && racing) hudGoUntil = performance.now() + 800; // released: flash GO
     hudHadStop = !!st;
@@ -1993,7 +2013,7 @@ const ownFrame = { rpm: 0, load: 0, limiter: false, pit: false, speedMs: 0 };
 const listenerFrame = { x: 0, y: 0, fx: 1, fy: 0, vx: 0, vy: 0 }, sndFrame = { own: null, others: soundOthers, listener: listenerFrame };
 const silentFrame = { own: null, others: [], listener: listenerFrame };
 const camDir = new THREE.Vector3();
-let lastDrs = false, hudLit = -1, hudFlash = null, hudGear = '', hudTyre = null, hudHadStop = false, hudGoUntil = 0;
+let lastDrs = false, hudLit = -1, hudFlash = null, hudGear = '', hudPick = '', pickIdx = null, hudHadStop = false, hudGoUntil = 0;
 function updateSound(dt) {
     const gs = clientState.gameState, me = gs[clientState.me], racing = !!me && !isSpectator();
     const followId = racing && !watchingAfterFinish() ? clientState.me : spectateId; // dash and engine: the car on screen
