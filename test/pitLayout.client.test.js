@@ -31,7 +31,7 @@ for (const id of Track.TRACK_IDS) {
             const o = lateral(t, b);
             assert.ok(o > 0 && o + L.BOX_M.wide / 2 <= 5 + 0.05, `box ${b.teamId} at ${o.toFixed(2)} m: not in the working lane`);
             assert.ok(Math.abs(lateral(t, b.codeAt)) <= 5, `code ${b.code} outside the lane`);
-            for (const c of L.crewSpots(b, sc)) assert.ok(Math.abs(lateral(t, c)) <= 5 + 0.05, `${c.role} outside the lane`);
+            for (const c of L.crewSpots(b, sc, -pit.trackSide)) assert.ok(Math.abs(lateral(t, c)) <= 5 + 0.05, `${c.role} outside the lane`);
         }
         const boxEdge = Math.max(...lay.boxes.map((b) => lateral(t, b) + L.BOX_M.wide / 2));
         for (const c of lay.canopy) assert.ok(lateral(t, c) - 0.75 >= boxEdge + 1 - 0.05, 'canopy over the boxes');
@@ -39,11 +39,19 @@ for (const id of Track.TRACK_IDS) {
     });
 }
 
-test('crew: seven people around the box, lollipop ahead of the nose', () => {
-    const box = { x: 0, y: 0, angle: 0 }, spots = L.crewSpots(box, 1);
-    assert.deepStrictEqual(spots.map((s) => s.role).sort(), ['jackF', 'jackR', 'lollipop', 'wheelFL', 'wheelFR', 'wheelRL', 'wheelRR']);
-    const lol = spots.find((s) => s.role === 'lollipop');
-    assert.ok(lol.x > 4 && Math.abs(lol.y) < 0.01);
+test('crew: seven people around the box, all clear of the car corridor, jacks and lollipop on the garage side', () => {
+    for (const g of [1, -1]) for (const angle of [0, 1.1]) {
+        const box = { x: 5, y: -3, angle }, spots = L.crewSpots(box, 1, g);
+        assert.deepStrictEqual(spots.map((s) => s.role).sort(), ['jackF', 'jackR', 'lollipop', 'wheelFL', 'wheelFR', 'wheelRL', 'wheelRR']);
+        for (const s of spots) {
+            const dx = s.x - box.x, dy = s.y - box.y;
+            const fwd = dx * Math.cos(angle) + dy * Math.sin(angle), lat = -dx * Math.sin(angle) + dy * Math.cos(angle);
+            assert.ok(Math.abs(lat) >= 1.1, `${s.role} in the car corridor (${lat.toFixed(2)} m)`);
+            if (/jack|lollipop/.test(s.role)) assert.ok(Math.sign(lat) === g, `${s.role} not on the garage side`);
+            assert.ok(Math.abs(s.ox * Math.sin(angle) * -1 + s.oy * Math.cos(angle) - Math.sign(lat)) < 1e-9, `${s.role} GO step not sideways-out`);
+            if (s.role === 'lollipop') assert.ok(fwd > 4, 'lollipop ahead of the nose');
+        }
+    }
 });
 
 test('boxCue: distance, BRAKE when braking is due, MISSED when too late or past', () => {
@@ -55,6 +63,26 @@ test('boxCue: distance, BRAKE when braking is due, MISSED when too late or past'
     assert.strictEqual(L.boxCue(2, 1.5, stopsIn(0.5)), 'YOUR BOX 2 m'); // crawling onto the mark: no BRAKE flash
     assert.strictEqual(L.boxCue(0.2, 0, stopsIn(0)), null); // on the mark
     assert.strictEqual(L.boxCue(-3, 0.5, stopsIn(0)), null); // crawled just past and stopped: the guide handles it
+    assert.strictEqual(L.boxCue(-3, 15, stopsIn(30), true), null); // visit done: nothing
+});
+
+// Frame by frame through a visit: [distM, speedMs, phase, inLane] → the cue text the HUD would show
+function runVisit(frames, stopsIn) {
+    let done = false;
+    return frames.map(([distM, speedMs, phase, inLane = true]) => {
+        done = L.visitDone(done, { phase, distM, speedMs, inLane });
+        return !inLane ? null : phase ? 'STOP' : L.boxCue(distM, speedMs, (m) => m >= stopsIn(speedMs), done);
+    });
+}
+test('visitDone: no MISSED / countdown after a stop or a quali exit; MISSED on a genuine overshoot', () => {
+    const need = (v) => (v * v) / 2 / 8; // braking at 8 m/s²
+    assert.deepStrictEqual(runVisit([[120, 22, null], [31, 22, null], [8, 8, null], [0.3, 0.2, 'guide'], [0, 0, 'service'], [0, 0, 'hold'],
+        [-2, 4, null], [-15, 20, null], [-40, 22, null], [-80, 22, null, false], [120, 22, null]], need),
+    ['YOUR BOX 120 m', 'BRAKE', 'YOUR BOX 8 m', 'STOP', 'STOP', 'STOP', null, null, null, null, 'YOUR BOX 120 m']);
+    // quali: starts on the mark, drives out
+    assert.deepStrictEqual(runVisit([[0, 0, null], [-2, 5, null], [-30, 20, null]], need), [null, null, null]);
+    // overshoot without stopping
+    assert.deepStrictEqual(runVisit([[20, 22, null], [-5, 18, null]], need), ['MISSED — GO AROUND', 'MISSED — GO AROUND']);
 });
 
 test('pickerOpen: grid, quali garage, pit approach; never spectators or the lobby', () => {
@@ -69,4 +97,7 @@ test('pickerOpen: grid, quali garage, pit approach; never spectators or the lobb
     assert.strictEqual(open({ toEntryM: 600 }), false);
     assert.strictEqual(open({ inPit: true, boxDistM: 80 }), true);
     assert.strictEqual(open({ inPit: true, boxDistM: -2 }), false);
+    assert.strictEqual(open({ inPit: true, boxDistM: 0, phase: 'service', done: true }), true); // still choosing during the change
+    assert.strictEqual(open({ inPit: true, boxDistM: 0, phase: 'hold', done: true }), false); // serviced
+    assert.strictEqual(open({ inPit: true, boxDistM: -0.5, done: true }), false); // released, still on the box
 });

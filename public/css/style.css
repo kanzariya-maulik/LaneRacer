@@ -794,7 +794,7 @@ input:disabled { opacity: 0.7; }
 .tp.fit { opacity: 1; box-shadow: 0 0 0 2px #fff; }
 .tp.next { opacity: 1; color: #111; }
 .tp.next.tyre-S { background: #e10600; } .tp.next.tyre-M { background: #ffd12e; } .tp.next.tyre-H { background: #f2f2f2; }
-#tyre-picker.open { position: fixed; right: 6%; top: 42%; transform: scale(1.9); transform-origin: right center; background: rgba(0,0,0,0.65); padding: 10px 12px 14px; border-radius: 8px; z-index: 5; }
+#tyre-picker-big { position: absolute; right: 6%; top: 42%; display: flex; flex-direction: column; align-items: center; gap: 3px; transform: scale(1.9); transform-origin: right center; background: rgba(0,0,0,0.65); padding: 10px 12px 14px; border-radius: 8px; z-index: 5; }
 .tyre-S { border-color: #e10600; color: #e10600; } .tyre-M { border-color: #ffd12e; color: #ffd12e; } .tyre-H { border-color: #f2f2f2; color: #f2f2f2; }
 #tyre-wear { width: 40px; height: 4px; background: #333; border-radius: 2px; overflow: hidden; }
 #tyre-wear i { display: block; height: 100%; width: 100%; background: #3ecf6e; transform-origin: left; }

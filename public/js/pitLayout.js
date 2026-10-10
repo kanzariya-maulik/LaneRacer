@@ -46,18 +46,23 @@ export function pitLayout(t) {
     return { split, edge: { ...split }, boxes, garages, canopy };
 }
 
-// Around a car parked on its box: wheel men at the corners, jacks fore and aft, the lollipop ahead of the nose
+// Around a car parked on its box (car corridor 2.2 m wide): wheel men at the corners; the jacks and the lollipop man stand
+// to the garage side, clear of the line the car drives in and out on. garageSide: -pit.trackSide. ox/oy: unit step away
+// from the box centre line (sideways), for the step-back at GO.
 const CREW = [['wheelFL', 1.8, 1.6], ['wheelFR', 1.8, -1.6], ['wheelRL', -1.8, 1.6], ['wheelRR', -1.8, -1.6],
-    ['jackF', 3.6, 0], ['jackR', -3.6, 0], ['lollipop', 4.6, 0]];
-export function crewSpots(box, scale) {
+    ['jackF', 3.2, 1.3], ['jackR', -3.4, 1.3], ['lollipop', 4.4, 1.6]];
+export function crewSpots(box, scale, garageSide) {
     return CREW.map(([role, a, l]) => {
-        const p = side(ahead(box, box.angle, a * scale), box.angle, l * scale);
-        return { role, x: p.x, y: p.y, angle: Math.atan2(box.y - p.y, box.x - p.x) }; // facing the car
+        const lat = l * garageSide, p = side(ahead(box, box.angle, a * scale), box.angle, lat * scale), sg = Math.sign(lat);
+        return { role, x: p.x, y: p.y, lat, angle: Math.atan2(box.y - p.y, box.x - p.x), // facing the car
+            ox: -Math.sin(box.angle) * sg, oy: Math.cos(box.angle) * sg };
     });
 }
 
-// HUD cue on the way to your box. distM: metres along the lane to the mark (< 0 past it); canStop(m): can the car stop in m
-export function boxCue(distM, speedMs, canStop) {
+// HUD cue on the way to your box. distM: metres along the lane to the mark (< 0 past it); canStop(m): can the car stop in m;
+// done: this visit already ended at the box (see visitDone) — nothing to cue
+export function boxCue(distM, speedMs, canStop, done = false) {
+    if (done) return null;
     if (distM > 0.5) {
         if (!canStop(distM + 0.5)) return 'MISSED — GO AROUND';
         return speedMs < 3 || canStop(distM - 3) ? `YOUR BOX ${Math.round(distM)} m` : 'BRAKE';
@@ -65,12 +70,20 @@ export function boxCue(distM, speedMs, canStop) {
     return distM < -1 && speedMs > 2 ? 'MISSED — GO AROUND' : null;
 }
 
+// Per pit-lane visit: true once the car has stopped at its box (a stop phase ran, or it sat on the mark — a quali car starting
+// in its box); cleared on leaving the lane
+export function visitDone(prev, { phase, distM, speedMs, inLane }) {
+    if (!inLane) return false;
+    return prev || !!phase || (distM !== null && Math.abs(distM) < 0.5 && speedMs < 0.5);
+}
+
 // When the tyre picker pops out (spec §1)
-export function pickerOpen({ spectator, status, inPit, parked, toEntryM, boxDistM }) {
+// phase: your stop's phase (null when none); done: visitDone — in a race the picker closes once serviced (hold, or after)
+export function pickerOpen({ spectator, status, inPit, parked, toEntryM, boxDistM, phase = null, done = false }) {
     if (spectator) return false;
     if (status === 'COUNTDOWN') return true;
     if (status === 'QUALIFYING') return !!(inPit && parked);
     if (status !== 'RACE') return false;
-    if (inPit) return boxDistM !== null && boxDistM > -1;
+    if (inPit) return phase !== 'hold' && !(done && !phase) && boxDistM !== null && boxDistM > -1;
     return toEntryM >= 0 && toEntryM <= ENTRY_PICK_M;
 }
