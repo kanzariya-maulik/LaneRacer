@@ -792,6 +792,7 @@ input:disabled { opacity: 0.7; }
 #tyre-card { position: absolute; left: 16px; bottom: calc(var(--pad) + 4.5em); pointer-events: auto; background: rgba(0,0,0,0.6); border-radius: 10px; padding: 10px 12px; color: #fff; min-width: 120px; max-width: 220px; }
 /* Touch: the joystick fills the bottom-left 30..170 px, so sit above it */
 body.touch #tyre-card { bottom: 180px; }
+@media (max-width: 600px) { #tyre-card, body.touch #tyre-card { bottom: 230px; } } /* phones: the speed cluster spans the bottom, sit above it */
 .tc-head { display: flex; align-items: center; gap: 10px; }
 .tc-head > div:last-child { display: flex; flex-direction: column; }
 .tc-head small { font-size: 10px; letter-spacing: 0.04em; color: #cbd5e1; }

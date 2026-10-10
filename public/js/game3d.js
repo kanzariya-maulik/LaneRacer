@@ -216,7 +216,7 @@ function pickTyre(c) {
     window.showBanner?.(`TYRES: ${{ S: 'SOFT', M: 'MEDIUM', H: 'HARD' }[c]}`, true);
 }
 const tcBtns = [...document.querySelectorAll('#tc-pick .tc-btn')];
-$('tc-pick').addEventListener('click', (e) => { const b = e.target.closest('.tc-btn'); if (b) { b.blur(); pickTyre(b.dataset.c); } }); // blur: Space/Enter must not re-fire the pick
+document.getElementById('tc-pick').addEventListener('click', (e) => { const b = e.target.closest('.tc-btn'); if (b) { b.blur(); pickTyre(b.dataset.c); } }); // blur: Space/Enter must not re-fire the pick
 
 function onKey(e, down) {
     if (e.target?.matches?.('input, textarea, select')) return; // typing a name or a chat line, not driving
@@ -1745,6 +1745,7 @@ function updateWheelBatch() {
 
 // ---------- camera ----------
 const look = new THREE.Vector3(), pitCam = new THREE.Vector3();
+const PIT_CAM_AHEAD_M = 7, PIT_CAM_SIDE_M = 4, PIT_CAM_UP_M = 3.4;
 let camHeading = 0, pitBlend = 0; // pitBlend: 0 = chase camera, 1 = TV pit camera
 
 function rankedCarIds() {
@@ -1777,8 +1778,9 @@ function updateCamera(dt) {
     pitBlend += ((own && box && td?.pit && (ph === 'service' || ph === 'hold' || ph === 'wait') ? 1 : 0) - pitBlend) * (1 - Math.exp(-dt * 3));
     if (!own) pitBlend = 0;
     if (pitBlend > 0.001 && box && td?.pit) {
-        const c = side(box, box.angle, -td.pit.trackSide * 9 * scale);
-        camera.position.lerp(pitCam.set(c.x, pitY(box.x, box.y) + 2 * scale, c.y), pitBlend);
+        // front quarter from the working lane (7 m ahead, 4 m to the garage side): car, crew and lit garage in one frame
+        const c = side(box, box.angle, -td.pit.trackSide * PIT_CAM_SIDE_M * scale), ca = Math.cos(box.angle) * PIT_CAM_AHEAD_M * scale, sa = Math.sin(box.angle) * PIT_CAM_AHEAD_M * scale;
+        camera.position.lerp(pitCam.set(c.x + ca, pitY(box.x, box.y) + PIT_CAM_UP_M * scale, c.y + sa), pitBlend);
         look.lerp(p, pitBlend);
     }
     camera.lookAt(look);
@@ -2086,18 +2088,19 @@ function updateHUD(withTower = true) {
         const on = fitted ? comp : next;
         tcBtns.forEach((b) => b.classList.toggle('on', b.dataset.c === on));
     }
-    const st = predictor?.car?.stop;
-    if (hudHadStop && !st && racing) { hudGoUntil = performance.now() + 800; } // released: flash GO
-    hudHadStop = !!st;
+    const st = predictor?.car?.stop, atBox = !!st && (st.phase === 'guide' || st.phase === 'service' || st.phase === 'hold');
+    if (hudHadStop && !atBox && racing && st?.phase === 'out') { hudGoUntil = performance.now() + 800; } // released: GO stays up a moment as the car pulls away
+    hudHadStop = atBox;
     const go = performance.now() < hudGoUntil;
-    $('box-msg').classList.toggle('hidden', !(racing && (st || go)));
-    if (st) $('box-msg').textContent = st.phase === 'service' ? `BOX — ${Math.max(0, st.t).toFixed(1)} s` : st.phase === 'hold' ? 'HOLD' : 'BOX';
+    $('box-msg').classList.toggle('hidden', !(racing && (atBox || go)));
+    // hold: the lollipop is green, press throttle now for a perfect release
+    if (atBox) $('box-msg').textContent = st.phase === 'service' ? `BOX — ${Math.max(0, st.t).toFixed(1)} s` : st.phase === 'hold' ? 'GO' : 'BOX';
     else if (go) $('box-msg').textContent = 'GO';
     // Pit banner: PIT ASSIST on entering lane/out, the stop time on a new lastStop, YOUR CAR when the exit drive ends
     const ls = me?.lastStop, lsKey = ls ? `${ls.s}|${ls.release}` : null, now = performance.now(), bannerFor = (txt, ms) => { bannerText = txt; bannerUntil = now + ms; };
     if (hudLastStop !== undefined && lsKey && lsKey !== hudLastStop) bannerFor(`PIT STOP ${ls.s.toFixed(2)} s${ls.release === 'perfect' ? '\nPERFECT RELEASE' : ls.release === 'jumped' ? '\nJUMPED +0.5 s' : ''}`, 3000);
     hudLastStop = lsKey;
-    if (!hudPrevPhase && (phase === 'lane' || phase === 'out')) bannerFor('PIT ASSIST', 1500);
+    if ((!hudPrevPhase || hudPrevPhase === 'wait') && (phase === 'lane' || phase === 'out')) bannerFor('PIT ASSIST', 1500); // wait: a quali car leaving its garage
     else if (hudPrevPhase === 'out' && !phase) bannerFor('YOUR CAR', 1200);
     if (phase !== hudPrevPhase) lastPick = null;
     hudPrevPhase = phase;
