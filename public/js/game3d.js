@@ -624,7 +624,7 @@ function gridBoxes(slots) {
 // Your own box: a pulsing outline, a "BOX" sign and a pit crew with a lollipop board, shown only while you're in the lane
 let boxCues = null, missedUntil = 0;
 function buildBoxCues(box, teamId, name) {
-    const g = new THREE.Group(), h = pitY(box.x, box.y), col = teamInfo[teamId]?.chatColor || '#888888';
+    const g = new THREE.Group(), lane = new THREE.Group(), h = pitY(box.x, box.y), col = teamInfo[teamId]?.chatColor || '#888888';
     const bar = (w, d, x, z) => { const q = new THREE.PlaneGeometry(w, d); q.rotateX(-Math.PI / 2); q.translate(x, 0, z); return q; };
     const L = (BOX_M.len + 0.6) * scale, W = (BOX_M.wide + 0.6) * scale, lw = 0.3 * scale;
     const ring = new THREE.Mesh(mergeGeometries([bar(L, lw, 0, W / 2), bar(L, lw, 0, -W / 2), bar(lw, W, L / 2, 0), bar(lw, W, -L / 2, 0)]),
@@ -643,53 +643,75 @@ function buildBoxCues(box, teamId, name) {
     const tyres = new THREE.InstancedMesh(new THREE.TorusGeometry(0.3 * scale, 0.12 * scale, 6, 10), new THREE.MeshStandardMaterial({ color: 0x111111 }), 4);
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.03 * scale, 0.03 * scale, 2.2 * scale), new THREE.MeshStandardMaterial({ color: 0xdddddd }));
     const brake = textPlane('BRAKE', 0.9 * scale, 0.9 * scale, '#e10600'), go = textPlane('GO', 0.9 * scale, 0.9 * scale, '#2a9d3f');
-    const lol = spots.find((p) => p.role === 'lollipop'), board = new THREE.Group();
-    board.add(pole, brake, go);
+    const lol = spots.find((p) => p.role === 'lollipop'), mast = new THREE.Group(), board = new THREE.Group();
+    mast.add(pole, brake, go); board.add(mast); // board: yawed to the box heading (local +x = forward); mast: tilts so the pole lowers forward, away from the arriving car
     pole.position.y = 1.1 * scale; brake.position.y = go.position.y = 2.3 * scale;
-    brake.rotation.y = go.rotation.y = facing(box.angle) + Math.PI; // facing the arriving car
+    brake.rotation.y = go.rotation.y = facing(box.angle) + Math.PI + box.angle; // facing the arriving car
+    board.rotation.y = -box.angle;
     board.position.set(lol.x, h, lol.y);
-    g.add(ring, sign, crew, tyres, board);
+    lane.add(crew, tyres, board);
+    lane.visible = false;
+    g.add(ring, sign, lane);
     g.visible = false;
     world.add(g);
-    return { g, ring, crew, tyres, board, brake, go, spots, h, box };
+    return { g, lane, ring, crew, tyres, mast, brake, go, spots, h, box, text: '' };
 }
 
 const tmpM = new THREE.Matrix4(), tmpQ = new THREE.Quaternion(), tmpE = new THREE.Euler(), tmpV = new THREE.Vector3(), ONE = new THREE.Vector3(1, 1, 1);
-function updateBoxCues(me, racing) {
+let cueToward = 0;
+function placeCrew(p, k) {
+    const bc = boxCues, dx = bc.box.x - p.x, dy = bc.box.y - p.y, l = Math.hypot(dx, dy) || 1;
+    tmpQ.setFromEuler(tmpE.set(0, -p.angle + Math.PI / 2, 0));
+    tmpV.set(p.x + (dx / l) * cueToward * scale, bc.h, p.y + (dy / l) * cueToward * scale);
+    bc.crew.setMatrixAt(k, tmpM.compose(tmpV, tmpQ, ONE));
+    if (k < 4) { // each tyre sits ~0.6 m toward the car from its wheel man
+        tmpV.set(p.x + (dx / l) * (cueToward + 0.6) * scale, bc.h + 0.3 * scale, p.y + (dy / l) * (cueToward + 0.6) * scale);
+        bc.tyres.setMatrixAt(k, tmpM.compose(tmpV, tmpQ, ONE));
+    }
+}
+let cueCar = null, cueTd = null;
+const cueCanStop = (m) => canStopOnMark(cueCar, cueTd, m);
+function disposeCues(c) {
+    world?.remove(c.g);
+    c.g.traverse((o) => { o.geometry?.dispose(); const m = o.material; if (m) { m.map?.dispose(); m.dispose(); } });
+}
+function updateBoxCues(me, racing, toEntryM) {
     const car = predictor?.car, box = predictor?.box, td = clientState.trackData;
-    if (boxCues && boxCues.box !== box) { world?.remove(boxCues.g); boxCues = null; }
+    if (boxCues && boxCues.box !== box) { disposeCues(boxCues); boxCues = null; }
     if (!boxCues && box && me && world) boxCues = buildBoxCues(box, me.teamId || clientState.players[clientState.me]?.teamId, clientState.players[clientState.me]?.username || '');
     const cueEl = $('box-cue');
-    const show = !!(boxCues && racing && me?.inPit && car);
-    if (boxCues) boxCues.g.visible = show;
-    if (!show) { cueEl.classList.add('hidden'); return; }
-    const st = car.stop, phase = st?.phase || null, go = performance.now() < hudGoUntil, now = performance.now();
+    const inLane = !!(boxCues && racing && me?.inPit && car && td);
+    const near = !!(boxCues && racing && clientState.status === 'RACE' && toEntryM <= 500); // spec: outline + sign from 500 m before the entry
+    if (boxCues) { boxCues.g.visible = inLane || near; boxCues.lane.visible = inLane; }
+    if (!inLane) { if (boxCues?.text) { boxCues.text = ''; cueEl.classList.add('hidden'); } return; }
+    const st = car.stop, phase = st?.phase || null, now = performance.now(), go = now < hudGoUntil;
     boxCues.ring.material.opacity = 0.55 + 0.45 * Math.sin(now / 180);
     // Crew: lean in during the change, step back at GO
-    const toward = phase === 'service' ? 0.3 : go ? -0.5 : 0;
-    boxCues.spots.forEach((p, k) => {
-        const dx = boxCues.box.x - p.x, dy = boxCues.box.y - p.y, l = Math.hypot(dx, dy) || 1;
-        tmpV.set(p.x + (dx / l) * toward * scale, boxCues.h, p.y + (dy / l) * toward * scale);
-        tmpQ.setFromEuler(tmpE.set(0, -p.angle + Math.PI / 2, 0));
-        boxCues.crew.setMatrixAt(k, tmpM.compose(tmpV, tmpQ, ONE));
-        if (k < 4) { tmpV.y = boxCues.h + 0.3 * scale; boxCues.tyres.setMatrixAt(k, tmpM.compose(tmpV, tmpQ, ONE)); }
-    });
+    cueToward = phase === 'service' ? 0.3 : go ? -0.5 : 0;
+    boxCues.spots.forEach(placeCrew);
     boxCues.crew.instanceMatrix.needsUpdate = true;
     boxCues.tyres.instanceMatrix.needsUpdate = true;
     // Lollipop: red BRAKE while you arrive, down during the stop, green GO at release
-    boxCues.board.rotation.z = phase ? Math.PI / 2.2 : 0;
+    boxCues.mast.rotation.z = phase ? -Math.PI / 2.2 : 0;
     boxCues.brake.visible = !phase && !go;
     boxCues.go.visible = go;
     // Countdown
-    const dist = (box.s - (car.pitS || 0)) / td.scale, speed = Math.hypot(car.vx, car.vy) / td.scale;
-    let text = phase || go ? null : boxCue(dist, speed, (m) => canStopOnMark(car, td, m));
-    if (text?.startsWith('MISSED')) missedUntil = now + 2000;
-    if (!text && now < missedUntil) text = 'MISSED — GO AROUND';
-    cueEl.classList.toggle('hidden', !text);
-    if (text) {
-        cueEl.textContent = text;
-        cueEl.classList.toggle('brake', text === 'BRAKE');
-        cueEl.classList.toggle('missed', text.startsWith('MISSED'));
+    let text = null;
+    if (phase || go) missedUntil = 0;
+    else {
+        cueCar = car; cueTd = td;
+        text = boxCue((box.s - (car.pitS || 0)) / td.scale, Math.hypot(car.vx, car.vy) / td.scale, cueCanStop);
+        if (text?.startsWith('MISSED')) missedUntil = now + 2000;
+        else if (!text && now < missedUntil) text = 'MISSED — GO AROUND';
+    }
+    if (text !== (boxCues.text || null)) {
+        boxCues.text = text || '';
+        cueEl.classList.toggle('hidden', !text);
+        if (text) {
+            cueEl.textContent = text;
+            cueEl.classList.toggle('brake', text === 'BRAKE');
+            cueEl.classList.toggle('missed', text.startsWith('MISSED'));
+        }
     }
 }
 
@@ -1948,7 +1970,7 @@ function updateHUD(withTower = true) {
     $('box-msg').classList.toggle('hidden', !(racing && (st || go)));
     if (st) $('box-msg').textContent = st.phase === 'service' ? `BOX — ${Math.max(0, st.t).toFixed(1)} s` : st.phase === 'hold' ? 'HOLD' : 'BOX';
     else if (go) $('box-msg').textContent = 'GO';
-    updateBoxCues(me, racing);
+    updateBoxCues(me, racing, toEntryM);
     $('drs-badge').className = !racing ? 'drs-off' : me.drs ? 'drs-open' : me.drsAvailable ? 'drs-avail' : 'drs-off';
     let hint = '';
     if (racing && clientState.trackData) {
