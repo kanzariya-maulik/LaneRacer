@@ -15,6 +15,7 @@ import { estimateLoad } from './audio/mix.js';
 import * as Sound from './audio/audio.js';
 import { gapText, driverCode, lapDelta, stepFollow, watchTarget, inDrsZone, drsHint, liveSectors, resultCells, sectorClass, lastLapClass } from './timing.js';
 import { MODES, segmentColor, cornerMask, aheadM, trackIndex, nextMode } from './racingline.js';
+import { distToPath } from './pitLayout.js';
 
 // World units per metre come from the track JSON (track.scale = 6).
 const WHEEL_RADIUS_M = WHEEL_RADIUS; // carShape.js
@@ -411,18 +412,6 @@ function offsetPoints(path, offset) {
         const o = typeof offset === 'number' ? offset : offset[i];
         return { x: p.x - dy * o, y: p.y + dx * o };
     }));
-}
-
-function distToPath(p, path, closed = true) {
-    let best = Infinity;
-    for (let i = 0; i < (closed ? path.length : path.length - 1); i++) {
-        const a = path[i], b = path[(i + 1) % path.length];
-        const l2 = (b.x - a.x) ** 2 + (b.y - a.y) ** 2;
-        let t = l2 ? ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / l2 : 0;
-        t = Math.max(0, Math.min(1, t));
-        best = Math.min(best, Math.hypot(p.x - (a.x + t * (b.x - a.x)), p.y - (a.y + t * (b.y - a.y))));
-    }
-    return best;
 }
 
 function turnAngle(path, i) {
