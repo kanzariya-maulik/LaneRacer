@@ -31,28 +31,12 @@ for (const id of Track.TRACK_IDS) {
             const o = lateral(t, b);
             assert.ok(o > 0 && o + L.BOX_M.wide / 2 <= 5 + 0.05, `box ${b.teamId} at ${o.toFixed(2)} m: not in the working lane`);
             assert.ok(Math.abs(lateral(t, b.codeAt)) <= 5, `code ${b.code} outside the lane`);
-            for (const c of L.crewSpots(b, sc, -pit.trackSide)) assert.ok(Math.abs(lateral(t, c)) <= 5 + 0.05, `${c.role} outside the lane`);
         }
         const boxEdge = Math.max(...lay.boxes.map((b) => lateral(t, b) + L.BOX_M.wide / 2));
         for (const c of lay.canopy) assert.ok(lateral(t, c) - 0.75 >= boxEdge + 1 - 0.05, 'canopy over the boxes');
         assert.strictEqual(lay.garages.length, pit.garages.length);
     });
 }
-
-test('crew: seven people around the box, all clear of the car corridor, jacks and lollipop on the garage side', () => {
-    for (const g of [1, -1]) for (const angle of [0, 1.1]) {
-        const box = { x: 5, y: -3, angle }, spots = L.crewSpots(box, 1, g);
-        assert.deepStrictEqual(spots.map((s) => s.role).sort(), ['jackF', 'jackR', 'lollipop', 'wheelFL', 'wheelFR', 'wheelRL', 'wheelRR']);
-        for (const s of spots) {
-            const dx = s.x - box.x, dy = s.y - box.y;
-            const fwd = dx * Math.cos(angle) + dy * Math.sin(angle), lat = -dx * Math.sin(angle) + dy * Math.cos(angle);
-            assert.ok(Math.abs(lat) >= 1.1, `${s.role} in the car corridor (${lat.toFixed(2)} m)`);
-            if (/jack|lollipop/.test(s.role)) assert.ok(Math.sign(lat) === g, `${s.role} not on the garage side`);
-            assert.ok(Math.abs(s.ox * Math.sin(angle) * -1 + s.oy * Math.cos(angle) - Math.sign(lat)) < 1e-9, `${s.role} GO step not sideways-out`);
-            if (s.role === 'lollipop') assert.ok(fwd > 4, 'lollipop ahead of the nose');
-        }
-    }
-});
 
 const roles17 = ['gunFL', 'gunFR', 'gunRL', 'gunRR', 'offFL', 'offFR', 'offRL', 'offRR', 'onFL', 'onFR', 'onRL', 'onRR', 'jackF', 'jackR', 'stabL', 'stabR', 'lollipop'];
 for (const id of Track.TRACK_IDS) {
@@ -61,10 +45,15 @@ for (const id of Track.TRACK_IDS) {
         for (const b of lay.boxes) {
             const marks = L.tMarks(b, sc);
             assert.strictEqual(marks.length, 4);
-            for (const m of marks) assert.ok(Math.hypot(m.x - b.x, m.y - b.y) / sc < Math.hypot(L.BOX_M.len, L.BOX_M.wide) / 2, 'mark outside its box');
+            const fx = Math.cos(b.angle), fy = Math.sin(b.angle);
+            marks.forEach((m, k) => { // wheelbase ±1.8 m along the box, track ±0.8 m across (left of the heading = +)
+                const dx = (m.x - b.x) / sc, dy = (m.y - b.y) / sc, along = dx * fx + dy * fy, across = -dx * fy + dy * fx;
+                assert.ok(Math.abs(along - (k < 2 ? 1.8 : -1.8)) < 1e-6 && Math.abs(across - (k % 2 ? -0.8 : 0.8)) < 1e-6, `mark ${k} at ${along.toFixed(3)}, ${across.toFixed(3)}`);
+            });
             const crew = L.crew17(b, sc, t.pit.trackSide);
             assert.deepStrictEqual(crew.map((c) => c.role).sort(), [...roles17].sort());
             for (const c of crew) for (const at of [c.idle, c.work]) assert.ok(Math.abs(lateral(t, at)) <= 5 + 0.05, `${c.role} outside the lane`);
+            for (const c of crew) if (/^(jackF|jackR|lollipop)$/.test(c.role)) assert.ok(lateral(t, c.idle) > 0, `${c.role} idles on the wrong side`);
             // Waiting crew stand clear of the car's way in and out (2.2 m corridor along the box)
             for (const c of crew) {
                 const dx = (c.idle.x - b.x) / sc, dy = (c.idle.y - b.y) / sc, l = -dx * Math.sin(b.angle) + dy * Math.cos(b.angle);
@@ -92,19 +81,16 @@ test('cardText: next set, auto, confirmations', () => {
     assert.deepStrictEqual(L.cardText({ compound: 'S', next: null, fitted: true }), { next: 'NEXT: M (auto)', confirm: '✓ SOFT FITTED' });
 });
 
-test('pickerOpen: grid, quali garage, pit approach; never spectators or the lobby', () => {
-    const base = { spectator: false, status: 'RACE', inPit: false, parked: false, toEntryM: 2000, boxDistM: null };
+test('pickerOpen: grid, quali garage, pit approach and lane; never spectators or the lobby', () => {
+    const base = { spectator: false, status: 'RACE', inPit: false, parked: false, toEntryM: 2000 };
     const open = (o) => L.pickerOpen({ ...base, ...o });
     assert.strictEqual(open({ status: 'COUNTDOWN' }), true);
     assert.strictEqual(open({ status: 'COUNTDOWN', spectator: true }), false);
     assert.strictEqual(open({ status: 'LOBBY' }), false);
-    assert.strictEqual(open({ status: 'QUALIFYING', inPit: true, parked: true, boxDistM: 0 }), true);
-    assert.strictEqual(open({ status: 'QUALIFYING', inPit: true, parked: false, boxDistM: 40 }), false);
+    assert.strictEqual(open({ status: 'QUALIFYING', inPit: true, parked: true }), true);
+    assert.strictEqual(open({ status: 'QUALIFYING', inPit: true, parked: false }), false);
     assert.strictEqual(open({ toEntryM: 450 }), true);
     assert.strictEqual(open({ toEntryM: 600 }), false);
-    assert.strictEqual(open({ inPit: true, boxDistM: 80 }), true);
-    assert.strictEqual(open({ inPit: true, boxDistM: -2 }), false);
-    assert.strictEqual(open({ inPit: true, boxDistM: 0, phase: 'service', done: true }), true); // still choosing during the change
-    assert.strictEqual(open({ inPit: true, boxDistM: 0, phase: 'hold', done: true }), false); // serviced
-    assert.strictEqual(open({ inPit: true, boxDistM: -0.5, done: true }), false); // released, still on the box
+    for (const phase of ['lane', 'guide', 'service']) assert.strictEqual(open({ inPit: true, phase }), true, phase);
+    for (const phase of ['hold', 'out', null]) assert.strictEqual(open({ inPit: true, phase }), false, String(phase));
 });

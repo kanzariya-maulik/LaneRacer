@@ -202,3 +202,11 @@ test('present mode through a RenderClock (target delay 0): even frame steps on j
     errs.sort((a, c) => a - c);
     assert.ok(errs[Math.floor(errs.length * 0.95)] < 0.05, `p95 step error ${(errs[Math.floor(errs.length * 0.95)] * 100).toFixed(1)}%`);
 });
+
+test('a car\'s pit stop phase (entry index 12) and timer (13) survive the snapshot buffer, and drop back to none', () => {
+    const b = new N.SnapshotBuffer();
+    b.push(pkt(1, 0, [[0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 2, 1.5]]), 0);
+    b.push(pkt(2, 0.1, [[0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0]]), 0.1);
+    assert.deepStrictEqual(b.snaps[0].cars.get(0).slice(12), [2, 1.5]);
+    assert.strictEqual(b.latest().cars.get(0)[12] || 0, 0);
+});

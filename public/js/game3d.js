@@ -15,8 +15,7 @@ import { estimateLoad } from './audio/mix.js';
 import * as Sound from './audio/audio.js';
 import { gapText, driverCode, lapDelta, stepFollow, watchTarget, inDrsZone, drsHint, liveSectors, resultCells, sectorClass, lastLapClass } from './timing.js';
 import { MODES, segmentColor, cornerMask, aheadM, trackIndex, nextMode } from './racingline.js';
-import { distToPath, pitLayout, tMarks, wallStands, pickerOpen, BOX_M, crewSpots, boxCue, visitDone, COMPOUND_COLORS } from './pitLayout.js';
-import { canStopOnMark } from './sim/drive.js';
+import { distToPath, pitLayout, tMarks, wallStands, pickerOpen, crew17, BOX_M, COMPOUND_COLORS } from './pitLayout.js';
 
 // World units per metre come from the track JSON (track.scale = 6).
 const WHEEL_RADIUS_M = WHEEL_RADIUS; // carShape.js
@@ -622,10 +621,10 @@ function gridBoxes(slots) {
     world.add(atlasPlanes(nums, 1.6 * scale, 1.6 * scale, 'rgba(0,0,0,0)'));
 }
 
-// Your own box: a pulsing outline, a "BOX" sign and a pit crew with a lollipop board, shown only while you're in the lane
-let boxCues = null, missedUntil = 0, visitIsDone = false, cueGoUntil = 0; // visitIsDone: visitDone() for this pit-lane visit
-function buildBoxCues(box, teamId, name, garageSide) {
-    const g = new THREE.Group(), lane = new THREE.Group(), h = pitY(box.x, box.y), col = teamInfo[teamId]?.chatColor || '#888888';
+// Your own box: a pulsing outline and a "BOX" sign, shown from 500 m before the entry until you leave the lane
+let boxRing = null;
+function buildBoxRing(box, name, col) {
+    const g = new THREE.Group(), h = pitY(box.x, box.y);
     const bar = (w, d, x, z) => { const q = new THREE.PlaneGeometry(w, d); q.rotateX(-Math.PI / 2); q.translate(x, 0, z); return q; };
     const L = (BOX_M.len + 0.6) * scale, W = (BOX_M.wide + 0.6) * scale, lw = 0.3 * scale;
     const ring = new THREE.Mesh(mergeGeometries([bar(L, lw, 0, W / 2), bar(L, lw, 0, -W / 2), bar(lw, W, L / 2, 0), bar(lw, W, -L / 2, 0)]),
@@ -635,94 +634,152 @@ function buildBoxCues(box, teamId, name, garageSide) {
     const sign = textPlane(`BOX · ${name.toUpperCase()}`, 6 * scale, 1.4 * scale, col);
     sign.position.set(box.x, 7 * scale + h, box.y);
     sign.rotation.y = facing(box.angle);
-    // Crew: capsule body + head, team colours; four tyres; the lollipop man's board (two faces)
-    const body = new THREE.CapsuleGeometry(0.28 * scale, 1.0 * scale, 2, 6); body.translate(0, 0.78 * scale, 0);
-    const head = new THREE.SphereGeometry(0.16 * scale, 6, 4); head.translate(0, 1.62 * scale, 0);
-    const person = mergeGeometries([body, head]);
-    const spots = crewSpots(box, scale, garageSide);
-    const crew = new THREE.InstancedMesh(person, new THREE.MeshStandardMaterial({ color: col }), spots.length);
-    const tyres = new THREE.InstancedMesh(new THREE.TorusGeometry(0.3 * scale, 0.12 * scale, 6, 10), new THREE.MeshStandardMaterial({ color: 0x111111 }), 4);
-    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.03 * scale, 0.03 * scale, 2.2 * scale), new THREE.MeshStandardMaterial({ color: 0xdddddd }));
-    const brake = textPlane('BRAKE', 0.9 * scale, 0.9 * scale, '#e10600'), go = textPlane('GO', 0.9 * scale, 0.9 * scale, '#2a9d3f');
-    const lol = spots.find((p) => p.role === 'lollipop'), mast = new THREE.Group(), board = new THREE.Group();
-    mast.add(pole, brake, go); board.add(mast); // board: yawed to the box heading (local +x = forward); mast: tilts so the pole lowers forward, away from the arriving car
-    pole.position.y = 1.1 * scale; brake.position.y = go.position.y = 2.3 * scale;
-    brake.rotation.y = go.rotation.y = facing(box.angle) + box.angle; // net yaw = facing(): normal = -heading, toward the arriving car
-    board.rotation.y = -box.angle;
-    board.position.set(lol.x, h, lol.y);
-    // The man stands off the car's line: lean the pole in (board-local +z = the lateral + side) so the board hangs over the
-    // box centre line ahead of the nose; the faces roll back level
-    const lean = Math.asin(-lol.lat / 2.3);
-    mast.rotation.x = lean; brake.rotation.x = go.rotation.x = -lean;
-    lane.add(crew, tyres, board);
-    lane.visible = false;
-    g.add(ring, sign, lane);
+    g.add(ring, sign);
     g.visible = false;
     world.add(g);
-    return { g, lane, ring, crew, tyres, mast, brake, go, spots, h, box, text: '' };
+    return { g, ring, box };
 }
-
-const tmpM = new THREE.Matrix4(), tmpQ = new THREE.Quaternion(), tmpE = new THREE.Euler(), tmpV = new THREE.Vector3(), ONE = new THREE.Vector3(1, 1, 1);
-const ZERO = new THREE.Vector3(0, 0, 0);
-let cueToward = 0, cueOut = 0, cueRearJack = false;
-function placeCrew(p, k) {
-    const bc = boxCues, dx = bc.box.x - p.x, dy = bc.box.y - p.y, l = Math.hypot(dx, dy) || 1;
-    tmpQ.setFromEuler(tmpE.set(0, -p.angle + Math.PI / 2, 0));
-    // lean toward the car (cueToward); at GO step sideways off the car's line (cueOut), never along the lane
-    tmpV.set(p.x + ((dx / l) * cueToward + p.ox * cueOut) * scale, bc.h, p.y + ((dy / l) * cueToward + p.oy * cueOut) * scale);
-    bc.crew.setMatrixAt(k, tmpM.compose(tmpV, tmpQ, p.role === 'jackR' && !cueRearJack ? ZERO : ONE)); // rear jack: from service on
-    if (k < 4) { // each tyre sits ~0.6 m toward the car from its wheel man
-        tmpV.set(p.x + ((dx / l) * (cueToward + 0.6) + p.ox * cueOut) * scale, bc.h + 0.3 * scale, p.y + ((dy / l) * (cueToward + 0.6) + p.oy * cueOut) * scale);
-        bc.tyres.setMatrixAt(k, tmpM.compose(tmpV, tmpQ, ONE));
-    }
-}
-let cueCar = null, cueTd = null;
-const cueCanStop = (m) => canStopOnMark(cueCar, cueTd, m);
-function hideBoxCue() { const el = $('box-cue'); el.classList.add('hidden'); el.classList.remove('brake', 'missed'); el.textContent = ''; }
-function disposeCues(c) {
+function disposeRing(c) {
     world?.remove(c.g);
-    hideBoxCue();
     c.g.traverse((o) => { o.geometry?.dispose(); const m = o.material; if (m) { m.map?.dispose(); m.dispose(); } });
 }
-function updateBoxCues(me, racing, toEntryM) {
-    const car = predictor?.car, box = predictor?.box, td = clientState.trackData;
-    if (boxCues && boxCues.box !== box) { disposeCues(boxCues); boxCues = null; }
-    if (!boxCues && box && me && world && td?.pit) boxCues = buildBoxCues(box, me.teamId || clientState.players[clientState.me]?.teamId, clientState.players[clientState.me]?.username || '', -td.pit.trackSide);
-    const cueEl = $('box-cue');
-    const inLane = !!(boxCues && racing && me?.inPit && car && td);
-    const near = !!(boxCues && racing && clientState.status === 'RACE' && toEntryM <= 500); // spec: outline + sign from 500 m before the entry
-    if (boxCues) { boxCues.g.visible = inLane || near; boxCues.lane.visible = inLane; }
-    if (!inLane) { missedUntil = 0; if (boxCues?.text) { boxCues.text = ''; cueEl.classList.add('hidden'); } return; }
-    const st = car.stop, phase = st?.phase || null, now = performance.now(), go = now < cueGoUntil, done = visitIsDone;
-    boxCues.ring.material.opacity = 0.55 + 0.45 * Math.sin(now / 180);
-    // Crew: lean in during the change, step sideways off the car's line at GO; the rear jack comes out for the change
-    cueToward = phase === 'service' ? 0.3 : 0;
-    cueOut = go ? 0.6 : 0;
-    cueRearJack = phase === 'service' || phase === 'hold' || go;
-    boxCues.spots.forEach(placeCrew);
-    boxCues.crew.instanceMatrix.needsUpdate = true;
-    boxCues.tyres.instanceMatrix.needsUpdate = true;
-    // Lollipop: red BRAKE while you arrive, down during the stop, green GO at release
-    boxCues.mast.rotation.z = phase ? -Math.PI / 2.2 : 0;
-    boxCues.brake.visible = !phase && !go && !done; // done: this visit already stopped here (after a stop / a quali start)
-    boxCues.go.visible = go;
-    // Countdown
-    let text = null;
-    if (phase || go) missedUntil = 0;
-    else {
-        cueCar = car; cueTd = td;
-        text = boxCue((box.s - (car.pitS || 0)) / td.scale, Math.hypot(car.vx, car.vy) / td.scale, cueCanStop, done);
-        if (text?.startsWith('MISSED')) missedUntil = now + 2000;
-        else if (!text && !done && now < missedUntil) text = 'MISSED — GO AROUND';
+function updateBoxRing(me, racing, toEntryM) {
+    const box = predictor?.box;
+    if (boxRing && boxRing.box !== box) { disposeRing(boxRing); boxRing = null; }
+    if (!boxRing && box && me && world && clientState.trackData?.pit) {
+        const pl = clientState.players[clientState.me];
+        boxRing = buildBoxRing(box, pl?.username || '', teamInfo[me.teamId || pl?.teamId]?.chatColor || '#888888');
     }
-    if (text !== (boxCues.text || null)) {
-        boxCues.text = text || '';
-        cueEl.classList.toggle('hidden', !text);
-        if (text) {
-            cueEl.textContent = text;
-            cueEl.classList.toggle('brake', text === 'BRAKE');
-            cueEl.classList.toggle('missed', text.startsWith('MISSED'));
+    if (!boxRing) return;
+    const inLane = !!(racing && me?.inPit);
+    boxRing.g.visible = inLane || !!(racing && clientState.status === 'RACE' && toEntryM <= 500);
+    boxRing.ring.material.opacity = 0.55 + 0.45 * Math.sin(performance.now() / 180);
+}
+
+// ---------- pit crews: 17 people, tyres and a lollipop board at every car that is stopping (at most CREWS at once) ----------
+const CREWS = 4, STOP_PHASES = ['', 'guide', 'service', 'hold', 'lane', 'out', 'wait'];
+const CREW_EASE = 6, STEP_BACK_M = 0.5, STEP_BACK_S = 0.6, GO_BOARD_S = 1, LIFT_M = 0.08;
+const crews = []; // { id, mesh, tyres, board: { group, mast, brake, go }, pos: [{x,y}] x17, ... }
+const crewTmp = { m: new THREE.Matrix4(), q: new THREE.Quaternion(), e: new THREE.Euler(), v: new THREE.Vector3(), one: new THREE.Vector3(1, 1, 1), zero: new THREE.Vector3(0, 0, 0) };
+let humanGeo = null, tyreGeo = null;
+function humanGeometry() {
+    const box = (w, h, d, x, y, z) => new THREE.BoxGeometry(w * scale, h * scale, d * scale).translate(x * scale, y * scale, z * scale);
+    const head = new THREE.SphereGeometry(0.15 * scale, 8, 6).translate(0, 1.68 * scale, 0);
+    return mergeGeometries([box(0.14, 0.8, 0.16, -0.1, 0.4, 0), box(0.14, 0.8, 0.16, 0.1, 0.4, 0), // legs
+        box(0.42, 0.62, 0.24, 0, 1.12, 0), box(0.11, 0.6, 0.12, -0.28, 1.12, 0.05), box(0.11, 0.6, 0.12, 0.28, 1.12, 0.05), head]); // torso, arms, helmet
+}
+function newCrew() {
+    humanGeo ||= humanGeometry();
+    tyreGeo ||= new THREE.TorusGeometry(0.3 * scale, 0.12 * scale, 6, 10).rotateX(Math.PI / 2);
+    const mesh = new THREE.InstancedMesh(humanGeo, new THREE.MeshStandardMaterial({ color: 0xffffff }), 17);
+    const tyres = new THREE.InstancedMesh(tyreGeo, new THREE.MeshStandardMaterial({ color: 0xffffff }), 8);
+    const dark = new THREE.Color(0x222222);
+    for (let k = 0; k < 4; k++) tyres.setColorAt(k, dark); // old tyres dark; the new ones' band colour is set per car
+    for (let k = 4; k < 8; k++) tyres.setColorAt(k, dark);
+    mesh.frustumCulled = tyres.frustumCulled = false;
+    const group = new THREE.Group(), mast = new THREE.Group();
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.03 * scale, 0.03 * scale, 2.2 * scale), new THREE.MeshStandardMaterial({ color: 0xdddddd }));
+    const brake = textPlane('BRAKE', 0.9 * scale, 0.9 * scale, '#e10600'), go = textPlane('GO', 0.9 * scale, 0.9 * scale, '#2a9d3f');
+    pole.position.y = 1.1 * scale; brake.position.y = go.position.y = 2.3 * scale;
+    mast.add(pole, brake, go); group.add(mast); // group: yawed to the box heading (local +x = forward); mast tilts so the pole lowers forward
+    const root = new THREE.Group();
+    root.add(mesh, tyres, group);
+    root.visible = false;
+    world.add(root);
+    const pos = Array.from({ length: 17 }, () => ({ x: 0, y: 0 })), tpos = Array.from({ length: 8 }, () => ({ x: 0, y: 0 }));
+    return { id: null, root, mesh, tyres, group, mast, brake, go, pos, tpos, spotsFor: null, spots: null, phase: '', outAt: -1, goUntil: 0, fresh: true, serviceAt: 0, marks: null, compound: null };
+}
+const lerpTo = (p, x, y, k) => { p.x += (x - p.x) * k; p.y += (y - p.y) * k; };
+// Crew slots are keyed by car id: cars already holding one keep it, free slots go to new stoppers, slots of cars gone are freed
+const wantedIds = [];
+function assignCrews() {
+    for (const c of crews) if (c.id !== null && !wantedIds.includes(c.id)) c.id = null;
+    for (let n = 0; n < wantedIds.length; n++) {
+        const id = wantedIds[n];
+        let have = false, free = null;
+        for (const c of crews) { if (c.id === id) have = true; else if (c.id === null && !free) free = c; }
+        if (have) continue;
+        if (!free && crews.length < CREWS) { free = newCrew(); crews.push(free); }
+        if (free) { free.id = id; free.spots = null; free.phase = ''; free.outAt = -1; }
+    }
+}
+// Who needs a crew, best first: you, then cars in a stop (guide/service/hold/lane/out), then cars merely in the lane or parked in quali
+function pickCrewCars(gs) {
+    wantedIds.length = 0;
+    for (let pass = 0; pass < 3 && wantedIds.length < CREWS; pass++) {
+        for (const id in gs) {
+            const p = gs[id];
+            if (!p.box || !cars[id] || (!p.inPit && !p.stopPhase)) continue;
+            if ((pass === 0 && id === clientState.me) || (pass === 1 && id !== clientState.me && p.stopPhase && p.stopPhase !== 'wait') || (pass === 2 && id !== clientState.me && !(p.stopPhase && p.stopPhase !== 'wait'))) {
+                if (wantedIds.length < CREWS) wantedIds.push(id);
+            }
         }
+    }
+}
+const OLD_TYRE_OUT_M = 1, MID_SERVICE_MS = 1000, SIDES = ['FL', 'FR', 'RL', 'RR'];
+function updateCrews(dt) {
+    const gs = clientState.gameState, td = clientState.trackData;
+    if (!world || !gs || !td?.pit) { for (const c of crews) c.root.visible = false; return; }
+    pickCrewCars(gs);
+    assignCrews();
+    const now = performance.now(), k = 1 - Math.exp(-CREW_EASE * dt), T = crewTmp, garage = -td.pit.trackSide;
+    for (const c of crews) {
+        c.root.visible = c.id !== null;
+        if (c.id === null) continue;
+        const p = gs[c.id], box = p.box, phase = p.stopPhase || '', h = pitY(box.x, box.y);
+        if (!c.spots || c.spotsFor !== box) {
+            c.spots = crew17(box, scale, td.pit.trackSide); c.spotsFor = box; c.marks = tMarks(box, scale);
+            c.mesh.material.color.set(teamInfo[p.teamId]?.chatColor || '#888888');
+            c.group.position.set(c.spots[16].idle.x, h, c.spots[16].idle.y); c.group.rotation.y = -box.angle;
+            c.brake.rotation.y = c.go.rotation.y = facing(box.angle) + box.angle; // net yaw = facing(): toward the arriving car
+            const lean = Math.asin(-garage * 1.6 / 2.3); // the man stands off the car's line: lean the pole so the board hangs over the box centre line
+            c.mast.rotation.x = lean; c.brake.rotation.x = c.go.rotation.x = -lean;
+            c.fresh = true;
+        }
+        if (compoundColor[p.compound] !== c.compound) {
+            c.compound = compoundColor[p.compound];
+            for (let j = 4; j < 8; j++) c.tyres.setColorAt(j, c.compound || compoundColor.M);
+            c.tyres.instanceColor.needsUpdate = true;
+        }
+        if (phase !== c.phase) {
+            if (phase === 'service') c.serviceAt = now;
+            if (phase === 'out' && c.phase) { c.outAt = now; c.goUntil = now + GO_BOARD_S * 1000; } else if (phase !== 'out') c.outAt = -1;
+            c.phase = phase;
+        }
+        const working = phase === 'service' || phase === 'hold', released = phase === 'out' && c.outAt >= 0;
+        const mid = phase === 'hold' || phase === 'out' || (phase === 'service' && now - c.serviceAt > MID_SERVICE_MS);
+        const ox = -Math.sin(box.angle) * garage * STEP_BACK_M * scale, oy = Math.cos(box.angle) * garage * STEP_BACK_M * scale;
+        const kk = c.fresh ? 1 : k;
+        for (let i = 0; i < 17; i++) {
+            const s = c.spots[i], jack = s.role === 'jackF' || s.role === 'jackR';
+            const tgt = phase === 'service' || (phase === 'hold' && !jack) ? s.work : s.idle, q = c.pos[i];
+            lerpTo(q, tgt.x + (released ? ox : 0), tgt.y + (released ? oy : 0), kk);
+            T.q.setFromEuler(T.e.set(0, -s.angle + Math.PI / 2, 0));
+            T.v.set(q.x, h, q.y);
+            c.mesh.setMatrixAt(i, T.m.compose(T.v, T.q, T.one));
+        }
+        // Tyres: old ones come off the car at the wheels and go 1 m outward with the off-men from mid-service; new ones ride
+        // with the on-men, then sit at the wheels. Index order of crew17 is gun, off, on per wheel (FL, FR, RL, RR)
+        T.q.identity();
+        for (let w = 0; w < 4; w++) {
+            const mark = c.marks[w], off = c.pos[w * 3 + 1], on = c.pos[w * 3 + 2], sg = w % 2 ? -1 : 1;
+            const oldT = c.tpos[w], newT = c.tpos[w + 4];
+            if (mid) lerpTo(oldT, off.x - Math.sin(box.angle) * sg * OLD_TYRE_OUT_M * scale, off.y + Math.cos(box.angle) * sg * OLD_TYRE_OUT_M * scale, kk);
+            else { oldT.x = mark.x; oldT.y = mark.y; }
+            if (mid) lerpTo(newT, mark.x, mark.y, kk); else lerpTo(newT, on.x, on.y, kk);
+            const oldOn = working || phase === 'out'; // before the stop the old tyres are still on the car
+            T.v.set(oldT.x, h + 0.3 * scale, oldT.y);
+            c.tyres.setMatrixAt(w, T.m.compose(T.v, T.q, oldOn ? T.one : T.zero));
+            T.v.set(newT.x, h + 0.3 * scale, newT.y);
+            c.tyres.setMatrixAt(w + 4, T.m.compose(T.v, T.q, T.one));
+        }
+        c.mesh.instanceMatrix.needsUpdate = c.tyres.instanceMatrix.needsUpdate = true;
+        // Lollipop: red BRAKE until the service, lowered during it, green GO for 1 s after release
+        const goOn = now < c.goUntil;
+        c.mast.rotation.z = working ? -Math.PI / 2.2 : 0;
+        c.brake.visible = !working && !goOn && phase !== 'out';
+        c.go.visible = goOn;
+        c.fresh = false;
     }
 }
 
@@ -746,7 +803,7 @@ function buildPit(pit, t) {
     world.add(strip(pit.path, half.map(() => -line / 2), half.map(() => line / 2), 0.86, onSpan, solid('#f2f2f2')));
     // The concrete working lane: the garage-side half of the lane along the garages
     const wFrom = half.map((h) => (s > 0 ? -(h - 2 * line) : line / 2)), wTo = half.map((h) => (s > 0 ? -line / 2 : h - 2 * line));
-    world.add(strip(pit.path, wFrom, wTo, 0.6, onSpan, solid('#8a8f96')));
+    world.add(strip(pit.path, wFrom, wTo, 0.68, onSpan, solid('#8a8f96')));
     const yA = half.map((h) => -s * (h - line)), yB = half.map((h) => -s * (h - 2 * line));
     world.add(strip(pit.path, s > 0 ? yA : yB, s > 0 ? yB : yA, 0.86, onSpan, solid('#ffd400')));
 
@@ -821,7 +878,7 @@ function buildPit(pit, t) {
     const outlineGeo = mergeGeometries([bar(ol, lw, 0, ow / 2), bar(ol, lw, 0, -ow / 2), bar(lw, ow, ol / 2, 0), bar(lw, ow, -ol / 2, 0)]);
     add(outlineGeo, new THREE.MeshStandardMaterial({ color: 0xf2f2f2 }), outlines);
     const tGeo = mergeGeometries([bar(0.12 * scale, 0.7 * scale, 0, 0), bar(0.5 * scale, 0.12 * scale, 0.3 * scale, 0)]);
-    add(tGeo, new THREE.MeshStandardMaterial({ color: 0xf2f2f2 }), lay.boxes.flatMap((b) => tMarks(b, scale).map((m) => ({ x: m.x, y: 0.84 + pitY(m.x, m.y), z: m.y, angle: -m.angle }))));
+    add(tGeo, new THREE.MeshStandardMaterial({ color: 0xf2f2f2 }), lay.boxes.flatMap((b) => tMarks(b, scale).map((m, k) => ({ x: m.x, y: 0.84 + pitY(m.x, m.y), z: m.y, angle: -m.angle + (k < 2 ? Math.PI : 0) }))));  // stems point toward the car centre
     const standGeo = mergeGeometries([
         new THREE.BoxGeometry(4 * scale, 1.1 * scale, 1.6 * scale).translate(0, 0.55 * scale, 0),     // desk
         new THREE.BoxGeometry(4.6 * scale, 0.15 * scale, 2.2 * scale).translate(0, 2.6 * scale, 0),   // roof
@@ -1198,7 +1255,9 @@ function buildWorld(t) {
     }
     for (const id in cars) delete cars[id];
     wheelBatch = null; // rebuilt in the new world
-    boxCues = null; missedUntil = 0; visitIsDone = false; hideBoxCue();
+    boxRing = null;
+    for (const c of crews) { world?.remove(c.root); c.root.traverse((o) => { if (o.isMesh && !o.isInstancedMesh) { o.geometry.dispose(); o.material.map?.dispose(); o.material.dispose(); } }); c.mesh.material.dispose(); c.tyres.material.dispose(); }
+    crews.length = 0; humanGeo?.dispose(); tyreGeo?.dispose(); humanGeo = tyreGeo = null;
 
     scale = t.scale;
     world = new THREE.Group();
@@ -1570,6 +1629,8 @@ function updateCars(dt) {
             r.rotation.z = Math.atan((fl + fr - rl - rr) / 2 / (2 * ax)); // nose up on a climb (+z lifts the +x nose)
             r.rotation.x = Math.atan((fl + rl - fr - rr) / 2 / (2 * tw)); // right side lower: lean right (+x tips +y to +z)
         }
+        if (!(elev && elev.z)) r.position.y = ROAD_DRAW_Y;
+        if (s.stopPhase === 'service') r.position.y += LIFT_M * scale; // the jacks lift the car for the wheel change
         const far = camera.position.distanceTo(r.position) > 300 * scale; // wheels unreadable that far: 4 fewer draws per car
         for (const w of car.wheels) w.userData.show = !far;
         for (const w of car.wheels) w.rotation.z -= (s.speed / (WHEEL_RADIUS_M * scale)) * dt;
@@ -1621,6 +1682,7 @@ function applyNet(nowS, dt) {
             pose = predictor.pose(simAcc / STEP_S, ownPose);
             const e = latest.cars.get(i);
             if (e) decodeFlags(e[6], p);
+            p.stopPhase = predictor.car.stop?.phase || null;
         } else {
             let out = carPose.get(i), st = carState.get(i);
             if (!out) { out = {}; st = {}; carPose.set(i, out); carState.set(i, st); }
@@ -1628,6 +1690,7 @@ function applyNet(nowS, dt) {
             pose = othersMode === 'smooth' ? sample(netBuf, renderT, i, out, st, scale) : samplePresent(netBuf, presentT, i, out, st, scale);
             if (!pose) continue;
             decodeFlags(pose.flags, p);
+            p.stopPhase = STOP_PHASES[latest.cars.get(i)?.[12] || 0] || null; // pit stop phase, for the crew
         }
         p.x = pose.x; p.y = pose.y; p.angle = pose.angle; p.speed = pose.speed; p.steer = pose.steer;
         p.curLap = p.lapStart === null || p.lapStart === undefined || p.finished ? null : Math.max(0, gameT - p.lapStart);
@@ -1986,7 +2049,6 @@ function updateHUD(withTower = true) {
     $('tyre-wear').classList.toggle('worn', wear > 0.8);
     const comp = me?.compound || 'M', next = me?.nextCompound || '';
     const car = predictor?.car, box = predictor?.box, td = clientState.trackData;
-    const boxDistM = car && box && td && me?.inPit ? (box.s - (car.pitS || 0)) / td.scale : null;
     let toEntryM = Infinity;
     if (car && td?.pit && !me?.inPit) {
         pickIdx = trackIndex(td.path, car.x, car.y, pickIdx, td.width);
@@ -1994,10 +2056,9 @@ function updateHUD(withTower = true) {
         toEntryM = ((((td.pit.entryS - td.cum[pickIdx]) % total) + total) % total) / td.scale;
     }
     const speedMs = car && td ? Math.hypot(car.vx, car.vy) / td.scale : 0, phase = car?.stop?.phase || null;
-    const parked = boxDistM !== null && Math.abs(boxDistM) < 0.5 && speedMs < 0.5; // server PARK_M 0.5 m
-    visitIsDone = visitDone(visitIsDone, { phase, distM: boxDistM, speedMs, inLane: !!racing && boxDistM !== null });
+    const parked = !!car && !!box && !!td && !!me?.inPit && Math.abs((box.s - (car.pitS || 0)) / td.scale) < 0.5 && speedMs < 0.5; // server PARK_M 0.5 m
     const spectator = isSpectator();
-    const open = pickerOpen({ spectator, status: clientState.status, inPit: !!me?.inPit, parked, toEntryM, boxDistM, phase, done: visitIsDone });
+    const open = pickerOpen({ spectator, status: clientState.status, inPit: !!me?.inPit, parked, toEntryM, phase });
     const pickKey = `${comp}${next}${open}${spectator}`;
     if (pickKey !== hudPick) {
         hudPick = pickKey;
@@ -2010,13 +2071,13 @@ function updateHUD(withTower = true) {
         small.classList.toggle('hidden', spectator); // spectators: no picker
     }
     const st = predictor?.car?.stop;
-    if (hudHadStop && !st && racing) { hudGoUntil = performance.now() + 800; cueGoUntil = hudGoUntil + 200; } // released: flash GO (lollipop board 1 s)
+    if (hudHadStop && !st && racing) { hudGoUntil = performance.now() + 800; } // released: flash GO
     hudHadStop = !!st;
     const go = performance.now() < hudGoUntil;
     $('box-msg').classList.toggle('hidden', !(racing && (st || go)));
     if (st) $('box-msg').textContent = st.phase === 'service' ? `BOX — ${Math.max(0, st.t).toFixed(1)} s` : st.phase === 'hold' ? 'HOLD' : 'BOX';
     else if (go) $('box-msg').textContent = 'GO';
-    updateBoxCues(me, racing, toEntryM);
+    updateBoxRing(me, racing, toEntryM);
     $('drs-badge').className = !racing ? 'drs-off' : me.drs ? 'drs-open' : me.drsAvailable ? 'drs-avail' : 'drs-off';
     let hint = '';
     if (racing && clientState.trackData) {
@@ -2211,6 +2272,7 @@ function frame(now) {
     if (!world || !clientState.gameState) { Sound.update(silentFrame); return; }
     if (!paused) applyNet(now / 1000, dt);
     updateCars(dt);
+    updateCrews(dt);
     updateWheelBatch();
     if (!window.lanraceDebug?.freeCam) updateCamera(dt);
     skyDome.position.copy(camera.position);
