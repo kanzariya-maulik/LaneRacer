@@ -42,7 +42,7 @@ export class SnapshotBuffer {
 
     push(pkt, arrivalS) {
         let newest = this.snaps.at(-1);
-        if (newest && pkt.s < newest.s - NEW_SESSION_GAP) { // seq restarted: a new session, the buffer held a straggler
+        if (newest && (pkt.s < newest.s - 30 || pkt.t < newest.t - 0.2)) { // seq restarted or time reset: a new session, the buffer held a straggler
             this.reset();
             newest = undefined;
         }

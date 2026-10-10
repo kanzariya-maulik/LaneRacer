@@ -182,7 +182,7 @@ class Game {
     initPayload() {
         // Late joiners also need the quali clock and the session-best sectors (tower colours)
         const session = this.mode === 'quali' ? { phase: 'QUALIFYING', endsInMs: Math.max(0, (this.qualiMaxS() - this.time) * 1000) } : null;
-        return { players: this.players, track: this.track, mode: this.mode, index: this.index, session, bestSectors: this.bestSectors, bestSectorIds: this.bestSectorIds, fastestLap: this.fastestLap, paused: !!this.paused };
+        return { players: this.players, track: this.track, mode: this.mode, index: this.index, session, bestSectors: this.bestSectors, bestSectorIds: this.bestSectorIds, fastestLap: this.fastestLap, paused: !!this.paused, settings: this.settings, frozen: !!this.frozen };
     }
 
     handleInput(id, input) {
@@ -195,7 +195,17 @@ class Game {
     // Prediction clients: each tick applies exactly one queued input, in sequence order
     handleInputs(id, list) {
         const p = this.players[id];
-        if (!p) return;
+        if (!p || !Array.isArray(list) || !list.length) return;
+        // Automatic sequence reset detection: if client restarted its counter (page reload or reconnect),
+        // incoming sequence numbers are far below p.maxSeen. Reset sequence counters immediately so no inputs are dropped.
+        const incomingMin = Math.min(...list.map(i => i.seq));
+        if ((p.maxSeen ?? -1) > 10 && incomingMin < (p.maxSeen ?? -1) - 10) {
+            p.maxSeen = -1;
+            p.lastSeq = -1;
+            delete p.applied;
+            p.queue = [];
+            p.behind = 0;
+        }
         // Brand-new inputs that already sit behind the server's slots: the client lags them. Far behind (stalled tab,
         // reconnect): re-align now. A little behind for a while (a lasting latency rise of even one tick): every input
         // would land in an already-guessed slot and the car repeat a stale input forever, so re-align too. A brief jitter
@@ -216,6 +226,56 @@ class Game {
         for (const i of list) if (i.seq > top && !p.queue.some((q) => q.seq === i.seq)) p.queue.push(i);
         p.queue.sort((a, b) => a.seq - b.seq);
         p.inputAt = this.clock;
+    }
+
+    reconnectPlayer(oldId, newId) {
+        if (this.players[oldId]) {
+            const car = this.players[oldId];
+            delete this.players[oldId];
+            car.id = newId;
+            car.disconnected = false;
+            car.queue = [];
+            car.lastSeq = -1;
+            car.maxSeen = -1;
+            delete car.applied;
+            car.behind = 0;
+            car.input = { throttle: 0, brake: 0, steer: 0, drs: false, handbrake: false };
+            this.players[newId] = car;
+        } else if (this.players[newId]) {
+            this.resetPlayerInputs(newId);
+        }
+        if (this.index && this.index[oldId] !== undefined) {
+            const idx = this.index[oldId];
+            delete this.index[oldId];
+            this.index[newId] = idx;
+        }
+        if (this.roster) {
+            const r = this.roster.find(p => p.id === oldId);
+            if (r) r.id = newId;
+        }
+        if (this.sentMeta) {
+            delete this.sentMeta[oldId];
+            delete this.sentMeta[newId];
+        }
+        if (this.bestSectorIds) {
+            this.bestSectorIds = this.bestSectorIds.map(id => id === oldId ? newId : id);
+        }
+        if (this.fastestLap && this.fastestLap.id === oldId) {
+            this.fastestLap.id = newId;
+        }
+    }
+
+    resetPlayerInputs(id) {
+        const car = this.players[id];
+        if (car) {
+            car.disconnected = false;
+            car.queue = [];
+            car.lastSeq = -1;
+            car.maxSeen = -1;
+            delete car.applied;
+            car.behind = 0;
+            car.input = { throttle: 0, brake: 0, steer: 0, drs: false, handbrake: false };
+        }
     }
 
     removePlayer(id) {

@@ -406,4 +406,132 @@ test('host settings: maxSpeed and acceleration can be set by host, but rejected 
     guest.fire('disconnect');
 });
 
+test('lobby refresh: host disconnecting in lobby keeps host role across quick reconnect', (t) => {
+    t.mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
+    const io = fakeIo();
+    setupSocketManager(io, noNet);
+
+    const host = io.connect('host-1');
+    host.fire('join_lobby', { sessionId: 'sess-host-persist', username: 'HOST', teamId: 'redbull' });
+    const guest = io.connect('guest-1');
+    guest.fire('join_lobby', { sessionId: 'sess-guest-1', username: 'GUEST', teamId: 'ferrari' });
+
+    let sync = io.events('lobby_state_sync').at(-1);
+    assert.strictEqual(sync.hostId, 'host-1');
+
+    // Host refreshes page (disconnect)
+    host.fire('disconnect');
+    advance(t, 500); // 500ms reload time
+
+    // Guest should NOT have stolen host
+    sync = io.events('lobby_state_sync').at(-1);
+    assert.strictEqual(sync.hostId, 'host-1', 'hostId should not immediately be transferred away');
+
+    // Host reconnects with new socket ID but same sessionId
+    const hostReload = io.connect('host-2');
+    hostReload.fire('join_lobby', { sessionId: 'sess-host-persist', username: 'HOST', teamId: 'redbull' });
+
+    sync = io.events('lobby_state_sync').at(-1);
+    assert.strictEqual(sync.hostId, 'host-2', 'host role must transfer to reconnected socket');
+
+    hostReload.fire('disconnect');
+    guest.fire('disconnect');
+    advance(t, 15000); // allow lobby grace timers to clear
+});
+
+test('countdown refresh: driver disconnecting during countdown is preserved on race grid', (t) => {
+    t.mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
+    const io = fakeIo();
+    setupSocketManager(io, noNet);
+
+    const a = io.connect('cd-sock-1');
+    a.fire('join_lobby', { sessionId: 'sess-cd-1', username: 'LECLERC', teamId: 'ferrari' });
+    a.fire('update_settings', { trackId: 'monza', maxLaps: 1, qualifying: false });
+    a.fire('toggle_ready', true);
+    a.fire('start_game');
+
+    // Fast forward 1 second into COUNTDOWN
+    advance(t, 1000);
+    assert.strictEqual(io.events('status_change').at(-1), 'COUNTDOWN');
+
+    // Refresh during countdown
+    a.fire('disconnect');
+    advance(t, 500);
+
+    // Reconnect during countdown
+    const aReload = io.connect('cd-sock-2');
+    aReload.fire('join_lobby', { sessionId: 'sess-cd-1', username: 'LECLERC', teamId: 'ferrari' });
+
+    const initEv = aReload.sent.find(([ev]) => ev === 'game_init');
+    assert.ok(initEv, 'reconnecting during countdown must receive game_init');
+    assert.ok(initEv[1].players['cd-sock-2'], 'car must be mapped to new socket ID on grid');
+    assert.strictEqual(initEv[1].frozen, true, 'car must still be frozen on starting grid');
+
+    aReload.fire('abandon_race');
+    aReload.fire('disconnect');
+    advance(t, 15000);
+});
+
+test('reconnecting player input reset: inputs with reset seq are accepted immediately', (t) => {
+    t.mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
+    const io = fakeIo();
+    setupSocketManager(io, noNet);
+
+    const a = io.connect('input-sock-1');
+    a.fire('join_lobby', { sessionId: 'sess-input-1', username: 'NORRIS', teamId: 'mclaren' });
+    a.fire('update_settings', { trackId: 'monza', maxLaps: 1, qualifying: false });
+    a.fire('toggle_ready', true);
+    a.fire('start_game');
+
+    advance(t, 8000); // starts RACE
+    assert.strictEqual(io.events('status_change').at(-1), 'RACE');
+
+    // Send high sequence inputs
+    for (let s = 1; s <= 50; s++) {
+        a.fire('input', { inputs: [{ seq: s, throttle: 1, steer: 0, brake: 0, drs: false, handbrake: false }] });
+    }
+    advance(t, 1000);
+
+    // Refresh page
+    a.fire('disconnect');
+    advance(t, 500);
+
+    // Reconnect
+    const aReload = io.connect('input-sock-2');
+    aReload.fire('join_lobby', { sessionId: 'sess-input-1', username: 'NORRIS', teamId: 'mclaren' });
+
+    // Client restarted sequence at 1
+    aReload.fire('input', { inputs: [{ seq: 1, throttle: 1, steer: 0.5, brake: 0, drs: false, handbrake: false }] });
+    advance(t, 100);
+
+    const initEv = aReload.sent.find(([ev]) => ev === 'game_init');
+    const car = initEv[1].players['input-sock-2'];
+    assert.ok(car, 'car must exist for new socket');
+
+    aReload.fire('abandon_race');
+    aReload.fire('disconnect');
+    advance(t, 15000);
+});
+
+test('host settings sent with join_lobby: initial join preserves custom maxSpeed and acceleration', () => {
+    const io = fakeIo();
+    setupSocketManager(io, noNet);
+
+    const host = io.connect('host-custom-settings');
+    host.fire('join_lobby', {
+        sessionId: 'sess-custom-host',
+        username: 'SPEEDSTER',
+        teamId: 'redbull',
+        hostSettings: { maxSpeed: 9999, acceleration: 9999, trackId: 'spielberg' }
+    });
+
+    const sync = io.events('lobby_state_sync').at(-1);
+    assert.strictEqual(sync.settings.maxSpeed, 9999, 'maxSpeed must initialize to host value');
+    assert.strictEqual(sync.settings.acceleration, 9999, 'acceleration must initialize to host value');
+    assert.strictEqual(sync.settings.trackId, 'spielberg');
+
+    host.fire('disconnect');
+});
+
+
 

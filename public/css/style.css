@@ -140,7 +140,93 @@ input:disabled { opacity: 0.7; }
     border-left: 5px solid var(--team);
     transition: background 0.3s, border-color 0.3s;
 }
-#hero-car { width: min(100%, 560px); aspect-ratio: 8 / 3; object-fit: contain; justify-self: center; filter: drop-shadow(0 10px 12px rgba(0,0,0,0.55)); }
+#hero-car { display: none; }
+.hero-viewport {
+    position: relative;
+    width: 100%;
+    height: 230px;
+    border-radius: 8px;
+    overflow: hidden;
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    background: radial-gradient(ellipse at 50% 65%, rgba(255,255,255,0.06), rgba(0,0,0,0.2) 70%, transparent 100%);
+}
+.hero-viewport:active {
+    cursor: grabbing;
+}
+#hero-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    outline: none;
+    cursor: inherit;
+}
+.hero-3d-hint {
+    position: absolute;
+    bottom: 8px;
+    left: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    pointer-events: none;
+    opacity: 0.85;
+    transition: opacity 0.25s ease;
+    z-index: 2;
+}
+.hero-viewport:hover .hero-3d-hint {
+    opacity: 0.35;
+}
+.hero-3d-badge {
+    background: rgba(15, 23, 42, 0.75);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    color: #38bdf8;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1.5px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    backdrop-filter: blur(6px);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+}
+.hero-3d-subhint {
+    font-size: 11px;
+    color: #cbd5e1;
+    letter-spacing: 0.5px;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.85);
+    font-weight: 500;
+}
+.hero-reset-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: rgba(15, 23, 42, 0.65);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    color: #cbd5e1;
+    font-size: 14px;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    backdrop-filter: blur(6px);
+    opacity: 0.7;
+    z-index: 2;
+}
+.hero-viewport:hover .hero-reset-btn {
+    opacity: 1;
+}
+.hero-reset-btn:hover {
+    background: rgba(30, 41, 59, 0.95);
+    color: #38bdf8;
+    border-color: #38bdf8;
+    transform: rotate(-90deg);
+}
 .hero-info { display: flex; flex-direction: column; }
 .hero-team { font-size: 1.6rem; font-weight: 900; font-style: italic; text-transform: uppercase; letter-spacing: 1px; line-height: 1.1; }
 .hero-sub { font-size: 0.85rem; color: #cbd5e1; letter-spacing: 2px; text-transform: uppercase; }
@@ -363,6 +449,7 @@ input:disabled { opacity: 0.7; }
     display: block;
     width: 100%;
     height: 100%;
+    outline: none;
 }
 
 #hud {
@@ -677,21 +764,21 @@ input:disabled { opacity: 0.7; }
 /* F1 steering-wheel gear + shift lights */
 #gear-hud { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; margin: 0 0 6px auto; width: fit-content; }
 #rev-lights { display: flex; gap: 3px; padding: 4px 6px; background: rgba(0,0,0,0.6); border-radius: 6px; }
-#rev-lights i { width: 10px; height: 10px; border-radius: 50%; background: #1f2937; }
-#rev-lights i.on:nth-child(-n+5) { background: #22c55e; box-shadow: 0 0 6px #22c55e; }
-#rev-lights i.on:nth-child(n+6):nth-child(-n+10) { background: #ef4444; box-shadow: 0 0 6px #ef4444; }
-#rev-lights i.on:nth-child(n+11) { background: #3b82f6; box-shadow: 0 0 6px #3b82f6; }
-#rev-lights.flash i { animation: revflash 0.12s steps(1) infinite; }
-@keyframes revflash { 50% { background: #1f2937; box-shadow: none; } }
+#rev-lights i { width: 10px; height: 10px; border-radius: 50%; background: #0f172a; border: 1px solid rgba(255, 255, 255, 0.14); }
+#rev-lights i.on:nth-child(-n+5) { background: #22c55e; box-shadow: 0 0 10px #22c55e, 0 0 3px #86efac; border-color: #86efac; }
+#rev-lights i.on:nth-child(n+6):nth-child(-n+10) { background: #ef4444; box-shadow: 0 0 10px #ef4444, 0 0 3px #fca5a5; border-color: #fca5a5; }
+#rev-lights i.on:nth-child(n+11) { background: #3b82f6; box-shadow: 0 0 12px #3b82f6, 0 0 4px #93c5fd; border-color: #93c5fd; }
+#rev-lights.flash i { animation: revflash 0.10s steps(1) infinite; }
+@keyframes revflash { 50% { background: #0f172a; box-shadow: none; border-color: rgba(255, 255, 255, 0.08); } }
 #hud-gear { font: 900 2.4rem/1 sans-serif; color: #fff; text-shadow: 0 2px 6px #000; min-width: 1.4em; text-align: center; }
 
 /* ===================== HUD v2: broadcast style =====================
    Thin translucent panels, no thick borders; everything sized in em from #hud's font size, which follows the window
    height, so the HUD takes the same share of the view on a laptop or a big screen. Edges only: the middle is the road. */
-#hud { font-size: clamp(11px, 1.85vh, 17px); --glass: rgba(10, 13, 22, 0.62); --edge: rgba(255, 255, 255, 0.1); --pad: 1.4em; }
+#hud { font-size: clamp(11px, 1.85vh, 17px); --glass: rgba(15, 23, 42, 0.74); --edge: rgba(255, 255, 255, 0.16); --pad: 1.4em; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: geometricPrecision; }
 #hud .glass, #hud-top .hud-stat, #leaderboard, #lap-times, #cluster, #minimap, #session-bar, #lights {
-    background: var(--glass); border: 1px solid var(--edge); border-radius: 0.7em; box-shadow: 0 0.3em 1.2em rgba(0, 0, 0, 0.25);
-    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    background: var(--glass); border: 1px solid var(--edge); border-radius: 0.7em; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.42);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
 }
 
 /* Top left: position and lap, one slim row */

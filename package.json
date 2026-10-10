@@ -4,7 +4,9 @@
   "main": "index.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js",
+    "dev": "node --watch server.js",
+    "watch": "node --watch server.js",
+    "kill": "node scripts/kill-server.js",
     "test": "node --test test/*.test.js",
     "tracks": "node scripts/import-tracks.js && node scripts/import-pits.js && node scripts/import-elevation.js"
   },

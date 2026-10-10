@@ -431,6 +431,12 @@ export function placeScenery(t, density, seed, theme = themeOf(t.id)) {
             const i = Math.floor(rand() * n), side = rand() < 0.5 ? -1 : 1;
             block(i, side, clear + (260 + rand() * 700) * sc, 20 + rand() * 30, 20 + rand() * 25, 15 + rand() * rand() * 90);
         }
+    } else { // circuit paddock hospitality, team hubs & race control buildings beyond the barriers
+        const want2 = Math.round(20 * density);
+        for (let k = 0; k < want2 * 4 && buildings.length < want2; k++) {
+            const i = Math.floor(rand() * n), side = rand() < 0.5 ? -1 : 1;
+            block(i, side, clear + (35 + rand() * 85) * sc, 22 + rand() * 18, 16 + rand() * 14, 12 + rand() * 16);
+        }
     }
 
     // Marshal posts behind the barrier every ~300 m, alternating sides

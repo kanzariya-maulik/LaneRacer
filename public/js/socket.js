@@ -217,10 +217,14 @@ socket.on('connect', () => {
 
 // LOBBY SYNCS
 socket.on('lobby_state_sync', (state) => {
+    const prevStatus = clientState.status;
     clientState.players = state.players;
     clientState.hostId = state.hostId;
     clientState.status = state.status;
     clientState.settings = state.settings;
+    if (state.hostId && state.hostId === clientState.me && state.settings) {
+        try { localStorage.setItem('lanrace.hostSettings', JSON.stringify(state.settings)); } catch (e) {}
+    }
     if (state.status === 'LOBBY') {
         // Drop the finished race so the next countdown doesn't treat its data as current
         clientState.gameState = null;
@@ -230,6 +234,7 @@ socket.on('lobby_state_sync', (state) => {
     }
     if (window.updateLobbyUI) window.updateLobbyUI();
     if (window.updateSettingsUI) window.updateSettingsUI();
+    if (prevStatus !== state.status && window.handleStatusChange) window.handleStatusChange(state.status);
     window.renderSessionPanel?.(); // the host may have changed
 });
 
@@ -261,6 +266,9 @@ socket.on('player_ready_sync', (data) => {
 
 socket.on('settings_updated', (settings) => {
     clientState.settings = settings;
+    if (clientState.hostId && clientState.hostId === clientState.me) {
+        try { localStorage.setItem('lanrace.hostSettings', JSON.stringify(settings)); } catch (e) {}
+    }
     if (window.updateSettingsUI) window.updateSettingsUI();
 });
 
@@ -278,6 +286,9 @@ socket.on('status_change', (status) => {
 
 
 socket.on('game_init', (data) => {
+    if (data.status) clientState.status = data.status;
+    if (data.frozen !== undefined) clientState.frozen = !!data.frozen;
+    if (data.settings) clientState.settings = Object.assign({}, clientState.settings, data.settings);
     clientState.gameState = data.players;
     clientState.trackData = data.track;
     clientState.netIndex = data.index || {};
@@ -293,6 +304,8 @@ socket.on('game_init', (data) => {
     clientState.resuming = false;
     clientState.pausedAt = clientState.paused ? Date.now() : null;
     if (window.initGameVisuals) window.initGameVisuals();
+    if (window.updateLobbyUI) window.updateLobbyUI();
+    if (window.handleStatusChange) window.handleStatusChange(clientState.status);
     if (clientState.paused) window.onPaused?.(true); else window.renderSessionPanel?.(); // a new session: no resume banner
 });
 

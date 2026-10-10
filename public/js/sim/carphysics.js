@@ -69,26 +69,34 @@ function step(car, input, dt, scale, offTrack = false, assist = 'off') {
     // Custom acceleration multiplier (default 100% -> 1.0)
     const hasCustomAccel = Number.isFinite(car.accel) && car.accel !== 100;
     const accelMul = hasCustomAccel ? Math.max(0.1, car.accel / 100) : 1.0;
-    const power = hasCustomAccel ? C.POWER * accelMul : C.POWER;
-    const tractionGrip = hasCustomAccel ? C.TRACTION * grip * Math.max(1, accelMul) : C.TRACTION * grip;
-    const driveGrip = hasCustomAccel ? grip * Math.max(1, accelMul) : grip;
+    const targetMaxKmh = Number.isFinite(car.maxSpeed) && car.maxSpeed !== 340 ? car.maxSpeed : null;
+    const speedPowerMul = (targetMaxKmh && targetMaxKmh > 340) ? Math.pow(targetMaxKmh / 340, 1.5) : 1.0;
+    const effectivePowerMul = accelMul * speedPowerMul;
+    const power = (hasCustomAccel || speedPowerMul > 1) ? C.POWER * effectivePowerMul : C.POWER;
+    const tractionGrip = (hasCustomAccel || speedPowerMul > 1) ? C.TRACTION * grip * Math.max(1, effectivePowerMul) : C.TRACTION * grip;
+    const driveGrip = (hasCustomAccel || speedPowerMul > 1) ? grip * Math.max(1, effectivePowerMul) : grip;
 
     // Longitudinal tyre force: traction/power-limited drive, grip-limited brakes, slow reverse
     let ft = 0;
     const allowReverse = input.explicitReverse !== undefined ? input.explicitReverse === true : true;
     if (vf >= -0.5) {
         ft += input.throttle * Math.min(power / Math.max(vf, 1), tractionGrip, offTrack ? C.GRASS_DRIVE_G * C.G * C.MASS : Infinity);
-        if (vf > 0.5) ft -= input.brake * (1 - C.BRAKE_STEER_GIVE * Math.abs(input.steer)) * grip;
+        if (vf > 0.5) {
+            const brakeGripMul = (targetMaxKmh && targetMaxKmh > 340) ? Math.max(1, Math.sqrt(targetMaxKmh / 340)) : 1.0;
+            ft -= input.brake * (1 - C.BRAKE_STEER_GIVE * Math.abs(input.steer)) * grip * brakeGripMul;
+        }
         else if (input.brake > 0 && input.throttle === 0 && allowReverse) ft -= input.brake * C.REVERSE_FORCE;
     } else if (input.throttle > 0) {
         ft += input.throttle * grip; // throttle while rolling backwards acts as a brake
     } else if (input.brake > 0 && allowReverse) {
         ft -= input.brake * C.REVERSE_FORCE;
     }
-    ft = Math.max(-grip, Math.min(driveGrip, ft));
+    ft = Math.max(-grip * (speedPowerMul > 1 ? Math.sqrt(speedPowerMul) : 1), Math.min(driveGrip, ft));
 
     // Friction circle: what braking/drive uses is not available for cornering
-    const ftCorner = hasCustomAccel && accelMul > 1 ? Math.min(grip * 0.95, Math.abs(ft) / accelMul) : Math.abs(ft);
+    const ftCorner = (hasCustomAccel || speedPowerMul > 1) && effectivePowerMul > 1
+        ? Math.min(grip * 0.95, Math.abs(ft) / Math.max(1, accelMul))
+        : Math.abs(ft);
     const latAccel = ((1 + C.ASSIST_GRIP * k) * C.LAT_ASSIST * Math.sqrt(Math.max(0, grip * grip - ftCorner * ftCorner))) / C.MASS;
     const slip = Math.atan2(Math.abs(-vx * fy + vy * fx), Math.abs(vf));
 
@@ -109,7 +117,6 @@ function step(car, input, dt, scale, offTrack = false, assist = 'off') {
     let vl = -vx * fy + vy * fx;
     vl -= Math.sign(vl) * Math.min(Math.abs(vl), latAccel * dt);
 
-    const targetMaxKmh = Number.isFinite(car.maxSpeed) && car.maxSpeed !== 340 ? car.maxSpeed : null;
     const speedDragMul = (targetMaxKmh && targetMaxKmh > 340) ? Math.pow(340 / targetMaxKmh, 3) : 1.0;
     const drag = 0.5 * C.RHO * C.CDA * (car.dragMul ?? 1) * speedDragMul * v * v; // dragMul: DRS / slipstream
     const before = vf;

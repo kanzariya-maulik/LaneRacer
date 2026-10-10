@@ -265,7 +265,11 @@ function autoJoinLobby() {
         localStorage.setItem('lanrace.username', username);
         if (selectedTeam) localStorage.setItem('lanrace.teamId', selectedTeam);
     } catch (e) {}
-    lastJoin = { username, teamId: selectedTeam, assist: getAssistString(), sessionId: persistentSessionId };
+    let savedSettings = null;
+    try {
+        savedSettings = JSON.parse(localStorage.getItem('lanrace.hostSettings'));
+    } catch (e) {}
+    lastJoin = { username, teamId: selectedTeam, assist: getAssistString(), sessionId: persistentSessionId, hostSettings: savedSettings };
     socket.emit('join_lobby', lastJoin);
     setJoinedUI(true);
     amReady = true;
@@ -375,6 +379,8 @@ function renderHero() {
     screenLobby.style.setProperty('--team', t ? t.chatColor : '#64748b');
     document.getElementById('hero-team').textContent = t ? t.name : 'Pick your team';
     document.getElementById('hero-sub').textContent = t ? `${t.car} · ${teamCounts()[t.id] || 0}/${t.maxPlayers} seats taken` : `${teams.length || 11} teams · 2 seats each`;
+    window.selectedTeam = selectedTeam;
+    if (t) window.updateHeroCar3D?.(t.id);
 }
 
 function setJoinedUI(joined) {
@@ -383,7 +389,12 @@ function setJoinedUI(joined) {
     renderTeamGrid();
 }
 
-inputUser.focus();
+try {
+    const savedName = localStorage.getItem('lanrace.username');
+    if (!savedName && screenLobby && !screenLobby.classList.contains('hidden')) {
+        inputUser.focus();
+    }
+} catch (e) {}
 // Wide, tall screens have room for My settings next to the teams: start it open there
 if (matchMedia('(min-width: 1281px) and (min-height: 900px)').matches) document.querySelector('.my-settings').open = true;
 
@@ -433,13 +444,8 @@ btnReady.addEventListener('click', () => {
     btnReady.classList.toggle('success', amReady);
 });
 
-btnStart.addEventListener('click', () => {
-    socket.emit('start_game');
-});
-
-function emitSettings() {
-    updateLobbyTrackPreview();
-    const settings = {
+function getSettingsObject() {
+    return {
         trackId: setTrack.value,
         timeOfDay: setTime.value,
         maxLaps: parseInt(setLaps.value, 10),
@@ -454,6 +460,19 @@ function emitSettings() {
         maxSpeed: setMaxSpeed ? (parseInt(setMaxSpeed.value, 10) || 340) : 340,
         acceleration: setAcceleration ? (parseInt(setAcceleration.value, 10) || 100) : 100
     };
+}
+
+btnStart.addEventListener('click', () => {
+    clearTimeout(settingsInputTimeout);
+    const settings = getSettingsObject();
+    try { localStorage.setItem('lanrace.hostSettings', JSON.stringify(settings)); } catch (e) {}
+    socket.emit('update_settings', settings);
+    socket.emit('start_game', settings);
+});
+
+function emitSettings() {
+    updateLobbyTrackPreview();
+    const settings = getSettingsObject();
     try { localStorage.setItem('lanrace.hostSettings', JSON.stringify(settings)); } catch (e) {}
     socket.emit('update_settings', settings);
 }
@@ -585,6 +604,24 @@ fetch('tracks-preview.json')
         console.warn('Failed to load track previews:', err);
     });
 
+function saveHostSettingsToStorage(settings = null) {
+    try {
+        const s = settings || getSettingsObject();
+        localStorage.setItem('lanrace.hostSettings', JSON.stringify(s));
+    } catch (e) {}
+}
+
+const hostInputs = [
+    setTrack, setLaps, setQuali, setOutLaps, setQualiLaps,
+    setCollisions, setPenalties, setTime, setTrackLimits,
+    setHidePenalties, setBot, setMaxSpeed, setAcceleration
+];
+hostInputs.forEach(el => {
+    if (!el) return;
+    el.addEventListener('input', () => saveHostSettingsToStorage());
+    el.addEventListener('change', () => saveHostSettingsToStorage());
+});
+
 setTrack.addEventListener('change', () => {
     updateLobbyTrackPreview();
     emitSettings();
@@ -602,6 +639,7 @@ setBot?.addEventListener('change', emitSettings);
 
 let settingsInputTimeout = null;
 const debouncedEmitSettings = () => {
+    saveHostSettingsToStorage();
     clearTimeout(settingsInputTimeout);
     settingsInputTimeout = setTimeout(emitSettings, 350);
 };
@@ -686,8 +724,15 @@ window.updateLobbyUI = () => {
         if (!window._hasEmittedSavedSettings) {
             window._hasEmittedSavedSettings = true;
             try {
-                if (localStorage.getItem('lanrace.hostSettings')) emitSettings();
-            } catch (e) {}
+                const saved = JSON.parse(localStorage.getItem('lanrace.hostSettings'));
+                if (saved && typeof saved === 'object') {
+                    socket.emit('update_settings', saved);
+                } else {
+                    emitSettings();
+                }
+            } catch (e) {
+                emitSettings();
+            }
         }
     } else {
         hostSettings.classList.add('hidden');
@@ -701,6 +746,7 @@ window.updateLobbyUI = () => {
         // Visitors who haven't joined stay in the lobby even mid-race
         screenLobby.classList.remove('hidden');
         screenGame.classList.add('hidden');
+        window.setHero3DActive?.(true);
         // Server state wins: syncs arrive whenever anyone joins, so don't reset a ready player
         amReady = me ? (me.isReady !== false) : true;
         btnReady.innerText = amReady ? 'Unready' : 'Ready Up';
@@ -710,6 +756,10 @@ window.updateLobbyUI = () => {
         screenLobby.classList.add('hidden');
         screenGame.classList.remove('hidden');
         spOverlay.classList.toggle('hidden', !me.isSpectating);
+        window.setHero3DActive?.(false);
+        if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
+        document.getElementById('game-canvas')?.focus?.();
+        if (window.handleStatusChange) window.handleStatusChange(clientState.status);
     }
 
     renderTeamGrid();
@@ -731,8 +781,8 @@ window.updateSettingsUI = () => {
     if (setTrackLimits) setTrackLimits.value = clientState.settings.trackLimits === false ? '0' : '1';
     if (setHidePenalties) setHidePenalties.value = clientState.settings.hidePenaltiesDuringRace ? '1' : '0';
     if (setBot) setBot.value = clientState.settings.botCar ? '1' : '0';
-    if (setMaxSpeed) setMaxSpeed.value = clientState.settings.maxSpeed ?? 340;
-    if (setAcceleration) setAcceleration.value = clientState.settings.acceleration ?? 100;
+    if (setMaxSpeed && document.activeElement !== setMaxSpeed) setMaxSpeed.value = clientState.settings.maxSpeed ?? 340;
+    if (setAcceleration && document.activeElement !== setAcceleration) setAcceleration.value = clientState.settings.acceleration ?? 100;
 
     // Header chips and the read-only view non-hosts see
     const s = clientState.settings;
@@ -798,6 +848,7 @@ window.handleStatusChange = (status) => {
         screenGame.classList.add('hidden');
         [cdOverlay, spOverlay, results, lights].forEach(el => el.classList.add('hidden')); // the race classification stays up over the lobby
         standingsBubbleBtn?.classList.remove('hidden');
+        window.setHero3DActive?.(true);
         return;
     }
 
@@ -806,6 +857,9 @@ window.handleStatusChange = (status) => {
 
     screenLobby.classList.add('hidden');
     screenGame.classList.remove('hidden');
+    window.setHero3DActive?.(false);
+    if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
+    document.getElementById('game-canvas')?.focus?.();
     standingsBubbleBtn?.classList.add('hidden');
     toggleStandings(false);
     spOverlay.classList.toggle('hidden', !me.isSpectating);
@@ -998,6 +1052,7 @@ if (btnLeaveRace) {
             document.getElementById('session-panel')?.classList.add('hidden');
             screenGame?.classList.add('hidden');
             screenLobby?.classList.remove('hidden');
+            window.setHero3DActive?.(true);
         }
     });
 }
@@ -1006,5 +1061,6 @@ socket.on('race_abandoned', () => {
     document.getElementById('session-panel')?.classList.add('hidden');
     screenGame?.classList.add('hidden');
     screenLobby?.classList.remove('hidden');
+    window.setHero3DActive?.(true);
     window.appendChat('SYSTEM', '#f43f5e', 'You left the race (DNF).');
 });

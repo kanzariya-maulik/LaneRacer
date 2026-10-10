@@ -128,3 +128,23 @@ test('shiftLights: green from 13k, 5 at 15k, 10 at 16.5k, all 15 by 17.8k, flash
     assert.strictEqual(G.shiftLights(15000, true).flash, true);
     assert.strictEqual(G.shiftLights(15000, false).flash, false);
 });
+
+test('higher gears: accelerating to 600 km/h uses higher gears past 7 without rev-limiter flicker', () => {
+    const box = new G.Gearbox(600);
+    const { gears, maxRpm } = accelerate(box, 580, 30);
+    assert.ok(gears.length > 7, `gears used: ${gears.join(', ')}`);
+    assert.ok(gears[gears.length - 1] >= 10, `top gear reached: ${gears[gears.length - 1]}`);
+    assert.ok(maxRpm <= G.REV_LIMIT, `max RPM: ${maxRpm}`);
+});
+
+test('pit lane stability: pit limiter holds gear <= 2 without oscillations or shift events', () => {
+    const box = new G.Gearbox();
+    accelerate(box, 250); // was in 5th gear
+    for (let k = 0; k < 60; k++) {
+        const r = box.update(kmh(80), 1.0, 1 / 60, true);
+        assert.ok(r.gear <= 2, `gear in pit: ${r.gear}`);
+        assert.strictEqual(r.limiter, false, 'rev limiter must not fire in pit lane');
+        assert.strictEqual(r.pit, true, 'pit flag set');
+        assert.strictEqual(r.events.length, 0, 'no shift oscillations in pit');
+    }
+});

@@ -24,7 +24,15 @@
                 <!-- Left: your car -->
                 <section class="panel profile-panel">
                     <div id="hero" class="hero">
-                        <img id="hero-car" alt="" hidden>
+                        <div id="hero-viewport" class="hero-viewport">
+                            <canvas id="hero-canvas"></canvas>
+                            <div class="hero-3d-hint">
+                                <span class="hero-3d-badge">3D SHOWROOM</span>
+                                <span class="hero-3d-subhint">Drag to rotate · Scroll to zoom</span>
+                            </div>
+                            <button id="hero-reset-cam" class="hero-reset-btn" type="button" title="Reset camera view">↺</button>
+                        </div>
+                        <img id="hero-car" alt="" hidden style="display:none">
                         <div class="hero-info">
                             <span id="hero-team" class="hero-team">Pick your team</span>
                             <span id="hero-sub" class="hero-sub">11 teams · 2 seats each</span>
@@ -232,10 +240,10 @@
                                         </select>
                                     </label>
                                     <label>Max Speed (km/h)
-                                        <input type="number" id="setting-max-speed" min="100" max="600" step="10" value="340" placeholder="340" title="Top speed limit in km/h (100–600 km/h, default 340)">
+                                        <input type="number" id="setting-max-speed" min="50" max="9999" step="10" value="340" placeholder="340" title="Top speed limit in km/h (default 340, up to 9999 km/h)">
                                     </label>
                                     <label>Acceleration (%)
-                                        <input type="number" id="setting-acceleration" min="20" max="500" step="10" value="100" placeholder="100" title="Engine acceleration power in % (20–500%, default 100%)">
+                                        <input type="number" id="setting-acceleration" min="10" max="9999" step="10" value="100" placeholder="100" title="Engine acceleration power in % (default 100%, up to 9999%)">
                                     </label>
                                 </div>
                                 <button id="btn-start" class="btn success">Start Race</button>
@@ -297,7 +305,7 @@
 
     <!-- GAME SCREEN -->
     <div id="game-screen" class="screen hidden">
-        <canvas id="game-canvas"></canvas>
+        <canvas id="game-canvas" tabindex="0"></canvas>
         
         <!-- HUD -->
         <div id="hud">
@@ -419,6 +427,7 @@
     <script src="/socket.io/socket.io.js"></script>
     <script src="js/socket.js"></script>
     <script src="js/app.js"></script>
+    <script type="module" src="js/lobby3d.js"></script>
     <script type="module" src="js/game3d.js"></script>
 </body>
 </html>

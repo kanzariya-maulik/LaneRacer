@@ -206,9 +206,11 @@ function mixFrame(frame) {
     if (o && mode !== 'off') {
         if (!ownVoice) ownVoice = makeVoice(false, engineType);
         let rpm = o.rpm, load = o.load;
-        if (now < blipUntil) { rpm = Math.min(18000, rpm + 1500); load = 1; }
+        if (!o.pit && now < blipUntil) { rpm = Math.min(18000, rpm + 1500); load = 1; }
         const fx = engineFx(rpm, load, o.pit, o.limiter);
-        ownVoice.set(rpm, load, now < cutUntil ? 1 : 0, fx.stutter, now < crackleUntil ? 1 : fx.crackle);
+        const cut = o.pit ? 0 : (now < cutUntil ? 1 : 0);
+        const crackle = o.pit ? 0 : (now < crackleUntil ? 1 : fx.crackle);
+        ownVoice.set(rpm, load, cut, fx.stutter, crackle);
         fade(ownVoice, OWN_GAIN);
     } else if (ownVoice) fade(ownVoice, 0);
     wind.set(o ? o.speedMs : 0);

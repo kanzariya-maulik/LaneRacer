@@ -38,8 +38,8 @@ export class Predictor {
     reset(e) {
         this.car = {
             assist: this.assist,
-            maxSpeed: this.settings.maxSpeed,
-            accel: this.settings.acceleration
+            maxSpeed: Number(this.settings.maxSpeed) || 340,
+            accel: Number(this.settings.acceleration) || 100
         };
         this.load(e);
         this.prev = { x: this.car.x, y: this.car.y, angle: this.car.angle };
@@ -50,6 +50,10 @@ export class Predictor {
 
     step(input) {
         if (!this.car) return;
+        if (this.settings) {
+            if (this.settings.maxSpeed !== undefined) this.car.maxSpeed = Number(this.settings.maxSpeed) || 340;
+            if (this.settings.acceleration !== undefined) this.car.accel = Number(this.settings.acceleration) || 100;
+        }
         this.prev.x = this.car.x; this.prev.y = this.car.y; this.prev.angle = this.car.angle;
         const k = Math.exp(-STEP_S / BLEND_TAU_S);
         this.off.x *= k; this.off.y *= k; this.off.angle *= k;
@@ -62,7 +66,15 @@ export class Predictor {
     // s = the packet's server seq: an older packet arriving late (reordered UDP) is ignored — its replay inputs are gone.
     // Keyed on s, not lastSeq: lastSeq legitimately moves back when the server re-aligns a stalled client.
     onServer(e, s = Infinity) {
-        if (s !== Infinity && s <= this.lastS) return;
+        if (s !== Infinity && s <= this.lastS) {
+            // Check if server packet sequence restarted (new session or session restart)
+            if (this.lastS - s > 20) {
+                this.reset(e);
+                this.lastS = s;
+                return;
+            }
+            return;
+        }
         if (s !== Infinity) this.lastS = s;
         if (!this.car) { this.reset(e); this.lastS = s === Infinity ? -1 : s; return; }
         const lastSeq = e[10];

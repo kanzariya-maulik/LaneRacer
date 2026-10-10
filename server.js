@@ -9,6 +9,13 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
+process.on('uncaughtException', (err) => {
+  console.error('[SERVER] Uncaught exception:', err);
+});
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[SERVER] Unhandled rejection at:', promise, 'reason:', reason);
+});
+
 // Serve static files from the public directory
 // no-cache: browsers check back (a cheap 304 when unchanged) instead of guessing how long a file stays fresh, so every
 // player gets the current game code after an update (stale modules otherwise linger, the terrain worker's most of all)

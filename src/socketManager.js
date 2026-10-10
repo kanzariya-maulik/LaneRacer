@@ -16,6 +16,7 @@ const state = {
 };
 
 let gameInstance = null;
+let currentQualiResults = null;
 
 // Prediction clients send sequenced batches; bots and old tabs send one plain input
 function applyInput(id, inputData) {
@@ -57,7 +58,7 @@ function removePlayer(io, id) {
     io.emit('player_left', id);
 
     if (id === state.hostId) {
-        const remainingHumans = Object.values(state.players).filter(p => !p.isBot && !p.disconnected);
+        const remainingHumans = Object.values(state.players).filter(p => !p.isBot && (!p.disconnected || disconnectTimers[p.id]));
         if (remainingHumans.length > 0) {
             state.hostId = remainingHumans[0].id;
             io.emit('lobby_state_sync', lobbySnapshot());
@@ -72,8 +73,8 @@ function removePlayer(io, id) {
         }
     }
 
-    const activeHumans = Object.values(state.players).filter(p => !p.isSpectating && !p.isBot && !p.disconnected);
-    if (activeHumans.length === 0 && state.status !== 'LOBBY') {
+    const potentialHumans = Object.values(state.players).filter(p => !p.isSpectating && !p.isBot && (!p.disconnected || disconnectTimers[p.id]));
+    if (potentialHumans.length === 0 && state.status !== 'LOBBY') {
         clearTimers();
         if (gameInstance) {
             gameInstance.stop();
@@ -139,33 +140,39 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
                     if (data?.assist) existingPlayer.assist = lobby.sanitizeAssist(data.assist);
                     state.players[socket.id] = existingPlayer;
 
-                    if (state.hostId === oldId) state.hostId = socket.id;
-
-                    if (gameInstance) {
-                        if (gameInstance.players[oldId]) {
-                            const car = gameInstance.players[oldId];
-                            delete gameInstance.players[oldId];
-                            car.id = socket.id;
-                            car.disconnected = false;
-                            gameInstance.players[socket.id] = car;
-                        }
-                        if (gameInstance.index && gameInstance.index[oldId] !== undefined) {
-                            const idx = gameInstance.index[oldId];
-                            delete gameInstance.index[oldId];
-                            gameInstance.index[socket.id] = idx;
-                        }
-                        if (gameInstance.roster) {
-                            const r = gameInstance.roster.find(p => p.id === oldId);
-                            if (r) r.id = socket.id;
+                    if (state.hostId === oldId) {
+                        state.hostId = socket.id;
+                        if (data?.hostSettings && state.status === 'LOBBY') {
+                            state.settings = lobby.sanitizeSettings(state.settings, data.hostSettings, Track.ALL_TRACK_IDS);
+                            syncBotPlayer(io);
                         }
                     }
-                    netlog.log(`[RECONNECT] ${existingPlayer.username} (${socket.id}, was ${oldId}) re-joined race`);
-                    io.emit('lobby_state_sync', lobbySnapshot());
+
+                    if (gameInstance) {
+                        gameInstance.reconnectPlayer(oldId, socket.id);
+                    }
+                    if (currentQualiResults) {
+                        const qr = currentQualiResults.find(r => r.id === oldId);
+                        if (qr) qr.id = socket.id;
+                    }
+                    netlog.log(`[RECONNECT] ${existingPlayer.username} (${socket.id}, was ${oldId}) re-joined`);
                 } else {
                     existingPlayer.disconnected = false;
                     delete existingPlayer.disconnectAt;
+                    if (state.hostId === socket.id && data?.hostSettings && state.status === 'LOBBY') {
+                        state.settings = lobby.sanitizeSettings(state.settings, data.hostSettings, Track.ALL_TRACK_IDS);
+                        syncBotPlayer(io);
+                    }
+                    if (gameInstance) {
+                        gameInstance.resetPlayerInputs(socket.id);
+                    }
                 }
 
+                io.emit('lobby_state_sync', lobbySnapshot());
+
+                if (state.status === 'QUALI_RESULTS' && currentQualiResults) {
+                    socket.emit('quali_results', currentQualiResults.map((r, i) => ({ id: r.id, bestLap: r.bestLap, position: i + 1 })));
+                }
                 if (gameInstance && state.status !== 'LOBBY') {
                     socket.emit('game_init', gameInstance.initPayload());
                 }
@@ -186,7 +193,13 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
                 isReady: true,
                 isSpectating: state.status !== 'LOBBY'
             };
-            if (isFirstPlayer) state.hostId = socket.id;
+            if (isFirstPlayer) {
+                state.hostId = socket.id;
+                if (data?.hostSettings && state.status === 'LOBBY') {
+                    state.settings = lobby.sanitizeSettings(state.settings, data.hostSettings, Track.ALL_TRACK_IDS);
+                    syncBotPlayer(io);
+                }
+            }
             netlog.log(`[JOIN] ${state.players[socket.id].username} (${socket.id}) | team ${check.team.id}`);
 
             // Everyone (visitors included) needs the new counts and the current host
@@ -239,6 +252,7 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
         socket.on('restart_session', () => {
             if (!isHost() || !gameInstance || !['QUALIFYING', 'COUNTDOWN', 'RACE'].includes(state.status)) return;
             const racers = Object.keys(gameInstance.players).map((id) => state.players[id]).filter(Boolean);
+            racers.forEach((p) => { p.isSpectating = false; });
             const quali = gameInstance.mode === 'quali';
             clearTimers(); // the old session's lights must not fire into the new one
             gameInstance.stop();
@@ -307,8 +321,14 @@ function syncBotPlayer(io) {
             io.emit('lobby_state_sync', lobbySnapshot());
         });
 
-        socket.on('start_game', () => {
+        socket.on('start_game', (incomingSettings) => {
             if (socket.id !== state.hostId || state.status !== 'LOBBY') return;
+
+            if (incomingSettings && typeof incomingSettings === 'object') {
+                state.settings = lobby.sanitizeSettings(state.settings, incomingSettings, Track.ALL_TRACK_IDS);
+                syncBotPlayer(io);
+                io.emit('settings_updated', state.settings);
+            }
 
             const notReady = Object.values(state.players)
                 .some(p => p.id !== state.hostId && !p.isReady && !p.isSpectating && !p.isBot);
@@ -377,7 +397,8 @@ function syncBotPlayer(io) {
             net.cleanup(socket.id);
             delete sockets[socket.id];
             const player = state.players[socket.id];
-            if (player && player.sessionId && (state.status === 'RACE' || state.status === 'QUALIFYING') && !player.isSpectating && !player.isBot && !player.abandoned) {
+            const inActiveSession = ['RACE', 'QUALIFYING', 'COUNTDOWN', 'QUALI_RESULTS', 'FINISHED'].includes(state.status);
+            if (player && player.sessionId && inActiveSession && !player.isSpectating && !player.isBot && !player.abandoned) {
                 // Keep player record and car for 60 seconds so browser reload or brief disconnect can rejoin!
                 player.disconnected = true;
                 player.disconnectAt = Date.now();
@@ -390,6 +411,15 @@ function syncBotPlayer(io) {
                     delete disconnectTimers[socket.id];
                     removePlayer(io, socket.id);
                 }, 60000);
+            } else if (player && player.sessionId && state.status === 'LOBBY' && !player.isBot) {
+                // Lobby reload grace period: 10 seconds for reload without losing host or team
+                player.disconnected = true;
+                player.disconnectAt = Date.now();
+                io.emit('lobby_state_sync', lobbySnapshot());
+                disconnectTimers[socket.id] = setTimeout(() => {
+                    delete disconnectTimers[socket.id];
+                    removePlayer(io, socket.id);
+                }, 10000);
             } else {
                 removePlayer(io, socket.id);
             }
@@ -399,13 +429,17 @@ function syncBotPlayer(io) {
 
 function startQuali(io, racers) {
     setStatus(io, 'QUALIFYING');
+    currentQualiResults = null;
     gameInstance = new Game(io, racers, TRACKS[state.settings.trackId], state.settings, (results) => {
+        currentQualiResults = results;
         setStatus(io, 'QUALI_RESULTS');
         io.emit('quali_results', results.map((r, i) => ({ id: r.id, bestLap: r.bestLap, position: i + 1 })));
         io.emit('session', { phase: 'QUALI_RESULTS', endsInMs: RESULTS_MS });
         later(() => {
             // Drivers who left during the results screen aren't on the grid
-            const grid = results.map(r => state.players[r.id]).filter(Boolean);
+            const res = currentQualiResults || results;
+            const grid = res.map(r => state.players[r.id] || Object.values(state.players).find(p => p.id === r.id || (p.sessionId && p.sessionId === r.sessionId))).filter(Boolean);
+            currentQualiResults = null;
             startRace(io, grid);
         }, RESULTS_MS);
     }, 'quali', net);

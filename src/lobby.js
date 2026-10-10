@@ -43,14 +43,14 @@ function sanitizeSettings(current, incoming, trackIds) {
         next.hidePenaltiesDuringRace = incoming.hidePenaltiesDuringRace === '1' || incoming.hidePenaltiesDuringRace === 1;
     }
     if (typeof incoming.maxSpeed === 'number' && Number.isFinite(incoming.maxSpeed)) {
-        next.maxSpeed = clamp(Math.round(incoming.maxSpeed), 100, 600);
+        next.maxSpeed = clamp(Math.round(incoming.maxSpeed), 50, 9999);
     } else if (typeof incoming.maxSpeed === 'string' && incoming.maxSpeed.trim() !== '' && Number.isFinite(Number(incoming.maxSpeed))) {
-        next.maxSpeed = clamp(Math.round(Number(incoming.maxSpeed)), 100, 600);
+        next.maxSpeed = clamp(Math.round(Number(incoming.maxSpeed)), 50, 9999);
     }
     if (typeof incoming.acceleration === 'number' && Number.isFinite(incoming.acceleration)) {
-        next.acceleration = clamp(Math.round(incoming.acceleration), 20, 500);
+        next.acceleration = clamp(Math.round(incoming.acceleration), 10, 9999);
     } else if (typeof incoming.acceleration === 'string' && incoming.acceleration.trim() !== '' && Number.isFinite(Number(incoming.acceleration))) {
-        next.acceleration = clamp(Math.round(Number(incoming.acceleration)), 20, 500);
+        next.acceleration = clamp(Math.round(Number(incoming.acceleration)), 10, 9999);
     }
     return next;
 }

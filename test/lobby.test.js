@@ -122,19 +122,21 @@ test('sanitizeSettings: out-laps 1–3 and timed quali laps 1–10, whole number
     assert.deepStrictEqual([s({ outLaps: '2', qualiLaps: null }).outLaps, s({ outLaps: '2', qualiLaps: null }).qualiLaps], [1, 2]);
 });
 
-test('sanitizeSettings: maxSpeed (100–600 km/h) and acceleration (20–500%)', () => {
+test('sanitizeSettings: maxSpeed (50–9999 km/h) and acceleration (10–9999%)', () => {
     const base = { trackId: 'monza', maxLaps: 3, qualifying: true, maxSpeed: 340, acceleration: 100 };
     const s = (inc) => lobby.sanitizeSettings(base, inc, ['monza']);
     assert.strictEqual(s({ maxSpeed: 450 }).maxSpeed, 450);
     assert.strictEqual(s({ maxSpeed: '500' }).maxSpeed, 500);
-    assert.strictEqual(s({ maxSpeed: 50 }).maxSpeed, 100);
-    assert.strictEqual(s({ maxSpeed: 999 }).maxSpeed, 600);
+    assert.strictEqual(s({ maxSpeed: 20 }).maxSpeed, 50);
+    assert.strictEqual(s({ maxSpeed: 9999 }).maxSpeed, 9999);
+    assert.strictEqual(s({ maxSpeed: 15000 }).maxSpeed, 9999);
     assert.strictEqual(s({ maxSpeed: 'garbage' }).maxSpeed, 340);
 
     assert.strictEqual(s({ acceleration: 200 }).acceleration, 200);
     assert.strictEqual(s({ acceleration: '250' }).acceleration, 250);
-    assert.strictEqual(s({ acceleration: 5 }).acceleration, 20);
-    assert.strictEqual(s({ acceleration: 1000 }).acceleration, 500);
+    assert.strictEqual(s({ acceleration: 5 }).acceleration, 10);
+    assert.strictEqual(s({ acceleration: 9999 }).acceleration, 9999);
+    assert.strictEqual(s({ acceleration: 20000 }).acceleration, 9999);
     assert.strictEqual(s({ acceleration: NaN }).acceleration, 100);
 });
 
