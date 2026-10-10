@@ -12,7 +12,7 @@ const state = {
     status: 'LOBBY', // LOBBY, QUALIFYING, QUALI_RESULTS, COUNTDOWN, RACE, FINISHED
     players: {},
     hostId: null,
-    settings: { trackId: 'monza', maxLaps: 3, qualifying: true, collisions: true, contactPenalties: true, timeOfDay: 'day', outLaps: 1, qualiLaps: 2 }
+    settings: { trackId: 'monza', maxLaps: 3, qualifying: true, collisions: true, contactPenalties: true, hidePenaltiesDuringRace: false, timeOfDay: 'day', outLaps: 1, qualiLaps: 2, maxSpeed: 340, acceleration: 100 }
 };
 
 let gameInstance = null;
@@ -42,16 +42,22 @@ function clearTimers() {
 
 // Live sockets by id, so the host can tell a kicked player
 const sockets = {};
+// Disconnect grace timers for reconnecting in-race players
+const disconnectTimers = {};
 
 // A player leaves the session (disconnect or kick): their car goes, and the host role passes on
 function removePlayer(io, id) {
+    if (disconnectTimers[id]) {
+        clearTimeout(disconnectTimers[id]);
+        delete disconnectTimers[id];
+    }
     if (!state.players[id]) return;
     delete state.players[id];
     if (gameInstance) gameInstance.removePlayer(id);
     io.emit('player_left', id);
 
     if (id === state.hostId) {
-        const remainingHumans = Object.values(state.players).filter(p => !p.isBot);
+        const remainingHumans = Object.values(state.players).filter(p => !p.isBot && !p.disconnected);
         if (remainingHumans.length > 0) {
             state.hostId = remainingHumans[0].id;
             io.emit('lobby_state_sync', lobbySnapshot());
@@ -66,7 +72,7 @@ function removePlayer(io, id) {
         }
     }
 
-    const activeHumans = Object.values(state.players).filter(p => !p.isSpectating && !p.isBot);
+    const activeHumans = Object.values(state.players).filter(p => !p.isSpectating && !p.isBot && !p.disconnected);
     if (activeHumans.length === 0 && state.status !== 'LOBBY') {
         clearTimers();
         if (gameInstance) {
@@ -106,17 +112,77 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
         socket.emit('lobby_state_sync', lobbySnapshot());
 
         socket.on('join_lobby', (data) => {
-            if (state.players[socket.id]) return;
+            const sId = (data && typeof data.sessionId === 'string' && data.sessionId.trim()) ? data.sessionId.trim() : null;
+
+            // Check if there is an existing player with this sessionId (or same socket)
+            let existingEntry = null;
+            if (sId) {
+                existingEntry = Object.entries(state.players).find(([pid, p]) => p.sessionId === sId);
+            }
+            if (!existingEntry && state.players[socket.id]) {
+                existingEntry = [socket.id, state.players[socket.id]];
+            }
+
+            if (existingEntry) {
+                const [oldId, existingPlayer] = existingEntry;
+                if (disconnectTimers[oldId]) {
+                    clearTimeout(disconnectTimers[oldId]);
+                    delete disconnectTimers[oldId];
+                }
+
+                if (oldId !== socket.id) {
+                    delete state.players[oldId];
+                    existingPlayer.id = socket.id;
+                    existingPlayer.disconnected = false;
+                    delete existingPlayer.disconnectAt;
+                    if (data?.username) existingPlayer.username = lobby.sanitizeUsername(data.username);
+                    if (data?.assist) existingPlayer.assist = lobby.sanitizeAssist(data.assist);
+                    state.players[socket.id] = existingPlayer;
+
+                    if (state.hostId === oldId) state.hostId = socket.id;
+
+                    if (gameInstance) {
+                        if (gameInstance.players[oldId]) {
+                            const car = gameInstance.players[oldId];
+                            delete gameInstance.players[oldId];
+                            car.id = socket.id;
+                            car.disconnected = false;
+                            gameInstance.players[socket.id] = car;
+                        }
+                        if (gameInstance.index && gameInstance.index[oldId] !== undefined) {
+                            const idx = gameInstance.index[oldId];
+                            delete gameInstance.index[oldId];
+                            gameInstance.index[socket.id] = idx;
+                        }
+                        if (gameInstance.roster) {
+                            const r = gameInstance.roster.find(p => p.id === oldId);
+                            if (r) r.id = socket.id;
+                        }
+                    }
+                    netlog.log(`[RECONNECT] ${existingPlayer.username} (${socket.id}, was ${oldId}) re-joined race`);
+                    io.emit('lobby_state_sync', lobbySnapshot());
+                } else {
+                    existingPlayer.disconnected = false;
+                    delete existingPlayer.disconnectAt;
+                }
+
+                if (gameInstance && state.status !== 'LOBBY') {
+                    socket.emit('game_init', gameInstance.initPayload());
+                }
+                return;
+            }
+
             const check = lobby.canJoinTeam(state.players, data && data.teamId);
             if (!check.ok) return socket.emit('join_error', check.reason);
 
             const isFirstPlayer = Object.keys(state.players).length === 0;
             state.players[socket.id] = {
                 id: socket.id,
-                username: lobby.sanitizeUsername(data.username),
+                sessionId: sId,
+                username: lobby.sanitizeUsername(data?.username),
                 teamId: check.team.id,
                 color: check.team.chatColor,
-                assist: lobby.sanitizeAssist(data.assist), // each player's own choice, changeable any time
+                assist: lobby.sanitizeAssist(data?.assist), // each player's own choice, changeable any time
                 isReady: true,
                 isSpectating: state.status !== 'LOBBY'
             };
@@ -287,12 +353,46 @@ function syncBotPlayer(io) {
                 (car ? ` | late inputs ${car.starveLast ?? 0}/s re-syncs ${car.realigns || 0}` : ''));
         });
 
+        socket.on('abandon_race', () => {
+            const player = state.players[socket.id];
+            if (!player) return;
+            player.abandoned = true;
+            if (disconnectTimers[socket.id]) {
+                clearTimeout(disconnectTimers[socket.id]);
+                delete disconnectTimers[socket.id];
+            }
+            if (gameInstance?.players[socket.id]) {
+                gameInstance.players[socket.id].dnf = true;
+                gameInstance.players[socket.id].finished = true;
+                gameInstance.removePlayer(socket.id);
+            }
+            player.isSpectating = true;
+            removePlayer(io, socket.id);
+            socket.emit('race_abandoned');
+        });
+
         socket.on('disconnect', () => {
             console.log(`Player disconnected: ${socket.id}`);
             netlog.log(`[DISCONNECT] ${state.players[socket.id]?.username ?? 'visitor'} (${socket.id})`);
             net.cleanup(socket.id);
             delete sockets[socket.id];
-            removePlayer(io, socket.id);
+            const player = state.players[socket.id];
+            if (player && player.sessionId && (state.status === 'RACE' || state.status === 'QUALIFYING') && !player.isSpectating && !player.isBot && !player.abandoned) {
+                // Keep player record and car for 60 seconds so browser reload or brief disconnect can rejoin!
+                player.disconnected = true;
+                player.disconnectAt = Date.now();
+                if (gameInstance?.players[socket.id]) {
+                    gameInstance.players[socket.id].disconnected = true;
+                    gameInstance.players[socket.id].input = { throttle: 0, brake: 0, steer: 0, drs: false, handbrake: false };
+                }
+                io.emit('lobby_state_sync', lobbySnapshot());
+                disconnectTimers[socket.id] = setTimeout(() => {
+                    delete disconnectTimers[socket.id];
+                    removePlayer(io, socket.id);
+                }, 60000);
+            } else {
+                removePlayer(io, socket.id);
+            }
         });
     });
 }
@@ -331,11 +431,20 @@ function startRace(io, grid) {
 function finishRace(io) {
     clearTimers(); // pending lights must not fire after the race is over
     setStatus(io, 'FINISHED');
+    for (const tid in disconnectTimers) {
+        clearTimeout(disconnectTimers[tid]);
+        delete disconnectTimers[tid];
+    }
     later(() => {
         state.status = 'LOBBY';
         for (const id in state.players) {
-            state.players[id].isReady = true;
-            state.players[id].isSpectating = false;
+            if (state.players[id].disconnected) {
+                delete state.players[id];
+            } else {
+                state.players[id].isReady = true;
+                state.players[id].isSpectating = false;
+                delete state.players[id].abandoned;
+            }
         }
         io.emit('lobby_state_sync', lobbySnapshot());
         gameInstance = null;

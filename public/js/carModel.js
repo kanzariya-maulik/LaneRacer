@@ -2,7 +2,7 @@
 // wheels named wheel_FL..RR, each the tyre then the wheel cover (game3d.js batches every car's wheels in that order).
 // Liveries are painted off the main thread (livery-worker.js) into canvas textures.
 import * as THREE from 'three';
-import { bodyArrays, WHEELS, WHEEL_RADIUS, ATLAS } from './carShape.js';
+import { bodyArrays, drsFlapArrays, WHEELS, WHEEL_RADIUS, ATLAS } from './carShape.js';
 export { WHEEL_RADIUS };
 
 const toGeometry = ({ pos, nrm, uv, idx, col }) => {
@@ -17,6 +17,9 @@ const toGeometry = ({ pos, nrm, uv, idx, col }) => {
 };
 const bodies = {};
 export const bodyGeometry = (detail) => (bodies[detail] ||= toGeometry(bodyArrays(detail)));
+
+const flaps = {};
+export const drsFlapGeometry = (detail) => (flaps[detail] ||= toGeometry(drsFlapArrays(detail)));
 
 // Lathe round the axle (three.js z): profile [radius, axial]; colour(radius) per vertex
 function lathe(profile, segs, colour) {
@@ -52,15 +55,25 @@ let wheels = null;
 export function buildCar(detail = 'mid', lodM = Infinity) {
     const root = new THREE.Group(), body = new THREE.LOD();
     body.name = 'bodyLOD';
-    const mat = new THREE.MeshStandardMaterial({ name: 'livery', roughness: 0.55, metalness: 0.05 });
+    const mat = new THREE.MeshStandardMaterial({ name: 'livery', roughness: 0.38, metalness: 0.22 });
     const near = new THREE.Mesh(bodyGeometry(detail), mat);
     near.name = 'body';
     body.addLevel(near, 0);
     if (detail !== 'low' && Number.isFinite(lodM)) { const far = new THREE.Mesh(bodyGeometry('low'), mat); far.name = 'body'; body.addLevel(far, lodM); }
     root.add(body);
+
+    // DRS Rear Wing Flap
+    const drsGroup = new THREE.Group();
+    drsGroup.name = 'drsWing';
+    drsGroup.position.set(-2.25, 0.91, 0);
+    const drsMesh = new THREE.Mesh(drsFlapGeometry(detail), mat);
+    drsMesh.name = 'drsFlap';
+    drsGroup.add(drsMesh);
+    root.add(drsGroup);
+
     const { tyre, cover } = (wheels ||= wheelGeometries(detail === 'high' ? 48 : detail === 'mid' ? 36 : 24));
-    const tyreMat = new THREE.MeshStandardMaterial({ name: 'tyre', vertexColors: true, roughness: 0.92 });
-    const coverMat = new THREE.MeshStandardMaterial({ name: 'rim', vertexColors: true, roughness: 0.4, metalness: 0.6 });
+    const tyreMat = new THREE.MeshStandardMaterial({ name: 'tyre', vertexColors: true, roughness: 0.88 });
+    const coverMat = new THREE.MeshStandardMaterial({ name: 'rim', vertexColors: true, roughness: 0.28, metalness: 0.85 });
     for (const [name, [x, y, w]] of Object.entries(WHEELS)) {
         const g = new THREE.Group();
         g.name = name;

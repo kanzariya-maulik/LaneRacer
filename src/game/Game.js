@@ -73,6 +73,8 @@ class Game {
                 username: p.username,
                 teamId: p.teamId,
                 assist: p.assist || 'off',
+                maxSpeed: this.settings.maxSpeed ?? 340,
+                accel: this.settings.acceleration ?? 100,
                 isBot: !!p.isBot,
                 x: slot.x, y: slot.y, angle: slot.angle,
                 vx: 0, vy: 0, speed: 0, steer: 0,
@@ -307,8 +309,13 @@ class Game {
         if (p.jumpStart || !p.throttledEarly || Math.hypot(p.x - p.gridX, p.y - p.gridY) <= JUMP_MOVE_M * this.track.scale) return;
         p.jumpStart = true;
         p.penalty += JUMP_PENALTY_S;
-        this.io.emit('track_limits', { id: p.id, kind: 'jump', penalty: p.penalty });
-        this.io.emit('chat_msg', { username: 'SYSTEM', color: '#ff0000', msg: `${p.username}: jump start, +${JUMP_PENALTY_S}s penalty` });
+        const hidePen = !!this.settings.hidePenaltiesDuringRace;
+        this.io.emit('track_limits', { id: p.id, kind: 'jump', penalty: p.penalty, hidden: hidePen });
+        if (hidePen) {
+            this.io.emit('chat_msg', { username: 'SYSTEM', color: '#ff0000', msg: `${p.username}: jump start under investigation` });
+        } else {
+            this.io.emit('chat_msg', { username: 'SYSTEM', color: '#ff0000', msg: `${p.username}: jump start, +${JUMP_PENALTY_S}s penalty` });
+        }
     }
 
     // Time from lights out to the first throttle
@@ -611,10 +618,15 @@ class Game {
             if (!s || !v) continue; // one of them left
             const add = inc.off ? COLLISION_OFF_PENALTY_S : COLLISION_PENALTY_S;
             s.penalty += add;
-            this.io.emit('track_limits', { id: s.id, kind: 'collision', add, penalty: s.penalty, victim: v.username });
-            this.io.emit('track_limits', { id: v.id, kind: 'hit', by: s.username });
+            const hidePen = !!this.settings.hidePenaltiesDuringRace;
+            this.io.emit('track_limits', { id: s.id, kind: 'collision', add, penalty: s.penalty, victim: v.username, hidden: hidePen });
+            this.io.emit('track_limits', { id: v.id, kind: 'hit', by: s.username, hidden: hidePen });
             const what = inc.off ? `pushed ${v.username} off track` : `hit ${v.username}`;
-            this.io.emit('chat_msg', { username: 'SYSTEM', color: '#ff0000', msg: `${s.username} ${what}, +${add}s (total +${s.penalty}s)` });
+            if (hidePen) {
+                this.io.emit('chat_msg', { username: 'SYSTEM', color: '#ff0000', msg: `${s.username} ${what} (incident under investigation)` });
+            } else {
+                this.io.emit('chat_msg', { username: 'SYSTEM', color: '#ff0000', msg: `${s.username} ${what}, +${add}s (total +${s.penalty}s)` });
+            }
             netlog.log(`[INCIDENT] ${s.username} (${s.id}) ${what} (${v.id}), +${add}s`);
         }
     }
@@ -644,8 +656,13 @@ class Game {
             return;
         }
         p.penalty += LIMIT_PENALTY_S;
-        this.io.emit('track_limits', { id: p.id, kind: 'penalty', penalty: p.penalty });
-        this.io.emit('chat_msg', { username: 'SYSTEM', color: '#ff0000', msg: `${p.username}: +${LIMIT_PENALTY_S}s track limits penalty (total +${p.penalty}s)` });
+        const hidePen = !!this.settings.hidePenaltiesDuringRace;
+        this.io.emit('track_limits', { id: p.id, kind: 'penalty', penalty: p.penalty, hidden: hidePen });
+        if (hidePen) {
+            this.io.emit('chat_msg', { username: 'SYSTEM', color: '#ff0000', msg: `${p.username}: track limits violation recorded` });
+        } else {
+            this.io.emit('chat_msg', { username: 'SYSTEM', color: '#ff0000', msg: `${p.username}: +${LIMIT_PENALTY_S}s track limits penalty (total +${p.penalty}s)` });
+        }
     }
 
     // Final result: finish time plus penalties, once every car has finished; everyone gets the results screen

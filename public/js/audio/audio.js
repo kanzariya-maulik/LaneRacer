@@ -35,7 +35,7 @@ export function init() {
         if (!ctx) return;
         if (document.hidden || muted) ctx.suspend(); else ctx.resume();
     });
-    window.lanraceAudio = { init, unlock, update, event, setVolume, setMode, setEngineType, setMusicTrack, setMusicVolume, toggleMute, debug, music };
+    window.lanraceAudio = { init, unlock, update, event, setVolume, setMode, setEngineType, setMusicTrack, setMusicVolume, toggleMute, debug, music, testEngine, stopEngineTest, isEngineTesting, testMusic, stopMusic };
 }
 
 // Browsers only start audio from a user gesture: the first click/key (Join counts) creates the context
@@ -302,3 +302,120 @@ export function debug() {
     const audible = (ownVoice && ownVoice.target > 0 ? 1 : 0) + [...others.values()].filter((v) => v.target > 0).length;
     return { state: ctx ? ctx.state : 'none', worklet: hasWorklet, engine: engineKind, engineType, voices: (ownVoice ? 1 : 0) + others.size, audible, slots: Object.keys(slots), mode, volume, muted, broken };
 }
+
+let engineTestVoice = null;
+let engineTestRaf = null;
+
+export function isEngineTesting() {
+    return !!engineTestVoice;
+}
+
+export function stopEngineTest(onStateChange) {
+    if (engineTestRaf) {
+        cancelAnimationFrame(engineTestRaf);
+        engineTestRaf = null;
+    }
+    if (engineTestVoice) {
+        const v = engineTestVoice;
+        engineTestVoice = null;
+        try {
+            if (ctx && v.out) v.out.gain.setTargetAtTime(0, ctx.currentTime, 0.03);
+            setTimeout(() => {
+                try { v.stop(); } catch (e) {}
+            }, 60);
+        } catch (e) {
+            try { v.stop(); } catch (e2) {}
+        }
+    }
+    if (typeof onStateChange === 'function') onStateChange(false);
+}
+
+export async function testEngine(profile, onStateChange) {
+    if (!ctx) unlock();
+    else if (ctx.state === 'suspended' && !muted) ctx.resume();
+    if (starting) await starting;
+    if (!ctx || !ready) return false;
+
+    if (engineTestVoice) {
+        stopEngineTest(onStateChange);
+        return false;
+    }
+
+    const prof = VALID_PROFILES.includes(profile) ? profile : engineType;
+    try {
+        engineTestVoice = makeVoice(false, prof);
+        engineTestVoice.out.gain.setValueAtTime(OWN_GAIN, ctx.currentTime);
+    } catch (e) {
+        console.warn('[LanRace] cannot make test voice', e);
+        return false;
+    }
+
+    if (typeof onStateChange === 'function') onStateChange(true);
+
+    const startTime = performance.now();
+    const duration = 2600; // 2.6 seconds total
+
+    const tick = () => {
+        if (!engineTestVoice) return;
+        const elapsed = performance.now() - startTime;
+        if (elapsed >= duration) {
+            stopEngineTest(onStateChange);
+            return;
+        }
+
+        let rpm = 4500, load = 0.2, cut = 0, stutter = 0, crackle = 0;
+        if (elapsed < 350) {
+            // Idle warm-up rumble
+            rpm = 4500 + Math.sin(elapsed * 0.03) * 200;
+            load = 0.2;
+        } else if (elapsed < 1400) {
+            // High acceleration rev climb from 4,500 to 17,500 RPM
+            const t = (elapsed - 350) / 1050;
+            rpm = 4500 + t * 13000;
+            load = 1.0;
+        } else if (elapsed < 1650) {
+            // Redline limiter peak scream
+            rpm = 17500;
+            load = 1.0;
+            stutter = 1;
+            crackle = 0.4;
+        } else {
+            // Throttle lift overrun / deceleration crackle down to idle
+            const t = (elapsed - 1650) / 950;
+            rpm = 17500 - t * 12500;
+            load = 0.05;
+            crackle = 1;
+            if (elapsed > 2200) {
+                // Fade out
+                const fadeT = (elapsed - 2200) / 400;
+                engineTestVoice.out.gain.setValueAtTime(Math.max(0, OWN_GAIN * (1 - fadeT)), ctx.currentTime);
+            }
+        }
+
+        engineTestVoice.set(rpm, load, cut, stutter, crackle);
+        engineTestRaf = requestAnimationFrame(tick);
+    };
+
+    engineTestRaf = requestAnimationFrame(tick);
+    return true;
+}
+
+export function testMusic(trackId, onStateChange) {
+    if (!ctx) unlock();
+    else if (ctx.state === 'suspended' && !muted) ctx.resume();
+    if (music.isPlaying) {
+        music.stop();
+        if (typeof onStateChange === 'function') onStateChange(false);
+        return false;
+    }
+    const track = TRACKS[trackId] && trackId !== 'off' ? trackId : 'synthwave';
+    music.play(track);
+    if (typeof onStateChange === 'function') onStateChange(music.isPlaying);
+    return music.isPlaying;
+}
+
+export function stopMusic(onStateChange) {
+    music.stop();
+    if (typeof onStateChange === 'function') onStateChange(false);
+}
+

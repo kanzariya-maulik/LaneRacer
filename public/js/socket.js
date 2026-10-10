@@ -391,10 +391,20 @@ socket.on('reaction', (r) => {
 
 socket.on('track_limits', (e) => {
     if (e.id !== clientState.me || !window.showBanner) return;
-    window.showBanner(e.kind === 'deleted' ? 'TRACK LIMITS — LAP DELETED'
-        : e.kind === 'warning' ? `TRACK LIMITS — WARNING ${e.count}/2`
-        : e.kind === 'jump' ? `JUMP START — +${e.penalty}s PENALTY`
-        : e.kind === 'collision' ? `+${e.add}s CAUSING A COLLISION (total +${e.penalty}s)`
-        : e.kind === 'hit' ? `HIT BY ${String(e.by).toUpperCase()} — PENALTY GIVEN`
-        : `+5s PENALTY (total +${e.penalty}s)`);
+    const hidePen = clientState.settings?.hidePenaltiesDuringRace || e.hidden;
+    if (hidePen) {
+        window.showBanner(e.kind === 'deleted' ? 'TRACK LIMITS — LAP DELETED'
+            : e.kind === 'warning' ? `TRACK LIMITS — WARNING ${e.count}/2`
+            : e.kind === 'jump' ? 'JUMP START WARNING — INCIDENT UNDER INVESTIGATION'
+            : e.kind === 'collision' ? 'COLLISION INCIDENT RECORDED'
+            : e.kind === 'hit' ? `CONTACT WITH ${String(e.by).toUpperCase()} NOTED`
+            : 'TRACK LIMITS WARNING — INCIDENT NOTED');
+    } else {
+        window.showBanner(e.kind === 'deleted' ? 'TRACK LIMITS — LAP DELETED'
+            : e.kind === 'warning' ? `TRACK LIMITS — WARNING ${e.count}/2`
+            : e.kind === 'jump' ? `JUMP START — +${e.penalty}s PENALTY`
+            : e.kind === 'collision' ? `+${e.add}s CAUSING A COLLISION (total +${e.penalty}s)`
+            : e.kind === 'hit' ? `HIT BY ${String(e.by).toUpperCase()} — PENALTY GIVEN`
+            : `+5s PENALTY (total +${e.penalty}s)`);
+    }
 });

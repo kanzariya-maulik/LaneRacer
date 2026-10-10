@@ -202,14 +202,17 @@ export function atlasLayout() {
 }
 
 // One BufferGeometry with every surface (uv into the atlas), smooth analytic normals, caps on closed lofts
-export function bodyArrays(detail = 'mid') {
+export function bodyArrays(detail = 'mid', filter = (s) => s.part !== 'rw_flap', offset = null) {
     const { S, rects } = atlasLayout(), k = DETAIL[detail] ?? DETAIL.mid, pos = [], nrm = [], uv = [], idx = [];
     const to3 = (p) => [p[0], p[2], -p[1]]; // car frame → three.js (y up)
     S.forEach((s, si) => {
+        if (filter && !filter(s)) return;
         const [nu, nv] = counts(s, k), [rx, ry, rw, rh] = rects[si], base = pos.length / 3;
         for (let i = 0; i <= nu; i++) for (let j = 0; j <= nv; j++) {
             const u = i / nu, v = j / nv;
-            pos.push(...to3(s.f(u, v % 1)));
+            const p3 = to3(s.f(u, v % 1));
+            if (offset) pos.push(p3[0] - offset[0], p3[1] - offset[1], p3[2] - offset[2]);
+            else pos.push(...p3);
             nrm.push(...to3(normalAt(s, u, v % 1)));
             uv.push(rx + u * rw, ry + v * rh);
         }
@@ -226,13 +229,19 @@ export function bodyArrays(detail = 'mid') {
         if (s.caps) for (const [i, out] of [[0, -1], [nu, 1]]) { // flat caps: a fan from the ring's centre
             const ring = [], c = to3(s.c(i / nu)), du = to3(sub(s.c(Math.min(1, i / nu + 0.01)), s.c(Math.max(0, i / nu - 0.01))));
             const n = unit(du.map((q) => q * out)), cb = pos.length / 3;
-            pos.push(...c); nrm.push(...n); uv.push(rx + (i / nu) * rw, ry + 0.25 * rh);
+            if (offset) pos.push(c[0] - offset[0], c[1] - offset[1], c[2] - offset[2]);
+            else pos.push(...c);
+            nrm.push(...n); uv.push(rx + (i / nu) * rw, ry + 0.25 * rh);
             for (let j = 0; j <= nv; j++) { const o = (base + i * (nv + 1) + j) * 3; pos.push(pos[o], pos[o + 1], pos[o + 2]); nrm.push(...n); uv.push(rx + (i / nu) * rw, ry + (j / nv) * rh); ring.push(cb + 1 + j); }
             const p0 = P(i, 0), p1 = P(i, 1), w = dot(cross(sub(p0, c), sub(p1, c)), n) < 0;
             for (let j = 0; j < nv; j++) w ? idx.push(cb, ring[j + 1], ring[j]) : idx.push(cb, ring[j], ring[j + 1]);
         }
     });
     return { pos, nrm, uv, idx };
+}
+
+export function drsFlapArrays(detail = 'mid') {
+    return bodyArrays(detail, (s) => s.part === 'rw_flap', [-2.25, 0.91, 0]);
 }
 
 // ---------- liveries ----------

@@ -23,7 +23,10 @@ const setQualiLaps = document.getElementById('setting-qualilaps');
 const setCollisions = document.getElementById('setting-collisions');
 const setPenalties = document.getElementById('setting-penalties');
 const setTrackLimits = document.getElementById('setting-track-limits');
+const setHidePenalties = document.getElementById('setting-hide-penalties');
 const setBot = document.getElementById('setting-bot');
+const setMaxSpeed = document.getElementById('setting-max-speed');
+const setAcceleration = document.getElementById('setting-acceleration');
 const setTime = document.getElementById('setting-time');
 const settingsView = document.getElementById('settings-view');
 const MAX_RACERS = 22; // src/lobby.js: grid slots per track
@@ -39,8 +42,11 @@ try {
         if (savedHostSettings.qualiLaps && setQualiLaps) setQualiLaps.value = savedHostSettings.qualiLaps;
         if (savedHostSettings.collisions !== undefined && setCollisions) setCollisions.value = savedHostSettings.collisions ? '1' : '0';
         if (savedHostSettings.contactPenalties !== undefined && setPenalties) setPenalties.value = savedHostSettings.contactPenalties ? '1' : '0';
+        if (savedHostSettings.hidePenaltiesDuringRace !== undefined && setHidePenalties) setHidePenalties.value = savedHostSettings.hidePenaltiesDuringRace ? '1' : '0';
         if (savedHostSettings.trackLimits !== undefined && setTrackLimits) setTrackLimits.value = savedHostSettings.trackLimits ? '1' : '0';
         if (savedHostSettings.botCar !== undefined && setBot) setBot.value = savedHostSettings.botCar ? '1' : '0';
+        if (savedHostSettings.maxSpeed !== undefined && setMaxSpeed) setMaxSpeed.value = savedHostSettings.maxSpeed;
+        if (savedHostSettings.acceleration !== undefined && setAcceleration) setAcceleration.value = savedHostSettings.acceleration;
     }
 } catch (e) {}
 const graphicsSelect = document.getElementById('graphics-select');
@@ -168,6 +174,62 @@ if (musicVolumeRange) {
     musicVolumeRange.addEventListener('input', () => window.lanraceAudio?.setMusicVolume?.(musicVolumeRange.value / 100));
 }
 
+// ── Audio Preview & Test Controls ─────────────────────────────────────────
+const btnTestEngine = document.getElementById('btn-test-engine');
+const engineTypeSelect = document.getElementById('engine-type-select');
+if (btnTestEngine) {
+    btnTestEngine.addEventListener('click', () => {
+        const audio = window.lanraceAudio;
+        if (!audio) return;
+        const selected = engineTypeSelect?.value || 'v8';
+        audio.testEngine(selected, (isPlaying) => {
+            btnTestEngine.innerHTML = isPlaying ? '&#9632; Stop' : '&#9654; Test';
+            btnTestEngine.classList.toggle('playing', isPlaying);
+        });
+    });
+    engineTypeSelect?.addEventListener('change', () => {
+        if (window.lanraceAudio?.isEngineTesting?.()) {
+            window.lanraceAudio.stopEngineTest((isPlaying) => {
+                btnTestEngine.innerHTML = isPlaying ? '&#9632; Stop' : '&#9654; Test';
+                btnTestEngine.classList.toggle('playing', isPlaying);
+            });
+        }
+    });
+}
+
+const btnTestMusic = document.getElementById('btn-test-music');
+const musicSelect = document.getElementById('music-select');
+if (btnTestMusic) {
+    const updateMusicBtn = (isPlaying) => {
+        btnTestMusic.innerHTML = isPlaying ? '&#9632; Stop' : '&#9654; Test';
+        btnTestMusic.classList.toggle('playing', isPlaying);
+    };
+
+    btnTestMusic.addEventListener('click', () => {
+        const audio = window.lanraceAudio;
+        if (!audio) return;
+        let track = musicSelect?.value || 'synthwave';
+        if (track === 'off') {
+            track = 'synthwave';
+            if (musicSelect) musicSelect.value = 'synthwave';
+            try { localStorage.setItem('lanrace.music', 'synthwave'); } catch (e) {}
+        }
+        audio.testMusic(track, updateMusicBtn);
+    });
+
+    musicSelect?.addEventListener('change', () => {
+        const audio = window.lanraceAudio;
+        if (audio?.music?.isPlaying) {
+            if (musicSelect.value === 'off') {
+                audio.stopMusic(updateMusicBtn);
+            } else {
+                audio.music.play(musicSelect.value);
+                updateMusicBtn(true);
+            }
+        }
+    });
+}
+
 let isJoined = false;
 let amReady = true;
 let wasKicked = false;
@@ -178,6 +240,17 @@ try {
     const savedName = localStorage.getItem('lanrace.username');
     if (savedName && inputUser) inputUser.value = savedName;
 } catch (e) {}
+
+let persistentSessionId = null;
+try {
+    persistentSessionId = localStorage.getItem('lanrace.sessionId');
+    if (!persistentSessionId) {
+        persistentSessionId = 's_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+        localStorage.setItem('lanrace.sessionId', persistentSessionId);
+    }
+} catch (e) {
+    persistentSessionId = 's_' + Math.random().toString(36).slice(2, 10);
+}
 
 function autoJoinLobby() {
     if (isJoined || wasKicked || !teams.length || !socket?.connected) return;
@@ -192,7 +265,7 @@ function autoJoinLobby() {
         localStorage.setItem('lanrace.username', username);
         if (selectedTeam) localStorage.setItem('lanrace.teamId', selectedTeam);
     } catch (e) {}
-    lastJoin = { username, teamId: selectedTeam, assist: getAssistString() };
+    lastJoin = { username, teamId: selectedTeam, assist: getAssistString(), sessionId: persistentSessionId };
     socket.emit('join_lobby', lastJoin);
     setJoinedUI(true);
     amReady = true;
@@ -375,8 +448,11 @@ function emitSettings() {
         qualiLaps: parseInt(setQualiLaps.value, 10),
         collisions: setCollisions.value === '1',
         contactPenalties: setPenalties.value === '1',
+        hidePenaltiesDuringRace: setHidePenalties ? setHidePenalties.value === '1' : false,
         trackLimits: setTrackLimits ? setTrackLimits.value === '1' : true,
-        botCar: setBot ? setBot.value === '1' : false
+        botCar: setBot ? setBot.value === '1' : false,
+        maxSpeed: setMaxSpeed ? (parseInt(setMaxSpeed.value, 10) || 340) : 340,
+        acceleration: setAcceleration ? (parseInt(setAcceleration.value, 10) || 100) : 100
     };
     try { localStorage.setItem('lanrace.hostSettings', JSON.stringify(settings)); } catch (e) {}
     socket.emit('update_settings', settings);
@@ -521,7 +597,18 @@ setCollisions.addEventListener('change', emitSettings);
 setPenalties.addEventListener('change', emitSettings);
 setTime.addEventListener('change', emitSettings);
 setTrackLimits?.addEventListener('change', emitSettings);
+setHidePenalties?.addEventListener('change', emitSettings);
 setBot?.addEventListener('change', emitSettings);
+
+let settingsInputTimeout = null;
+const debouncedEmitSettings = () => {
+    clearTimeout(settingsInputTimeout);
+    settingsInputTimeout = setTimeout(emitSettings, 350);
+};
+setMaxSpeed?.addEventListener('input', debouncedEmitSettings);
+setMaxSpeed?.addEventListener('change', emitSettings);
+setAcceleration?.addEventListener('input', debouncedEmitSettings);
+setAcceleration?.addEventListener('change', emitSettings);
 
 chatForm.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -642,7 +729,10 @@ window.updateSettingsUI = () => {
     setPenalties.value = clientState.settings.contactPenalties === false ? '0' : '1';
     document.querySelectorAll('.collisions-only').forEach((el) => el.classList.toggle('hidden', clientState.settings.collisions === false));
     if (setTrackLimits) setTrackLimits.value = clientState.settings.trackLimits === false ? '0' : '1';
+    if (setHidePenalties) setHidePenalties.value = clientState.settings.hidePenaltiesDuringRace ? '1' : '0';
     if (setBot) setBot.value = clientState.settings.botCar ? '1' : '0';
+    if (setMaxSpeed) setMaxSpeed.value = clientState.settings.maxSpeed ?? 340;
+    if (setAcceleration) setAcceleration.value = clientState.settings.acceleration ?? 100;
 
     // Header chips and the read-only view non-hosts see
     const s = clientState.settings;
@@ -656,7 +746,10 @@ window.updateSettingsUI = () => {
         ['Qualifying', quali],
         ['Collisions', s.collisions === false ? 'Off' : s.contactPenalties === false ? 'On, no penalties' : 'On, penalties'],
         ['Track limits', s.trackLimits === false ? 'Off' : 'On'],
-        ['AI Bot', s.botCar ? 'On' : 'Off']
+        ['Penalty display', s.hidePenaltiesDuringRace ? 'Hide until finish' : 'Live in-race'],
+        ['AI Bot', s.botCar ? 'On' : 'Off'],
+        ['Max Speed', `${s.maxSpeed ?? 340} km/h`],
+        ['Acceleration', `${s.acceleration ?? 100}%`]
     ];
     settingsView.replaceChildren(...rows.map(([k, v]) => {
         const d = document.createElement('div');
@@ -670,7 +763,10 @@ window.updateSettingsUI = () => {
         s.qualifying ? `Quali ${out}+${timed}` : 'Quali off',
         `Collisions ${s.collisions === false ? 'off' : 'on'}`,
         `Limits ${s.trackLimits === false ? 'off' : 'on'}`,
-        s.botCar ? '1 Bot' : 'No bots'
+        s.hidePenaltiesDuringRace ? 'Penalties hidden' : 'Penalties live',
+        s.botCar ? '1 Bot' : 'No bots',
+        `${s.maxSpeed ?? 340} km/h`,
+        `${s.acceleration ?? 100}% accel`
     ].map((text) => Object.assign(document.createElement('span'), { textContent: text })));
 };
 window.updateSettingsUI();
@@ -892,3 +988,23 @@ try {
         renderStandingsPopup();
     }
 } catch (e) {}
+
+// Leave Race (Abandon) Button
+const btnLeaveRace = document.getElementById('btn-leave-race');
+if (btnLeaveRace) {
+    btnLeaveRace.addEventListener('click', () => {
+        if (confirm('Leave the race? You will retire as DNF and cannot rejoin this race session.')) {
+            socket.emit('abandon_race');
+            document.getElementById('session-panel')?.classList.add('hidden');
+            screenGame?.classList.add('hidden');
+            screenLobby?.classList.remove('hidden');
+        }
+    });
+}
+
+socket.on('race_abandoned', () => {
+    document.getElementById('session-panel')?.classList.add('hidden');
+    screenGame?.classList.add('hidden');
+    screenLobby?.classList.remove('hidden');
+    window.appendChat('SYSTEM', '#f43f5e', 'You left the race (DNF).');
+});

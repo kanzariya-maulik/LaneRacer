@@ -12,9 +12,10 @@ const FIN = 16;
 const lerpAngle = (a, b, k) => a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * k;
 
 export class Predictor {
-    constructor(track, assist = 'off') {
+    constructor(track, assist = 'off', settings = {}) {
         this.track = track;
         this.assist = assist;             // must match the server's setting for this player, or every tick corrects
+        this.settings = settings || {};
         this.car = null;
         this.prev = { x: 0, y: 0, angle: 0 };
         this.pending = [];
@@ -35,7 +36,11 @@ export class Predictor {
     }
 
     reset(e) {
-        this.car = { assist: this.assist };
+        this.car = {
+            assist: this.assist,
+            maxSpeed: this.settings.maxSpeed,
+            accel: this.settings.acceleration
+        };
         this.load(e);
         this.prev = { x: this.car.x, y: this.car.y, angle: this.car.angle };
         this.pending = [];

@@ -85,13 +85,16 @@
                                 <small>M mutes during a race</small>
                             </label>
                             <label class="graphics-picker">Engine sound style
-                                <select id="engine-type-select">
-                                    <option value="v8" selected>F1 2.4L V8 (Classic Scream)</option>
-                                    <option value="v6">F1 1.6L V6 Turbo (Modern Growl)</option>
-                                    <option value="muscle">7.0L V8 Muscle (Deep Bass Rumble)</option>
-                                    <option value="screamer">F1 Classic Screamer (High-RPM Howl)</option>
-                                    <option value="rotary">4-Rotor Wankel (787B Shriek)</option>
-                                </select>
+                                <div class="audio-control-row">
+                                    <select id="engine-type-select">
+                                        <option value="v8" selected>F1 2.4L V8 (Classic Scream)</option>
+                                        <option value="v6">F1 1.6L V6 Turbo (Modern Growl)</option>
+                                        <option value="muscle">7.0L V8 Muscle (Deep Bass Rumble)</option>
+                                        <option value="screamer">F1 Classic Screamer (High-RPM Howl)</option>
+                                        <option value="rotary">4-Rotor Wankel (787B Shriek)</option>
+                                    </select>
+                                    <button type="button" id="btn-test-engine" class="btn small audio-test-btn" title="Test selected engine sound style">▶ Test</button>
+                                </div>
                             </label>
                             <label class="graphics-picker">Release W to Brake
                                 <select id="autobrake-select">
@@ -100,14 +103,17 @@
                                 </select>
                             </label>
                             <label class="graphics-picker">Race music
-                                <select id="music-select">
-                                    <option value="off" selected>Off (Engine only)</option>
-                                    <option value="synthwave">Synthwave Velocity</option>
-                                    <option value="eurobeat">Eurobeat Rush</option>
-                                    <option value="cyberpunk">Cyberpunk Overdrive</option>
-                                    <option value="arcade">8-Bit Arcade Sprint</option>
-                                    <option value="lofi">Sunset Cruise (Chill)</option>
-                                </select>
+                                <div class="audio-control-row">
+                                    <select id="music-select">
+                                        <option value="off" selected>Off (Engine only)</option>
+                                        <option value="synthwave">Synthwave Velocity</option>
+                                        <option value="eurobeat">Eurobeat Rush</option>
+                                        <option value="cyberpunk">Cyberpunk Overdrive</option>
+                                        <option value="arcade">8-Bit Arcade Sprint</option>
+                                        <option value="lofi">Sunset Cruise (Chill)</option>
+                                    </select>
+                                    <button type="button" id="btn-test-music" class="btn small audio-test-btn" title="Test selected background music">▶ Test</button>
+                                </div>
                             </label>
                             <label class="graphics-picker">Music volume
                                 <input type="range" id="music-volume-range" min="0" max="100" value="50">
@@ -125,12 +131,17 @@
                 <!-- Right: the session -->
                 <section class="side">
                     <div class="panel race-panel">
-                        <h2>Race settings</h2>
-                        <!-- Lobby Track Preview Minimap -->
-                        <div id="lobby-track-card" class="lobby-track-card">
-                            <canvas id="lobby-track-preview" width="220" height="135"></canvas>
-                            <div class="lobby-track-meta">
-                                <span id="lobby-track-name" class="lobby-track-name">MONZA</span>
+                        <div class="race-panel-top">
+                            <div>
+                                <h2>Race settings</h2>
+                            </div>
+                            <!-- Sleek compact top row track preview minimap -->
+                            <div id="lobby-track-card" class="lobby-track-card-compact">
+                                <canvas id="lobby-track-preview" width="96" height="58"></canvas>
+                                <div class="lobby-track-meta">
+                                    <span class="lobby-track-label">MAP</span>
+                                    <span id="lobby-track-name" class="lobby-track-name">MONZA</span>
+                                </div>
                             </div>
                         </div>
                         <dl id="settings-view" class="settings-view"></dl>
@@ -196,6 +207,12 @@
                                             <option value="0">Off</option>
                                         </select>
                                     </label>
+                                    <label>Penalty display
+                                        <select id="setting-hide-penalties" title="Hide time penalties from racers during race (warnings still shown)">
+                                            <option value="0" selected>Live during race</option>
+                                            <option value="1">Hide until finish (warnings only)</option>
+                                        </select>
+                                    </label>
                                     <label class="quali-only">Out-laps
                                         <input type="number" id="setting-outlaps" min="1" max="3" value="1" title="Untimed laps before timing starts (1 = pits to the line)">
                                     </label>
@@ -213,6 +230,12 @@
                                             <option value="0" selected>Off</option>
                                             <option value="1">On (1 AI Bot)</option>
                                         </select>
+                                    </label>
+                                    <label>Max Speed (km/h)
+                                        <input type="number" id="setting-max-speed" min="100" max="600" step="10" value="340" placeholder="340" title="Top speed limit in km/h (100–600 km/h, default 340)">
+                                    </label>
+                                    <label>Acceleration (%)
+                                        <input type="number" id="setting-acceleration" min="20" max="500" step="10" value="100" placeholder="100" title="Engine acceleration power in % (20–500%, default 100%)">
                                     </label>
                                 </div>
                                 <button id="btn-start" class="btn success">Start Race</button>
@@ -381,6 +404,10 @@
                 </div>
                 <div class="rr-cols hc-cols"><span>DRIVERS</span></div>
                 <ol id="hc-drivers"></ol>
+            </div>
+            <div class="session-leave-row" style="margin-top:14px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.12); display:flex; align-items:center; justify-content:space-between; gap:12px;">
+                <button type="button" id="btn-leave-race" class="btn danger small">Leave Race (Abandon)</button>
+                <span style="font-size:12px; color:#94a3b8;">Retires car (DNF) · permanent</span>
             </div>
             <div class="rr-foot" id="hc-foot">Only the host can pause, restart or remove drivers</div>
         </div>

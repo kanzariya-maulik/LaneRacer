@@ -66,11 +66,18 @@ function step(car, input, dt, scale, offTrack = false, assist = 'off') {
     const grade = car.grade || 0, load = Math.max(0, 1 + ((car.vcurv || 0) * v * v) / C.G);
     const grip = mu * (C.MASS * C.G * load + downforce);
 
+    // Custom acceleration multiplier (default 100% -> 1.0)
+    const hasCustomAccel = Number.isFinite(car.accel) && car.accel !== 100;
+    const accelMul = hasCustomAccel ? Math.max(0.1, car.accel / 100) : 1.0;
+    const power = hasCustomAccel ? C.POWER * accelMul : C.POWER;
+    const tractionGrip = hasCustomAccel ? C.TRACTION * grip * Math.max(1, accelMul) : C.TRACTION * grip;
+    const driveGrip = hasCustomAccel ? grip * Math.max(1, accelMul) : grip;
+
     // Longitudinal tyre force: traction/power-limited drive, grip-limited brakes, slow reverse
     let ft = 0;
     const allowReverse = input.explicitReverse !== undefined ? input.explicitReverse === true : true;
     if (vf >= -0.5) {
-        ft += input.throttle * Math.min(C.POWER / Math.max(vf, 1), C.TRACTION * grip, offTrack ? C.GRASS_DRIVE_G * C.G * C.MASS : Infinity);
+        ft += input.throttle * Math.min(power / Math.max(vf, 1), tractionGrip, offTrack ? C.GRASS_DRIVE_G * C.G * C.MASS : Infinity);
         if (vf > 0.5) ft -= input.brake * (1 - C.BRAKE_STEER_GIVE * Math.abs(input.steer)) * grip;
         else if (input.brake > 0 && input.throttle === 0 && allowReverse) ft -= input.brake * C.REVERSE_FORCE;
     } else if (input.throttle > 0) {
@@ -78,10 +85,11 @@ function step(car, input, dt, scale, offTrack = false, assist = 'off') {
     } else if (input.brake > 0 && allowReverse) {
         ft -= input.brake * C.REVERSE_FORCE;
     }
-    ft = Math.max(-grip, Math.min(grip, ft));
+    ft = Math.max(-grip, Math.min(driveGrip, ft));
 
     // Friction circle: what braking/drive uses is not available for cornering
-    const latAccel = ((1 + C.ASSIST_GRIP * k) * C.LAT_ASSIST * Math.sqrt(Math.max(0, grip * grip - ft * ft))) / C.MASS;
+    const ftCorner = hasCustomAccel && accelMul > 1 ? Math.min(grip * 0.95, Math.abs(ft) / accelMul) : Math.abs(ft);
+    const latAccel = ((1 + C.ASSIST_GRIP * k) * C.LAT_ASSIST * Math.sqrt(Math.max(0, grip * grip - ftCorner * ftCorner))) / C.MASS;
     const slip = Math.atan2(Math.abs(-vx * fy + vy * fx), Math.abs(vf));
 
     // Steering (bicycle model), yaw capped by available grip → understeer when overdriven
@@ -101,9 +109,16 @@ function step(car, input, dt, scale, offTrack = false, assist = 'off') {
     let vl = -vx * fy + vy * fx;
     vl -= Math.sign(vl) * Math.min(Math.abs(vl), latAccel * dt);
 
-    const drag = 0.5 * C.RHO * C.CDA * (car.dragMul ?? 1) * v * v; // dragMul: DRS / slipstream
+    const targetMaxKmh = Number.isFinite(car.maxSpeed) && car.maxSpeed !== 340 ? car.maxSpeed : null;
+    const speedDragMul = (targetMaxKmh && targetMaxKmh > 340) ? Math.pow(340 / targetMaxKmh, 3) : 1.0;
+    const drag = 0.5 * C.RHO * C.CDA * (car.dragMul ?? 1) * speedDragMul * v * v; // dragMul: DRS / slipstream
     const before = vf;
     vf += (ft / C.MASS - (drag / C.MASS + roll) * Math.sign(vf) - C.G * grade) * dt; // gravity along the slope
+    if (targetMaxKmh) {
+        const targetMaxMs = targetMaxKmh / 3.6;
+        const maxCapMs = car.drs ? targetMaxMs * 1.08 : targetMaxMs;
+        if (vf > maxCapMs) vf = maxCapMs;
+    }
     if (input.brake > 0 && (vf <= 0 || (before > 0 && vf < 0)) && !allowReverse) { vf = 0; vl = 0; } // auto-brakes stop, don't reverse
     if (input.brake > 0 && before > 0 && vf < 0) vf = 0;                                         // brakes stop, don't reverse
     if (input.throttle === 0 && input.brake === 0 && Math.sign(vf) !== Math.sign(before)) vf = 0; // coasting stops at zero

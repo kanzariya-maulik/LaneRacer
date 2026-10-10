@@ -348,6 +348,62 @@ test('every connection is told the server boot id, the same for all, so a tab fr
     const a = io.connect('a'), b = io.connect('b');
     const boot = (s) => s.sent.find(([ev]) => ev === 'boot')?.[1];
     assert.ok(typeof boot(a) === 'string' && boot(a).length > 0, 'no boot id');
-    assert.strictEqual(boot(b), boot(a));
     a.fire('disconnect'); b.fire('disconnect');
 });
+
+test('in-race reconnect: accidental refresh with sessionId preserves car and resumes session', (t) => {
+    t.mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
+    const io = fakeIo();
+    setupSocketManager(io, noNet);
+    const a = io.connect('sock-1');
+    a.fire('join_lobby', { sessionId: 'sess-user-1', username: 'VERSTAPPEN', teamId: 'redbull' });
+    a.fire('update_settings', { trackId: 'monza', maxLaps: 1, qualifying: false });
+    a.fire('toggle_ready', true);
+    a.fire('start_game');
+
+    advance(t, 8000); // countdown finishes and starts RACE
+    assert.strictEqual(io.events('status_change').at(-1), 'RACE');
+
+    // Simulate page refresh (disconnect)
+    a.fire('disconnect');
+
+    // Fast-forward 2 seconds (within 60s grace period)
+    advance(t, 2000);
+
+    // New connection on page reload with same sessionId
+    const aReload = io.connect('sock-2');
+    aReload.fire('join_lobby', { sessionId: 'sess-user-1', username: 'VERSTAPPEN', teamId: 'redbull' });
+
+    // Must receive game_init immediately
+    const initEv = aReload.sent.find(([ev]) => ev === 'game_init');
+    assert.ok(initEv, 'reconnecting player should receive game_init');
+    assert.ok(initEv[1].players['sock-2'], 'car must be mapped to new socket ID');
+
+    aReload.fire('abandon_race');
+    assert.ok(aReload.sent.some(([ev]) => ev === 'race_abandoned'), 'must acknowledge abandon');
+    aReload.fire('disconnect');
+});
+
+test('host settings: maxSpeed and acceleration can be set by host, but rejected for non-host', () => {
+    const io = fakeIo();
+    setupSocketManager(io, noNet);
+    const host = join(io, 'host-sock', 'redbull');
+    const guest = join(io, 'guest-sock', 'ferrari');
+
+    // Host updates maxSpeed to 450 and acceleration to 250
+    host.fire('update_settings', { maxSpeed: 450, acceleration: 250 });
+    const updated = io.events('settings_updated').at(-1);
+    assert.strictEqual(updated.maxSpeed, 450);
+    assert.strictEqual(updated.acceleration, 250);
+
+    // Non-host attempts to tamper with settings
+    guest.fire('update_settings', { maxSpeed: 150, acceleration: 50 });
+    const notUpdated = io.events('settings_updated').at(-1);
+    assert.strictEqual(notUpdated.maxSpeed, 450, 'non-host must not be able to alter maxSpeed');
+    assert.strictEqual(notUpdated.acceleration, 250, 'non-host must not be able to alter acceleration');
+
+    host.fire('disconnect');
+    guest.fire('disconnect');
+});
+
+

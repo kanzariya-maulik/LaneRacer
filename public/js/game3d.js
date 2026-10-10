@@ -714,6 +714,120 @@ function buildDrsBoards(t) {
     world.add(g);
 }
 
+// ── Tire Smoke Particles ───────────────────────────────────────────────────
+let smokeTexture = null;
+function getSmokeTexture() {
+    if (!smokeTexture) {
+        const c = document.createElement('canvas');
+        c.width = 128; c.height = 128;
+        const g = c.getContext('2d');
+        const grad = g.createRadialGradient(64, 64, 4, 64, 64, 64);
+        grad.addColorStop(0, 'rgba(255, 255, 255, 0.95)');
+        grad.addColorStop(0.25, 'rgba(245, 248, 255, 0.80)');
+        grad.addColorStop(0.55, 'rgba(225, 235, 245, 0.40)');
+        grad.addColorStop(0.85, 'rgba(210, 220, 235, 0.12)');
+        grad.addColorStop(1, 'rgba(200, 210, 230, 0)');
+        g.fillStyle = grad;
+        g.beginPath();
+        g.arc(64, 64, 64, 0, Math.PI * 2);
+        g.fill();
+        smokeTexture = new THREE.CanvasTexture(c);
+        smokeTexture.colorSpace = THREE.SRGBColorSpace;
+    }
+    return smokeTexture;
+}
+
+let smokeMesh = null;
+let smokeParticles = [];
+const SMOKE_MAX = 140;
+const smokeDummy = new THREE.Object3D();
+
+function initSmokeSystem() {
+    smokeParticles = Array.from({ length: SMOKE_MAX }, () => ({
+        active: false, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0,
+        size: 0.5, life: 0, maxLife: 0.7
+    }));
+    const geo = new THREE.PlaneGeometry(1, 1);
+    const mat = new THREE.MeshBasicMaterial({
+        map: getSmokeTexture(),
+        transparent: true,
+        depthWrite: false,
+        opacity: 0.72
+    });
+    smokeMesh = new THREE.InstancedMesh(geo, mat, SMOKE_MAX);
+    smokeMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    smokeMesh.frustumCulled = false; // CRITICAL: prevent frustum culling!
+    smokeMesh.renderOrder = 999;
+    // Initialize all matrices to hidden position
+    for (let i = 0; i < SMOKE_MAX; i++) {
+        smokeDummy.position.set(0, -9999, 0);
+        smokeDummy.scale.set(0, 0, 0);
+        smokeDummy.updateMatrix();
+        smokeMesh.setMatrixAt(i, smokeDummy.matrix);
+    }
+    if (smokeMesh.instanceMatrix) smokeMesh.instanceMatrix.needsUpdate = true;
+    world.add(smokeMesh);
+}
+
+function emitSmoke(x, y, z, baseAngle, speed, sizeMultiplier = 1) {
+    if (!smokeMesh) return;
+    for (const p of smokeParticles) {
+        if (!p.active) {
+            p.active = true;
+            p.x = x + (Math.random() - 0.5) * 0.3 * scale;
+            p.y = y + 0.12 * scale;
+            p.z = z + (Math.random() - 0.5) * 0.3 * scale;
+            const backSpd = Math.max(1.5, speed * 0.35);
+            p.vx = -Math.cos(baseAngle) * backSpd + (Math.random() - 0.5) * 1.5;
+            p.vy = 0.8 + Math.random() * 0.9;
+            p.vz = -Math.sin(baseAngle) * backSpd + (Math.random() - 0.5) * 1.5;
+            p.size = (0.55 + Math.random() * 0.35) * scale * sizeMultiplier;
+            p.life = 0;
+            p.maxLife = 0.55 + Math.random() * 0.35;
+            break;
+        }
+    }
+}
+
+function updateSmokeParticles(dt) {
+    if (!smokeMesh || !camera) return;
+    let anyActive = false;
+    for (let i = 0; i < SMOKE_MAX; i++) {
+        const p = smokeParticles[i];
+        if (!p.active) {
+            smokeDummy.position.set(0, -9999, 0);
+            smokeDummy.scale.set(0, 0, 0);
+            smokeDummy.updateMatrix();
+            smokeMesh.setMatrixAt(i, smokeDummy.matrix);
+            continue;
+        }
+        anyActive = true;
+        p.life += dt;
+        if (p.life >= p.maxLife) {
+            p.active = false;
+            smokeDummy.position.set(0, -9999, 0);
+            smokeDummy.scale.set(0, 0, 0);
+            smokeDummy.updateMatrix();
+            smokeMesh.setMatrixAt(i, smokeDummy.matrix);
+            continue;
+        }
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.z += p.vz * dt;
+        p.vx *= 0.92;
+        p.vz *= 0.92;
+        const progress = p.life / p.maxLife;
+        const currentSize = p.size * (1.0 + progress * 2.5);
+
+        smokeDummy.position.set(p.x, p.y, p.z);
+        smokeDummy.quaternion.copy(camera.quaternion);
+        smokeDummy.scale.set(currentSize, currentSize, 1);
+        smokeDummy.updateMatrix();
+        smokeMesh.setMatrixAt(i, smokeDummy.matrix);
+    }
+    if (smokeMesh.instanceMatrix) smokeMesh.instanceMatrix.needsUpdate = true;
+}
+
 // Text on a plane: signs, boards, grid numbers
 function textPlane(text, w, h, bg, fg = '#fff') {
     const c = document.createElement('canvas');
@@ -1445,6 +1559,7 @@ function buildWorld(t) {
     if (t.pit) buildPit(t.pit, t);
     for (const b of t.bridges || []) buildBridge(b, t);
     buildDrsBoards(t);
+    initSmokeSystem();
     snapCamera = true;
 }
 
@@ -1516,9 +1631,11 @@ function makeCar(id) {
     if (!lp) return null;
     const root = new THREE.Group();
     const wheels = [];
+    let drsWing = null;
     carTemplate = carTemplateFor();
     if (carTemplate) {
         const model = carTemplate.clone(true);
+        drsWing = model.getObjectByName('drsWing');
         const map = liveryTexture(lp.teamId);
         model.traverse((o) => {
             if (!o.isMesh) return;
@@ -1550,12 +1667,22 @@ function makeCar(id) {
         box.castShadow = true;
         root.add(box);
     }
-    // Your own car has no label: it would sit in the middle of the chase-cam view
     const tag = id === clientState.me ? null : nameTag(lp.username, lp.color);
     if (tag) root.add(tag);
-    root.add(blobShadow(Q.shadows ? 0.75 : 1)); // contact shadow: the car sits on the road, whatever the sun does
     singlePass(root);
-    return { root, wheels, teamId: lp.teamId, ghost: false, tag };
+    return {
+        root,
+        wheels,
+        teamId: lp.teamId,
+        ghost: false,
+        tag,
+        drsWing,
+        drsAngle: 0,
+        suspPitch: 0,
+        suspRoll: 0,
+        prevSpeed: 0,
+        smokeTimer: 0
+    };
 }
 
 function updateCars(dt) {
@@ -1592,6 +1719,83 @@ function updateCars(dt) {
             r.position.y = (fl + fr + rl + rr) / 4 + ROAD_DRAW_Y; // tyres on the drawn asphalt, not 10 cm into it
             r.rotation.z = Math.atan((fl + fr - rl - rr) / 2 / (2 * ax)); // nose up on a climb (+z lifts the +x nose)
             r.rotation.x = Math.atan((fl + rl - fr - rr) / 2 / (2 * tw)); // right side lower: lean right (+x tips +y to +z)
+        } else {
+            r.position.y = ROAD_DRAW_Y;
+            r.rotation.z = 0;
+            r.rotation.x = 0;
+        }
+
+        // Dynamic suspension pitch tilt (accel squat / brake dive) and body roll
+        const curSpeedMs = (s.speed || 0) / scale;
+        const dtSafe = Math.max(0.001, dt);
+        const aLong = Math.max(-28, Math.min(20, (curSpeedMs - car.prevSpeed) / dtSafe));
+        car.prevSpeed = curSpeedMs;
+
+        // Pitch: Accel squat (+pitch lifts nose) / Brake dive (-pitch dips nose)
+        const targetPitch = Math.max(-0.042, Math.min(0.035, aLong * 0.0024));
+        car.suspPitch += (targetPitch - car.suspPitch) * Math.min(1, dtSafe * 12);
+        r.rotation.z += car.suspPitch;
+
+        // Roll: Centripetal body lean towards outside of turn
+        const latG = (curSpeedMs * curSpeedMs / 130) * (s.steer || 0);
+        const targetRoll = -Math.max(-0.045, Math.min(0.045, latG * 0.022));
+        car.suspRoll += (targetRoll - car.suspRoll) * Math.min(1, dtSafe * 12);
+        r.rotation.x += car.suspRoll;
+
+        // Articulated DRS rear wing flap: physically opens when DRS is active
+        if (car.drsWing) {
+            const targetDrsAngle = s.drs ? -0.34 : 0;
+            car.drsAngle += (targetDrsAngle - car.drsAngle) * Math.min(1, dtSafe * 16);
+            car.drsWing.rotation.z = car.drsAngle;
+        }
+
+        // Tire smoke particle system: Launch burnout, hard acceleration, turning slip, brake lockup
+        car.smokeTimer = (car.smokeTimer || 0) + dtSafe;
+        if (car.smokeTimer >= 0.025) {
+            car.smokeTimer = 0;
+            const isMe = id === clientState.me;
+            const myThrottle = isMe ? (input?.throttle || 0) : 0;
+            const myBrake = isMe ? (input?.brake || 0) : 0;
+            const mySteer = isMe ? Math.abs(input?.steer || 0) : Math.abs(s.steer || 0);
+
+            // 1. High acceleration / standing launch burnout
+            const isLaunchBurnout = (myThrottle > 0.45 && curSpeedMs < 20) || (aLong > 2.2 && curSpeedMs < 25);
+            // 2. High-speed cornering / tire slide & slip
+            const isTurningSlip = (mySteer > 0.035 && curSpeedMs > 4.5) || (Math.abs(car.suspRoll || 0) > 0.010 && curSpeedMs > 6.0);
+            // 3. Heavy braking lockup
+            const isBrakeLockup = (myBrake > 0.35 && curSpeedMs > 4.5) || (aLong < -3.8 && curSpeedMs > 5.0);
+            // 4. Handbrake drift
+            const isHandbrakeSlide = isMe && !!input?.handbrake && curSpeedMs > 2.0;
+
+            if (isLaunchBurnout || isTurningSlip || isBrakeLockup || isHandbrakeSlide) {
+                const cosA = Math.cos(s.angle), sinA = Math.sin(s.angle);
+                const halfTrack = 0.85 * scale;
+                const axleDist = 1.6 * scale;
+
+                if (isLaunchBurnout || isHandbrakeSlide) {
+                    // Rear tires burnout
+                    const rx = r.position.x - cosA * axleDist;
+                    const rz = r.position.z - sinA * axleDist;
+                    emitSmoke(rx - sinA * halfTrack, r.position.y, rz + cosA * halfTrack, s.angle, curSpeedMs, 1.2);
+                    emitSmoke(rx + sinA * halfTrack, r.position.y, rz - cosA * halfTrack, s.angle, curSpeedMs, 1.2);
+                } else if (isTurningSlip) {
+                    // Turning slip: smoke from rear tires and outside front tire
+                    const rx = r.position.x - cosA * axleDist;
+                    const rz = r.position.z - sinA * axleDist;
+                    emitSmoke(rx - sinA * halfTrack, r.position.y, rz + cosA * halfTrack, s.angle, curSpeedMs, 0.95);
+                    emitSmoke(rx + sinA * halfTrack, r.position.y, rz - cosA * halfTrack, s.angle, curSpeedMs, 0.95);
+                    const fx = r.position.x + cosA * axleDist;
+                    const fz = r.position.z + sinA * axleDist;
+                    const outSide = (s.steer || 0) > 0 ? 1 : -1;
+                    emitSmoke(fx - outSide * sinA * halfTrack, r.position.y, fz + outSide * cosA * halfTrack, s.angle, curSpeedMs, 0.85);
+                } else if (isBrakeLockup) {
+                    // Front tires lockup
+                    const fx = r.position.x + cosA * axleDist;
+                    const fz = r.position.z + sinA * axleDist;
+                    emitSmoke(fx - sinA * halfTrack, r.position.y, fz + cosA * halfTrack, s.angle, curSpeedMs, 1.0);
+                    emitSmoke(fx + sinA * halfTrack, r.position.y, fz - cosA * halfTrack, s.angle, curSpeedMs, 1.0);
+                }
+            }
         }
         const far = camera.position.distanceTo(r.position) > 300 * scale; // wheels unreadable that far: 4 fewer draws per car
         for (const w of car.wheels) w.userData.show = !far;
@@ -1842,18 +2046,19 @@ let hostPanel = false, restartArmedUntil = 0;
 const amHost = () => !!clientState.me && clientState.hostId === clientState.me;
 const inSession = () => ['QUALIFYING', 'COUNTDOWN', 'RACE'].includes(clientState.status);
 function renderSessionPanel() {
-    const paused = !!clientState.paused && !clientState.resuming && inSession(), host = amHost() && inSession(); // the count hides it
+    const inSess = inSession();
+    const paused = !!clientState.paused && !clientState.resuming && inSess, host = amHost() && inSess;
     $('hud-host').classList.toggle('hidden', !host);
-    if (!host) hostPanel = false;
+    if (!inSess) hostPanel = false;
     const show = paused || hostPanel;
     $('session-panel').classList.toggle('hidden', !show);
     if (!show) return;
-    $('hc-title').textContent = paused ? 'PAUSED' : 'SESSION CONTROL';
+    $('hc-title').textContent = paused ? 'PAUSED' : host ? 'SESSION CONTROL' : 'RACE MENU';
     $('hc-note').textContent = !paused ? '' : host ? 'The session is paused for everyone.' : 'The host has paused the session.';
     $('hc-note').classList.toggle('hidden', !paused);
-    $('hc-close').classList.toggle('hidden', !host);
+    $('hc-close').classList.toggle('hidden', false);
     $('hc-host').classList.toggle('hidden', !host);
-    $('hc-foot').textContent = host ? 'Esc resumes and closes · restart and remove act for everyone' : 'Only the host can resume';
+    $('hc-foot').textContent = host ? 'Esc resumes and closes · restart and remove act for everyone' : 'Esc closes menu · Leave Race permanently retires';
     if (!host) return;
     const pause = $('hc-pause'), armed = performance.now() < restartArmedUntil;
     pause.textContent = paused ? 'Resume' : 'Pause';
@@ -1877,16 +2082,17 @@ function renderSessionPanel() {
     if (!list.children.length) list.append(Object.assign(document.createElement('li'), { className: 'hc-empty', textContent: 'No other drivers' }));
 }
 window.renderSessionPanel = renderSessionPanel;
-// Opening it pauses the session for everyone (once the lights are out); closing it (Esc, ✕, Resume) resumes
+// Opening it pauses the session for everyone (if host, once the lights are out); closing it (Esc, ✕, Resume) resumes
 const canPause = () => ['QUALIFYING', 'RACE'].includes(clientState.status);
 function toggleHostPanel() {
-    if (!amHost() || !inSession()) return;
+    if (!inSession()) return;
+    const isHost = amHost();
     const held = clientState.paused && !clientState.resuming;
     hostPanel = !(hostPanel || held);
     if (hostPanel) {
         releaseKeys();
-        if (canPause() && !held) socket.emit('pause_session', true); // also calls off a resume count under way
-    } else if (held) socket.emit('pause_session', false); // the server counts everyone in, then resumes
+        if (isHost && canPause() && !held) socket.emit('pause_session', true); // also calls off a resume count under way
+    } else if (isHost && held) socket.emit('pause_session', false); // the server counts everyone in, then resumes
     renderSessionPanel();
 }
 $('hud-host').addEventListener('click', toggleHostPanel);
@@ -2086,7 +2292,7 @@ function updateHUD(withTower = true) {
             const name = el('span', 'tt-name', codes.indexOf(codes[i]) !== codes.lastIndexOf(codes[i]) ? lp.username.slice(0, 8) : codes[i]);
             li.append(el('span', 'tt-pos', p.rank), team, name);
             if (p.inPit && !quali) li.append(el('span', 'tt-tag', 'PIT'));
-            if (p.penalty) li.append(el('span', 'tt-tag pen', `+${p.penalty}s`));
+            if (p.penalty && !clientState.settings?.hidePenaltiesDuringRace) li.append(el('span', 'tt-tag pen', `+${p.penalty}s`));
             if (clientState.fastestLap?.id === id) { // purple stopwatch: fastest lap of the session
                 const fl = el('span', 'tt-fl');
                 fl.innerHTML = STOPWATCH;
@@ -2128,7 +2334,7 @@ function updateRadar() {
 
     if (!gs || clientState.status === 'LOBBY' || !camera) {
         radarContainer.classList.add('hidden');
-        for (const [id, el] of radarBubblesMap.entries()) el.remove();
+        for (const [id, bState] of radarBubblesMap.entries()) bState.el?.remove();
         radarBubblesMap.clear();
         return;
     }
@@ -2138,7 +2344,7 @@ function updateRadar() {
     const me = gs[followId];
     if (!me) {
         radarContainer.classList.add('hidden');
-        for (const [id, el] of radarBubblesMap.entries()) el.remove();
+        for (const [id, bState] of radarBubblesMap.entries()) bState.el?.remove();
         radarBubblesMap.clear();
         return;
     }
@@ -2164,9 +2370,9 @@ function updateRadar() {
         const carRoot = cars[id]?.root;
         const carPos = carRoot ? carRoot.position.clone() : new THREE.Vector3(p.x, roadY ? roadY(p.x, p.y, p.angle) : ROAD_DRAW_Y, p.y);
 
-        // Distance limit: 100 meters
+        // Distance limit extended to 200 meters
         const distM = mePos.distanceTo(carPos) / scale;
-        if (distM > 100) continue;
+        if (distM > 200) continue;
 
         // Transform into camera local coordinates
         const camSpace = carPos.clone().applyMatrix4(camera.matrixWorldInverse);
@@ -2199,8 +2405,8 @@ function updateRadar() {
             s = halfH / (absNdy || 1e-5);
         }
 
-        const posX = Math.round(midX + ndx * s);
-        const posY = Math.round(midY + ndy * s);
+        const posX = midX + ndx * s;
+        const posY = midY + ndy * s;
 
         // Angle in degrees for directional pointer
         const arrowAngleDeg = Math.atan2(ndy, ndx) * (180 / Math.PI);
@@ -2209,10 +2415,21 @@ function updateRadar() {
         const shortName = (lp.username || 'CAR').trim().slice(0, 3).toUpperCase();
         const teamColor = lp.color || '#38bdf8';
         const isDanger = distM < 12;
+        const isFarDot = distM > 105;
 
-        let bubble = radarBubblesMap.get(id);
-        if (!bubble) {
-            bubble = document.createElement('div');
+        // Dynamic scale: 105m-30m = 0.70..1.00; <30m = 1.00..1.35x max growth!
+        let targetScale = 1.0;
+        if (distM > 105) {
+            targetScale = 0.60;
+        } else if (distM > 30) {
+            targetScale = 0.70 + 0.30 * (1 - (distM - 30) / 75);
+        } else {
+            targetScale = 1.00 + 0.35 * (1 - Math.max(0, distM) / 30);
+        }
+
+        let bState = radarBubblesMap.get(id);
+        if (!bState) {
+            const bubble = document.createElement('div');
             bubble.className = 'offscreen-bubble';
             bubble.innerHTML = `
                 <div class="bubble-pointer"></div>
@@ -2222,27 +2439,59 @@ function updateRadar() {
                 </div>
             `;
             radarContainer.appendChild(bubble);
-            radarBubblesMap.set(id, bubble);
+            bState = { el: bubble, x: posX, y: posY, angle: arrowAngleDeg, scale: targetScale, init: false };
+            radarBubblesMap.set(id, bState);
         }
 
-        bubble.style.transform = `translate3d(${posX}px, ${posY}px, 0)`;
+        // Exponential smoothing for fluid non-jitter edge movement
+        if (!bState.init) {
+            bState.x = posX;
+            bState.y = posY;
+            bState.angle = arrowAngleDeg;
+            bState.scale = targetScale;
+            bState.init = true;
+        } else {
+            const lerpFactor = 0.16;
+            bState.x += (posX - bState.x) * lerpFactor;
+            bState.y += (posY - bState.y) * lerpFactor;
+
+            let diff = arrowAngleDeg - bState.angle;
+            while (diff > 180) diff -= 360;
+            while (diff < -180) diff += 360;
+            bState.angle += diff * lerpFactor;
+            bState.scale += (targetScale - bState.scale) * lerpFactor;
+        }
+
+        const bubble = bState.el;
+        bubble.style.transform = `translate3d(${bState.x.toFixed(1)}px, ${bState.y.toFixed(1)}px, 0)`;
         bubble.style.setProperty('--team-color', teamColor);
+        bubble.style.setProperty('--bubble-scale', bState.scale.toFixed(3));
         bubble.classList.toggle('danger', isDanger);
+        bubble.classList.toggle('bubble-dot', isFarDot);
+
+        const circle = bubble.querySelector('.bubble-circle');
+        if (circle && !isFarDot) {
+            circle.style.transform = `scale(${bState.scale.toFixed(3)})`;
+        } else if (circle && isFarDot) {
+            circle.style.transform = 'none';
+        }
 
         const pointer = bubble.querySelector('.bubble-pointer');
-        if (pointer) pointer.style.transform = `rotate(${arrowAngleDeg}deg)`;
+        if (pointer) pointer.style.transform = `rotate(${bState.angle.toFixed(1)}deg)`;
 
-        const tag = bubble.querySelector('.bubble-tag');
-        if (tag && tag.textContent !== shortName) tag.textContent = shortName;
+        if (!isFarDot) {
+            const tag = bubble.querySelector('.bubble-tag');
+            if (tag && tag.textContent !== shortName) tag.textContent = shortName;
 
-        const distEl = bubble.querySelector('.bubble-dist');
-        if (distEl) distEl.textContent = `${Math.round(distM)}m`;
+            const distEl = bubble.querySelector('.bubble-dist');
+            if (distEl) distEl.textContent = `${Math.round(distM)}m`;
+        }
     }
 
     // Remove bubbles for cars that entered the viewport or are no longer tracked
-    for (const [id, el] of radarBubblesMap.entries()) {
+    for (const [id, bState] of radarBubblesMap.entries()) {
         if (!activeIds.has(id)) {
-            el.remove();
+            bState.el.remove();
             radarBubblesMap.delete(id);
         }
     }
@@ -2514,6 +2763,7 @@ function frame(now) {
     if (!paused) pollInput(dt);
     if (!world || !clientState.gameState) { Sound.update(silentFrame); return; }
     if (!paused) applyNet(now / 1000, dt);
+    updateSmokeParticles(dt);
     updateCars(dt);
     updateWheelBatch();
     if (!window.lanraceDebug?.freeCam) updateCamera(dt);
@@ -2563,9 +2813,10 @@ function frame(now) {
 }
 
 window.initGameVisuals = () => {
+    window.lanraceAudio?.stopEngineTest?.();
     netBuf = new SnapshotBuffer();
     // New session: predict from the new grid (reset on our first entry); spectators never get one, so never predict
-    predictor = new Predictor(clientState.trackData, clientState.gameState?.[clientState.me]?.assist || 'off');
+    predictor = new Predictor(clientState.trackData, clientState.gameState?.[clientState.me]?.assist || 'off', clientState.settings);
     sentInputs = []; carPose.clear(); carState.clear(); renderClock.t = presentClock.t = null;
     othersMode = store.get('lanrace.others') === 'smooth' ? 'smooth' : 'present';
     ownBox.reset(); remoteBoxes.clear(); lastDrs = false;

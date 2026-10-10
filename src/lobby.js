@@ -37,6 +37,21 @@ function sanitizeSettings(current, incoming, trackIds) {
     } else if (incoming.botCar !== undefined && (incoming.botCar === '0' || incoming.botCar === '1' || incoming.botCar === 0 || incoming.botCar === 1)) {
         next.botCar = incoming.botCar === '1' || incoming.botCar === 1;
     }
+    if (typeof incoming.hidePenaltiesDuringRace === 'boolean') {
+        next.hidePenaltiesDuringRace = incoming.hidePenaltiesDuringRace;
+    } else if (incoming.hidePenaltiesDuringRace !== undefined && (incoming.hidePenaltiesDuringRace === '0' || incoming.hidePenaltiesDuringRace === '1' || incoming.hidePenaltiesDuringRace === 0 || incoming.hidePenaltiesDuringRace === 1)) {
+        next.hidePenaltiesDuringRace = incoming.hidePenaltiesDuringRace === '1' || incoming.hidePenaltiesDuringRace === 1;
+    }
+    if (typeof incoming.maxSpeed === 'number' && Number.isFinite(incoming.maxSpeed)) {
+        next.maxSpeed = clamp(Math.round(incoming.maxSpeed), 100, 600);
+    } else if (typeof incoming.maxSpeed === 'string' && incoming.maxSpeed.trim() !== '' && Number.isFinite(Number(incoming.maxSpeed))) {
+        next.maxSpeed = clamp(Math.round(Number(incoming.maxSpeed)), 100, 600);
+    }
+    if (typeof incoming.acceleration === 'number' && Number.isFinite(incoming.acceleration)) {
+        next.acceleration = clamp(Math.round(incoming.acceleration), 20, 500);
+    } else if (typeof incoming.acceleration === 'string' && incoming.acceleration.trim() !== '' && Number.isFinite(Number(incoming.acceleration))) {
+        next.acceleration = clamp(Math.round(Number(incoming.acceleration)), 20, 500);
+    }
     return next;
 }
 
