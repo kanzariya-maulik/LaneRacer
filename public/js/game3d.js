@@ -15,7 +15,7 @@ import { estimateLoad } from './audio/mix.js';
 import * as Sound from './audio/audio.js';
 import { gapText, driverCode, lapDelta, stepFollow, watchTarget, inDrsZone, drsHint, liveSectors, resultCells, sectorClass, lastLapClass } from './timing.js';
 import { MODES, segmentColor, cornerMask, aheadM, trackIndex, nextMode } from './racingline.js';
-import { distToPath, pitLayout, pickerOpen, BOX_M, crewSpots, boxCue, visitDone, COMPOUND_COLORS } from './pitLayout.js';
+import { distToPath, pitLayout, tMarks, wallStands, pickerOpen, BOX_M, crewSpots, boxCue, visitDone, COMPOUND_COLORS } from './pitLayout.js';
 import { canStopOnMark } from './sim/drive.js';
 
 // World units per metre come from the track JSON (track.scale = 6).
@@ -726,6 +726,9 @@ function updateBoxCues(me, racing, toEntryM) {
     }
 }
 
+// A flat w x d bar at (x, z), lying on the ground
+const bar = (w, d, x, z) => { const q = new THREE.PlaneGeometry(w, d); q.rotateX(-Math.PI / 2); q.translate(x, 0, z); return q; };
+
 function buildPit(pit, t) {
     const n = pit.path.length, ph = pit.width / 2, s = pit.trackSide, line = 0.3 * scale;
     const W = pit.widthAt, half = W.map((w) => w / 2), neg = (A) => A.map((v) => -v);
@@ -741,6 +744,9 @@ function buildPit(pit, t) {
     // Fast lane | working lane (white) and the garage-row edge (yellow), along the garages
     const onSpan = (i) => inner(i) && i >= lay.split.i0 && i < lay.split.i1;
     world.add(strip(pit.path, half.map(() => -line / 2), half.map(() => line / 2), 0.86, onSpan, solid('#f2f2f2')));
+    // The concrete working lane: the garage-side half of the lane along the garages
+    const wFrom = half.map((h) => (s > 0 ? -(h - 2 * line) : line / 2)), wTo = half.map((h) => (s > 0 ? -line / 2 : h - 2 * line));
+    world.add(strip(pit.path, wFrom, wTo, 0.6, onSpan, solid('#8a8f96')));
     const yA = half.map((h) => -s * (h - line)), yB = half.map((h) => -s * (h - 2 * line));
     world.add(strip(pit.path, s > 0 ? yA : yB, s > 0 ? yB : yA, 0.86, onSpan, solid('#ffd400')));
 
@@ -772,18 +778,16 @@ function buildPit(pit, t) {
         world.add(m);
     }
 
-    const shells = [], signs = [], doors = [], lit = [], roofs = [], paint = [], outlines = [], codes = [];
+    const bays = [], signs = [], roofs = [], paint = [], outlines = [], codes = [];
     const tc = (id) => teamInfo[id]?.chatColor || '#888888';
     for (const g of lay.garages) {
         if (g.skip) continue;
         const h = pitY(g.x, g.y), info = teamInfo[g.teamId] || { name: g.teamId };
-        shells.push({ x: g.x, y: h, z: g.y, angle: -g.angle });
-        // Open front: a dark doorway with the team-colour back wall lit inside it, facing the lane
-        const d = side(g.front, g.angle, s * 0.02 * scale), e = side(g.front, g.angle, s * 0.04 * scale), rot = s > 0 ? -g.angle : Math.PI - g.angle;
-        doors.push({ x: d.x, y: h + 2.75 * scale, z: d.y, angle: rot });
-        lit.push({ x: e.x, y: h + 2.4 * scale, z: e.y, angle: rot, color: tc(g.teamId) });
+        // Bay frame: x along the lane, +z away from the lane. Local +z under rotation.y = th is (sin th, cos th) = the lane's left
+        // normal when th = -angle (garages on the left, trackSide < 0); for trackSide > 0 the garages are on the right, so th = PI - angle
+        bays.push({ x: g.front.x, y: h, z: g.front.y, angle: s > 0 ? Math.PI - g.angle : -g.angle, color: tc(g.teamId) });
         const f = side(g.front, g.angle, s * 0.1 * scale);
-        signs.push({ text: info.name.toUpperCase(), x: f.x, y: 6.4 * scale + h, z: f.y, rotY: rot, bg: tc(g.teamId) });
+        signs.push({ text: info.name.toUpperCase(), x: f.x, y: 6.4 * scale + h, z: f.y, rotY: s > 0 ? -g.angle : Math.PI - g.angle, bg: tc(g.teamId) });
     }
     for (const c of lay.canopy) roofs.push({ x: c.x, y: pitY(c.x, c.y) + 5.6 * scale, z: c.y, angle: -c.angle });
     for (const b of lay.boxes) {
@@ -793,20 +797,38 @@ function buildPit(pit, t) {
         codes.push({ text: b.code, x: b.codeAt.x, y: 0.83 + h, z: b.codeAt.y, rotY: facing(b.angle), flat: true });
     }
     const add = (geo, mat, list) => { if (list.length) world.add(instanced(geo, mat, list)); };
-    const shellMesh = instanced(new THREE.BoxGeometry(18 * scale, 12 * scale, 5 * scale), new THREE.MeshStandardMaterial({ color: 0x2b2f36 }), shells);
-    shellMesh.castShadow = true;
-    if (shells.length) world.add(shellMesh);
-    add(new THREE.PlaneGeometry(16 * scale, 5.5 * scale), new THREE.MeshBasicMaterial({ color: 0x0b0d10 }), doors);
-    add(new THREE.PlaneGeometry(14 * scale, 4.2 * scale), new THREE.MeshBasicMaterial({ color: 0xffffff }), lit);
+    const bayGeo = mergeGeometries([
+        new THREE.BoxGeometry(18 * scale, 6 * scale, 0.4 * scale).translate(0, 3 * scale, 4.8 * scale),          // back wall
+        new THREE.BoxGeometry(0.4 * scale, 6 * scale, 5 * scale).translate(-8.8 * scale, 3 * scale, 2.5 * scale), // side walls
+        new THREE.BoxGeometry(0.4 * scale, 6 * scale, 5 * scale).translate(8.8 * scale, 3 * scale, 2.5 * scale),
+        new THREE.BoxGeometry(18 * scale, 0.4 * scale, 5 * scale).translate(0, 6 * scale, 2.5 * scale),           // roof
+    ]);
+    const floorGeo = new THREE.BoxGeometry(17.2 * scale, 0.05 * scale, 4.6 * scale).translate(0, 0.03 * scale, 2.5 * scale);
+    const panelGeo = new THREE.PlaneGeometry(16 * scale, 4.5 * scale).translate(0, 2.6 * scale, 0).rotateY(Math.PI).translate(0, 0, 4.55 * scale);
+    const stackGeo = mergeGeometries([-6, -3.6, -1.2, 1.2, 3.6, 6].map((x) => new THREE.CylinderGeometry(0.33 * scale, 0.33 * scale, 1.2 * scale, 10).translate(x * scale, 0.6 * scale, 3.8 * scale)));
+    const bayMesh = instanced(bayGeo, new THREE.MeshStandardMaterial({ color: 0x2b2f36 }), bays.map((b) => ({ ...b, color: undefined })));
+    bayMesh.castShadow = true;
+    if (bays.length) world.add(bayMesh);
+    add(floorGeo, new THREE.MeshStandardMaterial({ color: 0xb9bec4 }), bays.map((b) => ({ ...b, color: undefined })));
+    add(panelGeo, new THREE.MeshBasicMaterial({ color: 0xffffff }), bays);
+    add(stackGeo, new THREE.MeshStandardMaterial({ color: 0x151515 }), bays.map((b) => ({ ...b, color: undefined })));
     add(new THREE.BoxGeometry(18 * scale, 0.2 * scale, 1.5 * scale), new THREE.MeshStandardMaterial({ color: 0xf2f2f2 }), roofs);
     const boxGeo = new THREE.PlaneGeometry(BOX_M.len * scale, BOX_M.wide * scale);
     boxGeo.rotateX(-Math.PI / 2);
     add(boxGeo, new THREE.MeshStandardMaterial({ color: 0xffffff }), paint);
     // Car outline: four thin bars (5.4 × 2 m) laid flat
-    const bar = (w, d, x, z) => { const q = new THREE.PlaneGeometry(w, d); q.rotateX(-Math.PI / 2); q.translate(x, 0, z); return q; };
     const lw = 0.15 * scale, ol = 5.4 * scale, ow = 2 * scale;
     const outlineGeo = mergeGeometries([bar(ol, lw, 0, ow / 2), bar(ol, lw, 0, -ow / 2), bar(lw, ow, ol / 2, 0), bar(lw, ow, -ol / 2, 0)]);
     add(outlineGeo, new THREE.MeshStandardMaterial({ color: 0xf2f2f2 }), outlines);
+    const tGeo = mergeGeometries([bar(0.12 * scale, 0.7 * scale, 0, 0), bar(0.5 * scale, 0.12 * scale, 0.3 * scale, 0)]);
+    add(tGeo, new THREE.MeshStandardMaterial({ color: 0xf2f2f2 }), lay.boxes.flatMap((b) => tMarks(b, scale).map((m) => ({ x: m.x, y: 0.84 + pitY(m.x, m.y), z: m.y, angle: -m.angle }))));
+    const standGeo = mergeGeometries([
+        new THREE.BoxGeometry(4 * scale, 1.1 * scale, 1.6 * scale).translate(0, 0.55 * scale, 0),     // desk
+        new THREE.BoxGeometry(4.6 * scale, 0.15 * scale, 2.2 * scale).translate(0, 2.6 * scale, 0),   // roof
+        new THREE.BoxGeometry(0.12 * scale, 2.6 * scale, 0.12 * scale).translate(-2.1 * scale, 1.3 * scale, 0),
+        new THREE.BoxGeometry(0.12 * scale, 2.6 * scale, 0.12 * scale).translate(2.1 * scale, 1.3 * scale, 0),
+    ]);
+    add(standGeo, new THREE.MeshStandardMaterial({ color: 0xffffff }), wallStands(t).map((w) => ({ x: w.x, y: pitY(w.x, w.y), z: w.y, angle: -w.angle, color: tc(w.teamId) })));
     if (signs.length) world.add(atlasPlanes(signs, 17 * scale, 1.6 * scale, '#888888'));
     if (codes.length) world.add(atlasPlanes(codes, 1.6 * scale, 1.2 * scale, 'rgba(0,0,0,0)'));
 }
