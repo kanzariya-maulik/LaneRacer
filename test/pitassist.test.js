@@ -1,0 +1,66 @@
+// Pit assist (drive.js): the game drives the car along the pit lane — in to its box, out to the limiter end
+const { test, before } = require('node:test');
+const assert = require('node:assert');
+const Track = require('../src/game/Track');
+const Game = require('../src/game/Game');
+
+let D;
+before(async () => { D = await import('../public/js/sim/drive.js'); });
+const io = { emit() {}, volatile: { emit() {} } };
+const tracks = Track.loadAll();
+
+function car(t, s, speedMs, phase) {
+    const g = new Game(io, [{ id: 'a', username: 'a', teamId: 'ferrari', assist: '100,100' }], t, { maxLaps: 3, qualifying: false, rng: () => 0.5 }, () => {});
+    const p = g.players.a, q = D.pointOnPath(t.pit, s), v = speedMs * t.scale;
+    Object.assign(p, { x: q.x, y: q.y, angle: q.angle, vx: Math.cos(q.angle) * v, vy: Math.sin(q.angle) * v, speed: v, stop: { phase, t: 0, age: 0 } });
+    return { g, p };
+}
+const tick = (p, t, input = { throttle: 0, brake: 0, steer: 0, drs: false }) => D.driveCar(p, input, t, 1 / 60);
+
+for (const id of Track.TRACK_IDS) {
+    test(`${id}: lane — from the pit mouth at 30 m/s to 12 m before the box at walking pace, never hitting a wall`, () => {
+        const t = tracks[id], sc = t.scale, { p } = car(t, 5 * sc, 30, 'lane'); // a driver braking for the pit entry; hot entries get the limiter clamp as before
+        let hits = 0, k = 0;
+        for (; k < 60 * 90 && p.box.s - (p.pitS ?? 0) > D.ASSIST_HANDOVER_M * sc; k++) {
+            const v0 = Math.hypot(p.vx, p.vy);
+            tick(p, t);
+            if (v0 / sc > 5 && Math.hypot(p.vx, p.vy) < v0 * 0.7) hits++;
+        }
+        assert.ok(k < 60 * 90, 'never reached the box');
+        assert.strictEqual(hits, 0, `${hits} wall hits`);
+        assert.ok(p.inPit, 'left the lane');
+        assert.ok(Math.hypot(p.vx, p.vy) / sc <= D.ASSIST_ARRIVE_MS + 0.5, `${(Math.hypot(p.vx, p.vy) / sc).toFixed(1)} m/s at the hand-over`);
+    });
+
+    test(`${id}: out — from the box at rest to the limiter end, moving, inside the lane`, () => {
+        const t = tracks[id], sc = t.scale, pit = t.pit, { p } = car(t, 0, 0, 'out');
+        Object.assign(p, { x: p.box.x, y: p.box.y, angle: p.box.angle });
+        let k = 0, hits = 0;
+        for (; k < 60 * 60 && (p.pitS ?? 0) < pit.limEnd; k++) {
+            const v0 = Math.hypot(p.vx, p.vy);
+            tick(p, t);
+            if (v0 / sc > 5 && Math.hypot(p.vx, p.vy) < v0 * 0.7) hits++;
+        }
+        assert.ok(k < 60 * 60, 'never reached the limiter end');
+        assert.strictEqual(hits, 0);
+        assert.ok(p.inPit);
+        const limit = (pit.limitKmh || D.PIT_LIMIT_KMH) / 3.6;
+        assert.ok(Math.hypot(p.vx, p.vy) / sc > 0.8 * limit, 'crawling at the hand-back');
+    });
+}
+
+test('the assist ignores the driver: full throttle and full lock change nothing', () => {
+    const t = tracks.monza, sc = t.scale, a = car(t, 5 * sc, 40, 'lane').p, b = car(t, 5 * sc, 40, 'lane').p;
+    for (let k = 0; k < 600; k++) { tick(a, t); tick(b, t, { throttle: 1, brake: 0, steer: 1, drs: true }); }
+    assert.deepStrictEqual([b.x, b.y, b.angle], [a.x, a.y, a.angle]);
+});
+
+test('parked phases stay still whatever the driver does', () => {
+    const t = tracks.monza;
+    for (const phase of ['service', 'hold', 'wait']) {
+        const { p } = car(t, 0, 0, phase);
+        Object.assign(p, { x: p.box.x, y: p.box.y, angle: p.box.angle });
+        for (let k = 0; k < 60; k++) tick(p, t, { throttle: 1, brake: 0, steer: 1, drs: false });
+        assert.ok(Math.hypot(p.x - p.box.x, p.y - p.box.y) < 1e-6, `${phase} moved`);
+    }
+});

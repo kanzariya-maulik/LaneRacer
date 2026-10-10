@@ -69,6 +69,47 @@ export function canStopOnMark(p, t, metres) {
     return Math.log(1 + (B * v * v) / A) / (2 * B) <= metres;
 }
 
+// Pit assist (Game.updateStop phases 'lane' and 'out'): along the pit lane's centre line at up to the limiter speed. 'lane'
+// slows to ASSIST_ARRIVE_MS by ASSIST_HANDOVER_M before the box (guideToBox parks from there); 'out' runs to the limiter
+// end. Stateless — steering and speed from the car and the track alone, so the client predictor makes the same choice
+export const ASSIST_HANDOVER_M = 12, ASSIST_ARRIVE_MS = 15 / 3.6;
+const ASSIST_DEC = 7;          // m/s² planned braking (the car manages ~15)
+const ASSIST_LOOK_S = 0.35, ASSIST_LOOK_MIN_M = 8, ASSIST_GAIN = 2; // pedal per m/s of speed error
+
+// The lane centre this far along it (world units), carried straight on past the exit tip
+export function pointOnPath(pit, s) {
+    const P = pit.path, c = pit.cum, n = P.length;
+    if (s >= c[n - 1]) {
+        const a = P[n - 2], b = P[n - 1], ang = Math.atan2(b.y - a.y, b.x - a.x), over = s - c[n - 1];
+        return { x: b.x + Math.cos(ang) * over, y: b.y + Math.sin(ang) * over, angle: ang };
+    }
+    let i = 0;
+    while (i < n - 2 && c[i + 1] < s) i++;
+    const a = P[i], b = P[i + 1], f = c[i + 1] > c[i] ? Math.max(0, (s - c[i]) / (c[i + 1] - c[i])) : 0;
+    return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f, angle: Math.atan2(b.y - a.y, b.x - a.x) };
+}
+
+export function pitAssist(p, t) {
+    const pit = t.pit, sc = t.scale, v = p.speed / sc, s = p.pitS ?? 0;
+    // Steering: pure pursuit onto the lane centre a moment ahead (pulls a car out of its box, too)
+    const aim = pointOnPath(pit, s + Math.max(ASSIST_LOOK_MIN_M, ASSIST_LOOK_S * Math.abs(v)) * sc);
+    const dx = (aim.x - p.x) / sc, dy = (aim.y - p.y) / sc, ld = Math.max(1, Math.hypot(dx, dy));
+    const err = Math.atan2(Math.sin(Math.atan2(dy, dx) - p.angle), Math.cos(Math.atan2(dy, dx) - p.angle));
+    const k = (2 * Math.sin(err)) / ld; // 1/m
+    const lock = (1 + C.ASSIST_STEER * parseAssist(p.assist).steer) * C.MAX_STEER, lockNow = lock / (1 + Math.abs(v) / C.STEER_FADE);
+    const steer = Math.max(-1, Math.min(1, Math.atan(k * C.WHEELBASE) / lockNow));
+    // Speed: the limiter, slowed for the pit-entry board and (arriving) for the box
+    const limit = (pit.limitKmh || PIT_LIMIT_KMH) / 3.6;
+    let want = limit;
+    if (s < pit.limStart) want = Math.max(limit, Math.sqrt(limit * limit + 2 * ASSIST_DEC * (pit.limStart - s) / sc));
+    if (p.stop?.phase === 'lane') {
+        const toGo = Math.max(0, (p.box.s - s) / sc - ASSIST_HANDOVER_M);
+        want = Math.min(want, Math.sqrt(ASSIST_ARRIVE_MS * ASSIST_ARRIVE_MS + 2 * ASSIST_DEC * toGo));
+    }
+    const more = want - v;
+    return { steer, throttle: Math.max(0, Math.min(1, more * ASSIST_GAIN)), brake: Math.max(0, Math.min(1, -more * ASSIST_GAIN)), drs: false };
+}
+
 // A car being guided into its box (Game.updateStop): onto its mark, shuffling like a driver would. Box frame: a = metres along
 // the box heading (< 0 short of the mark), l = metres to the side, h = heading error. The car drives the arc through the mark
 // when its steering reaches; otherwise it picks the quickest first stroke (forward or reverse, full lock either way or straight)
@@ -148,12 +189,14 @@ export function guideToBox(p, t) {
 
 export function driveCar(p, input, t, dt) {
     const scale = t.scale, pit = t.pit;
-    // Pit stop (Game.updateStop): guided into the box, then held still while the tyres change
-    if (p.stop && p.stop.phase !== 'guide') {
+    // Pit stop (Game.updateStop): the game drives — along the lane (pitAssist), onto the mark (guideToBox), parked
+    // while the tyres change or a quali car waits; the driver's input is ignored throughout
+    const phase = p.stop?.phase;
+    if (phase === 'service' || phase === 'hold' || phase === 'wait') {
         p.vx = p.vy = p.speed = 0; p.steer = 0;
         return Physics.nearestOnTrack(p.x, p.y, t, p.roadI);
     }
-    if (p.stop && p.box) input = guideToBox(p, t);
+    if (phase && p.box) input = phase === 'guide' ? guideToBox(p, t) : pitAssist(p, t);
     const x0 = p.x, y0 = p.y;
     // The pit lane only matters near it: elsewhere a far-away answer without searching it (3 of these a tick)
     const nearPit = (x, y) => (!pit ? null : nearPitBox(pit, x, y) ? Physics.nearestOnPathHint(x, y, pit.path, p.pitI) : FAR_PIT);
