@@ -60,7 +60,7 @@ export function crewSpots(box, scale) {
 export function boxCue(distM, speedMs, canStop) {
     if (distM > 0.5) {
         if (!canStop(distM + 0.5)) return 'MISSED — GO AROUND';
-        return canStop(distM - 3) ? `YOUR BOX ${Math.round(distM)} m` : 'BRAKE';
+        return speedMs < 3 || canStop(distM - 3) ? `YOUR BOX ${Math.round(distM)} m` : 'BRAKE';
     }
     return distM < -1 && speedMs > 2 ? 'MISSED — GO AROUND' : null;
 }

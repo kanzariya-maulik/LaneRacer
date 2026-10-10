@@ -52,6 +52,7 @@ test('boxCue: distance, BRAKE when braking is due, MISSED when too late or past'
     assert.strictEqual(L.boxCue(31, 22, stopsIn(30)), 'BRAKE');
     assert.strictEqual(L.boxCue(20, 22, stopsIn(30)), 'MISSED — GO AROUND');
     assert.strictEqual(L.boxCue(-3, 15, stopsIn(30)), 'MISSED — GO AROUND');
+    assert.strictEqual(L.boxCue(2, 1.5, stopsIn(0.5)), 'YOUR BOX 2 m'); // crawling onto the mark: no BRAKE flash
     assert.strictEqual(L.boxCue(0.2, 0, stopsIn(0)), null); // on the mark
     assert.strictEqual(L.boxCue(-3, 0.5, stopsIn(0)), null); // crawled just past and stopped: the guide handles it
 });
