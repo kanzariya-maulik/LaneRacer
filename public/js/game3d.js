@@ -15,7 +15,7 @@ import { estimateLoad } from './audio/mix.js';
 import * as Sound from './audio/audio.js';
 import { gapText, driverCode, lapDelta, stepFollow, watchTarget, inDrsZone, drsHint, liveSectors, resultCells, sectorClass, lastLapClass } from './timing.js';
 import { MODES, segmentColor, cornerMask, aheadM, trackIndex, nextMode } from './racingline.js';
-import { distToPath } from './pitLayout.js';
+import { distToPath, pitLayout, BOX_M } from './pitLayout.js';
 
 // World units per metre come from the track JSON (track.scale = 6).
 const WHEEL_RADIUS_M = WHEEL_RADIUS; // carShape.js
@@ -627,6 +627,12 @@ function buildPit(pit, t) {
     const inL = half.map((h) => h - line), inR = half.map((h) => -h + line);
     world.add(strip(pit.path, inL, half, 0.85, (i) => inner(i) && W[i] > line, solid('#f2f2f2')));
     world.add(strip(pit.path, neg(half), inR, 0.85, (i) => inner(i) && W[i] > line, solid('#f2f2f2')));
+    const lay = pitLayout(t);
+    // Fast lane | working lane (white) and the garage-row edge (yellow), along the garages
+    const onSpan = (i) => inner(i) && i >= lay.split.i0 && i < lay.split.i1;
+    world.add(strip(pit.path, half.map(() => -line / 2), half.map(() => line / 2), 0.86, onSpan, solid('#f2f2f2')));
+    const yA = half.map((h) => -s * (h - line)), yB = half.map((h) => -s * (h - 2 * line));
+    world.add(strip(pit.path, s > 0 ? yA : yB, s > 0 ? yB : yA, 0.86, onSpan, solid('#ffd400')));
 
     // Pit wall on the track side; outer wall behind the lane except where the garages open onto it
     world.add(wall(pit.wall, 0, 1 * scale, (i) => i < pit.wall.length - 1, solid('#9aa0a6')));
@@ -656,28 +662,43 @@ function buildPit(pit, t) {
         world.add(m);
     }
 
-    const buildings = [], signs = [], marks = [];
-    for (const g of pit.garages) {
-        const info = teamInfo[g.teamId] || { name: g.teamId, chatColor: '#888888' };
-        const c = side(g, g.angle, -s * (back + 2.5 * scale)), h = pitY(g.x, g.y);
-        // no building where it would stand on the track's run-off (Zandvoort, Sakhir: the track runs close behind the pits)
-        const fx = Math.cos(g.angle), fy = Math.sin(g.angle), onTrack = [[-9, -2.5], [9, -2.5], [-9, 2.5], [9, 2.5]].some(([a, l]) =>
-            distToPath({ x: c.x + (fx * a - fy * l) * scale, y: c.y + (fy * a + fx * l) * scale }, t.path) < t.width / 2 + (t.wallOffset ?? WALL_OFFSET));
-        if (!onTrack) buildings.push({ x: c.x, y: h, z: c.y, angle: -g.angle });
-        const f = side(g, g.angle, -s * (back - 0.1 * scale));
-        if (!onTrack) signs.push({ text: info.name.toUpperCase(), x: f.x, y: 5 * scale + h, z: f.y, rotY: s > 0 ? -g.angle : Math.PI - g.angle, bg: info.chatColor });
-        for (const b of g.boxes) marks.push({ x: b.x, y: 0.8 + h, z: b.y, angle: -b.angle, color: info.chatColor });
+    const shells = [], signs = [], doors = [], lit = [], roofs = [], paint = [], outlines = [], codes = [];
+    const tc = (id) => teamInfo[id]?.chatColor || '#888888';
+    for (const g of lay.garages) {
+        if (g.skip) continue;
+        const h = pitY(g.x, g.y), info = teamInfo[g.teamId] || { name: g.teamId };
+        shells.push({ x: g.x, y: h, z: g.y, angle: -g.angle });
+        // Open front: a dark doorway with the team-colour back wall lit inside it, facing the lane
+        const d = side(g.front, g.angle, s * 0.02 * scale), e = side(g.front, g.angle, s * 0.04 * scale), rot = s > 0 ? -g.angle : Math.PI - g.angle;
+        doors.push({ x: d.x, y: h + 2.75 * scale, z: d.y, angle: rot });
+        lit.push({ x: e.x, y: h + 2.4 * scale, z: e.y, angle: rot, color: tc(g.teamId) });
+        const f = side(g.front, g.angle, s * 0.1 * scale);
+        signs.push({ text: info.name.toUpperCase(), x: f.x, y: 6.4 * scale + h, z: f.y, rotY: rot, bg: tc(g.teamId) });
     }
-    const bGeo = new THREE.BoxGeometry(18 * scale, 12 * scale, 5 * scale); // 6 m above the pit lane, 6 m below: never floats
-    if (buildings.length) {
-        const garagesMesh = instanced(bGeo, new THREE.MeshStandardMaterial({ color: 0x2b2f36 }), buildings);
-        garagesMesh.castShadow = true;
-        world.add(garagesMesh);
+    for (const c of lay.canopy) roofs.push({ x: c.x, y: pitY(c.x, c.y) + 5.6 * scale, z: c.y, angle: -c.angle });
+    for (const b of lay.boxes) {
+        const h = pitY(b.x, b.y), dark = new THREE.Color(tc(b.teamId)).multiplyScalar(0.75);
+        paint.push({ x: b.x, y: 0.8 + h, z: b.y, angle: -b.angle, color: dark });
+        outlines.push({ x: b.x, y: 0.82 + h, z: b.y, angle: -b.angle });
+        codes.push({ text: b.code, x: b.codeAt.x, y: 0.83 + h, z: b.codeAt.y, rotY: facing(b.angle), flat: true });
     }
+    const add = (geo, mat, list) => { if (list.length) world.add(instanced(geo, mat, list)); };
+    const shellMesh = instanced(new THREE.BoxGeometry(18 * scale, 12 * scale, 5 * scale), new THREE.MeshStandardMaterial({ color: 0x2b2f36 }), shells);
+    shellMesh.castShadow = true;
+    if (shells.length) world.add(shellMesh);
+    add(new THREE.PlaneGeometry(16 * scale, 5.5 * scale), new THREE.MeshBasicMaterial({ color: 0x0b0d10 }), doors);
+    add(new THREE.PlaneGeometry(14 * scale, 4.2 * scale), new THREE.MeshBasicMaterial({ color: 0xffffff }), lit);
+    add(new THREE.BoxGeometry(18 * scale, 0.2 * scale, 1.5 * scale), new THREE.MeshStandardMaterial({ color: 0xf2f2f2 }), roofs);
+    const boxGeo = new THREE.PlaneGeometry(BOX_M.len * scale, BOX_M.wide * scale);
+    boxGeo.rotateX(-Math.PI / 2);
+    add(boxGeo, new THREE.MeshStandardMaterial({ color: 0xffffff }), paint);
+    // Car outline: four thin bars (5.4 × 2 m) laid flat
+    const bar = (w, d, x, z) => { const q = new THREE.PlaneGeometry(w, d); q.rotateX(-Math.PI / 2); q.translate(x, 0, z); return q; };
+    const lw = 0.15 * scale, ol = 5.4 * scale, ow = 2 * scale;
+    const outlineGeo = mergeGeometries([bar(ol, lw, 0, ow / 2), bar(ol, lw, 0, -ow / 2), bar(lw, ow, ol / 2, 0), bar(lw, ow, -ol / 2, 0)]);
+    add(outlineGeo, new THREE.MeshStandardMaterial({ color: 0xf2f2f2 }), outlines);
     if (signs.length) world.add(atlasPlanes(signs, 17 * scale, 1.6 * scale, '#888888'));
-    const mGeo = new THREE.PlaneGeometry(6 * scale, 2.6 * scale);
-    mGeo.rotateX(-Math.PI / 2);
-    world.add(instanced(mGeo, new THREE.MeshStandardMaterial({ transparent: true, opacity: 0.45 }), marks));
+    if (codes.length) world.add(atlasPlanes(codes, 1.6 * scale, 1.2 * scale, 'rgba(0,0,0,0)'));
 }
 
 const solid = (hex) => { const c = new THREE.Color(hex); return () => c; };
