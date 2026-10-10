@@ -90,7 +90,7 @@ export function pointOnPath(pit, s) {
 }
 
 export function pitAssist(p, t) {
-    const pit = t.pit, sc = t.scale, v = p.speed / sc, s = p.pitS ?? 0;
+    const pit = t.pit, sc = t.scale, v = p.speed / sc, s = pitAlong(pit, Physics.nearestOnPath(p.x, p.y, pit.path, false)); // own lookup: pitS/pitI are last tick's (unset in the predictor)
     // Steering: pure pursuit onto the lane centre a moment ahead (pulls a car out of its box, too)
     const aim = pointOnPath(pit, s + Math.max(ASSIST_LOOK_MIN_M, ASSIST_LOOK_S * Math.abs(v)) * sc);
     const dx = (aim.x - p.x) / sc, dy = (aim.y - p.y) / sc, ld = Math.max(1, Math.hypot(dx, dy));
@@ -101,7 +101,8 @@ export function pitAssist(p, t) {
     // Speed: the limiter, slowed for the pit-entry board and (arriving) for the box
     const limit = (pit.limitKmh || PIT_LIMIT_KMH) / 3.6;
     let want = limit;
-    if (s < pit.limStart) want = Math.max(limit, Math.sqrt(limit * limit + 2 * ASSIST_DEC * (pit.limStart - s) / sc));
+    // before the board a hot car only brakes onto the curve that meets the limiter there; it never speeds up past the limiter
+    if (s < pit.limStart) want = Math.max(limit, Math.min(v, Math.sqrt(limit * limit + 2 * ASSIST_DEC * (pit.limStart - s) / sc)));
     if (p.stop?.phase === 'lane') {
         const toGo = Math.max(0, (p.box.s - s) / sc - ASSIST_HANDOVER_M);
         want = Math.min(want, Math.sqrt(ASSIST_ARRIVE_MS * ASSIST_ARRIVE_MS + 2 * ASSIST_DEC * toGo));
@@ -207,7 +208,7 @@ export function driveCar(p, input, t, dt) {
     p.grade = road.grade; p.vcurv = road.vcurv;
     if (road.i !== undefined) p.roadI = road.i;
     const level = parseAssist(p.assist).brake; // braking help: 0 off, 0.5 Low, 1 High (off in the pit lane)
-    const used = level > 0 && !p.inPit ? brakeAssist(p, input, t, before, level) : input;
+    const used = level > 0 && !p.inPit && !p.stop ? brakeAssist(p, input, t, before, level) : input;
     p.usedThrottle = used.throttle; // what the car got after the help (engine sound follows the help's lift)
     p.dragMul = (p.drs ? DRS_DRAG : 1) * (1 - (p.tow || 0));
     const speed0 = p.speed || 0;

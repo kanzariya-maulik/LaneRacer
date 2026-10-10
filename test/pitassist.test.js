@@ -4,8 +4,8 @@ const assert = require('node:assert');
 const Track = require('../src/game/Track');
 const Game = require('../src/game/Game');
 
-let D;
-before(async () => { D = await import('../public/js/sim/drive.js'); });
+let D, Physics;
+before(async () => { D = await import('../public/js/sim/drive.js'); Physics = (await import('../public/js/sim/physics.js')).default; });
 const io = { emit() {}, volatile: { emit() {} } };
 const tracks = Track.loadAll();
 
@@ -16,6 +16,9 @@ function car(t, s, speedMs, phase) {
     return { g, p };
 }
 const tick = (p, t, input = { throttle: 0, brake: 0, steer: 0, drs: false }) => D.driveCar(p, input, t, 1 / 60);
+// Metres the car's centre is outside the lane edge (≤ 0 inside)
+const outside = (p, t) => { const n = Physics.nearestOnPath(p.x, p.y, t.pit.path, false); return (n.dist - D.pitHalf(t.pit, n)) / t.scale; };
+const LANE_MARGIN_M = 0.5;
 
 for (const id of Track.TRACK_IDS) {
     test(`${id}: lane — from the pit mouth at 30 m/s to 12 m before the box at walking pace, never hitting a wall`, () => {
@@ -25,6 +28,8 @@ for (const id of Track.TRACK_IDS) {
             const v0 = Math.hypot(p.vx, p.vy);
             tick(p, t);
             if (v0 / sc > 5 && Math.hypot(p.vx, p.vy) < v0 * 0.7) hits++;
+            const o = outside(p, t);
+            assert.ok(o <= LANE_MARGIN_M, `${o.toFixed(2)} m outside the lane at ${(p.pitS / sc).toFixed(0)} m`);
         }
         assert.ok(k < 60 * 90, 'never reached the box');
         assert.strictEqual(hits, 0, `${hits} wall hits`);
@@ -40,6 +45,8 @@ for (const id of Track.TRACK_IDS) {
             const v0 = Math.hypot(p.vx, p.vy);
             tick(p, t);
             if (v0 / sc > 5 && Math.hypot(p.vx, p.vy) < v0 * 0.7) hits++;
+            const o = outside(p, t);
+            assert.ok(o <= LANE_MARGIN_M, `${o.toFixed(2)} m outside the lane at ${(p.pitS / sc).toFixed(0)} m`);
         }
         assert.ok(k < 60 * 60, 'never reached the limiter end');
         assert.strictEqual(hits, 0);
@@ -62,5 +69,17 @@ test('parked phases stay still whatever the driver does', () => {
         Object.assign(p, { x: p.box.x, y: p.box.y, angle: p.box.angle });
         for (let k = 0; k < 60; k++) tick(p, t, { throttle: 1, brake: 0, steer: 1, drs: false });
         assert.ok(Math.hypot(p.x - p.box.x, p.y - p.box.y) < 1e-6, `${phase} moved`);
+    }
+});
+
+test('the assist finds the car on the lane itself: a stale or missing pitS (the client predictor) changes nothing', () => {
+    const t = tracks.monza, { p } = car(t, 0, 0, 'out');
+    Object.assign(p, { x: p.box.x, y: p.box.y, angle: p.box.angle });
+    tick(p, t); // sets pitS / pitI as the server would
+    const want = D.pitAssist(p, t);
+    for (const pitS of [undefined, 0, p.pitS + 200 * t.scale]) {
+        const q = JSON.parse(JSON.stringify(p));
+        if (pitS === undefined) { delete q.pitS; delete q.pitI; } else q.pitS = pitS;
+        assert.deepStrictEqual(D.pitAssist(q, t), want, `pitS ${pitS}`);
     }
 });
