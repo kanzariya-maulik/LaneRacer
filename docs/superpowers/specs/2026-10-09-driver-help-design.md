@@ -7,7 +7,7 @@ Builds on: `2026-10-02-racing-line-design.md`, `2026-10-01-quali-sectors-limits-
 
 ## Goal
 
-Help that keeps beginners on the track without making the car feel slow, and never makes anyone faster than driving well. A beginner on full help gets round every corner and is only a little slower (2–4 % per lap) than a driver who follows the racing line and brakes late. The racing line's colours show the real braking point, so following them teaches late braking. For serious races the host can give everyone the same help.
+Help that keeps beginners on the track without making the car feel slow, and never makes anyone faster than driving well. A beginner on full help (High) gets round every corner and is a little slower than a driver who follows the racing line at the limit with no help: never faster, at most 6 % slower per lap (measured with the test bot: Monza +0.4 %, Monaco +4.7 %, Spa +0.6 %). The racing line's colours show the real braking point, so following them teaches late braking. For serious races the host can give everyone the same help.
 
 ## Why the current help feels wrong
 
@@ -41,12 +41,14 @@ Unchanged string `'steer,brake'` in percent, parsed by `parseAssist`. Levels: st
 - Tyre grip: the help reads the car's `tyreGrip` and scales the limit by `sqrt(tyreGrip)`, so worn tyres get braked for earlier.
 
 ### Braking help (`assist.js` `brakeAssist`)
-Same scan ahead as today, judged against `lineLimit` instead of `safeSpeed`:
-- **High** (`brake = 1`): target `0.95 × limit`; brake (full brake, throttle cut) when reaching the target needs more than `0.9` of the braking grip available at the target speed. Smooth, early enough to never miss a corner.
-- **Low** (`brake = 0.5`): target `0.90 × limit`; brake only when reaching that target needs more than `1.0` of the braking grip available at the target speed, i.e. at the last possible moment with the car's full braking. Stateless (no memory between ticks, so the client predictor matches). Does nothing until the driver could no longer make the corner, then brakes hard and leaves the car 10 % under the corner speed: a safety net that costs time when it triggers.
+Same scan ahead as today, judged against `lineLimit` instead of `safeSpeed`. Target = `aim × lineLimit × √tyreGrip`; the help brakes (full brake, throttle cut) when reaching the target needs more than `margin` of the braking grip available at the target speed. It also cuts the throttle (brake and steering kept) when the car is over the target for a line point within 30 m (`liftM`), so a held W doesn't eat the cornering grip, or when the braking needed is over `liftK` of the planned braking (braking imminent). Stateless (no memory between ticks, so the client predictor matches).
+- **High** (`brake = 1`): aim `0.90`, margin `0.7`, lift window 30 m (`liftK 1`: no lift before braking). Brakes early, lifts in the corner.
+- **Low** (`brake = 0.5`): aim `0.85`, margin `1.0`, lift window 30 m, `liftK 0.8`. Brakes at the last moment with the car's full braking and leaves it 15 % under the corner speed; lifts only just before (Monza first chicane: lift 283 m / brake 235 m before the apex at 330 km/h, 169 / 145 m at 250 km/h). A safety net that costs time when it triggers.
 - **Off**: no intervention.
 - Driver braking harder than the help, steering, and the pit lane (help off in the lane) behave as today. Grade (uphill/downhill) is accounted for as today.
-- Tuning constants (`HIGH_AIM 0.95`, `HIGH_MARGIN 0.9`, `LOW_AIM 0.90`, `LOW_MARGIN 1.0`) are named at the top of `assist.js`; the lap-time test below pins their effect.
+- Lifting off W brakes on Off and Low (as the old lift-off braking); only High coasts (`liftOffBrake`).
+- Constants `HIGH = { aim 0.90, margin 0.7, liftM 30, liftK 1 }`, `LOW = { aim 0.85, margin 1.0, liftM 30, liftK 0.8 }` sit at the top of `assist.js`; `test/help.test.js` pins their effect.
+- The client's engine sound and gearbox follow the throttle the help applied (`p.usedThrottle`, set by `driveCar`), so the driver hears the help lift.
 
 ### Host "Same for all" (`lobby.js`, `socketManager.js`, `Game.js`)
 - New setting `help: { mode: 'choose' | 'fixed', steer: 0|100, brake: 0|50|100 }`, default `{ mode: 'choose', steer: 100, brake: 100 }`, sanitised in `lobby.js`.
@@ -55,9 +57,9 @@ Same scan ahead as today, judged against `lineLimit` instead of `safeSpeed`:
 
 ## 2. What drivers see
 
-- **Lobby, My settings:** two button groups replace the sliders: Braking Off / Low / High, Steering Off / On, each with a one-line hint ("High: brakes for you, about 2–3 % slower a lap", "Low: catches you if you'd miss a corner, costs time", "Off: fastest if you brake late"). Greyed with "set by host" when the host chose "Same for all". Saved per browser as today (`lanrace.assist`).
+- **Lobby, My settings:** two button groups replace the sliders: Braking Off / Low / High, Steering Off / On, each with a one-line hint ("High: brakes and lifts for you, a few % slower a lap", "Low: saves you if you would miss a corner, costs time", "Off: you brake and lift. Fastest if you brake late"). Greyed with "set by host" when the host chose "Same for all". Saved per browser as today (`lanrace.assist`).
 - **Lobby, Race settings (host):** "Driver help: Each driver chooses / Same for all", and with "Same for all" the two level pickers. Non-hosts see it read-only like other settings.
-- **Q key in a session** (today it cycles Full → Steer only → Brake only → Off): steps braking help Off → Low → High → Off with a banner "BRAKING HELP: LOW"; does nothing (banner "SET BY HOST") when fixed.
+- **Q key in a session** (today it cycles Full → Steer only → Brake only → Off): steps braking help Off → Low → High → Off with a banner "BRAKING HELP: LOW"; does nothing (banner "DRIVER HELP: SET BY HOST") when fixed.
 - **Racing line:** `RacingLine.compute` speed profile uses real grip (no assist grip, no assist cap), so its red zones start at the real-limit braking point. Modes, R key and recolouring from the player's own speed are unchanged.
 - **Tower and results:** `B` badge when braking help is Low or High, `S` when steering help is On, from each lobby player's `assist` (`clientState.players[id].assist`, already re-sent in `lobby_state_sync` whenever it changes).
 
@@ -68,12 +70,13 @@ Same scan ahead as today, judged against `lineLimit` instead of `safeSpeed`:
 - Reconnect: the player's saved choice is restored, unless fixed.
 - Qualifying: same help rules; the badges show on the quali results too.
 - Golden physics trace: re-recorded once after removing `ASSIST_GRIP` and switching the help to `lineLimit`, after confirming the divergence comes from those changes.
-- Tyre calibration (`LOAD_TYPICAL`): re-checked with `scripts/calibrate-tyres.js` since corner speeds change; update if outside ±5 %.
+- Tyre calibration (`LOAD_TYPICAL`): re-checked since corner speeds changed; now `1.25` (help-off racing-line driving measures 1.27), so tyres wear ~11 % slower than before.
+- Known exceptions: steering help's extra lock lets a car follow Monaco's 11.6 m hairpin line faster than steering Off (the S badge shows it); at six fast corners the line's limit is below the old centreline speed (Silverstone, Spa, Suzuka, Interlagos, Spielberg, Hungaroring, 1–4.5 m/s), so High brakes a little more there than before.
 
 ## Testing
 
 - `assist.test.js` (or the existing assist tests): level parsing and snapping; Low does nothing below the limit and brakes when the corner can't be made; High brakes earlier than Low; Off never brakes.
-- Lap-time test (bot following the racing line with full throttle and steering on the line, at Monza, Monaco and Spa): High laps 2–4 % slower than an "Off at the limit" bot that brakes at 1.0 × limit; neither leaves the track. Low with a driver who never brakes: stays on the track every corner and laps slower than High.
+- Lap-time test (bot following the racing line with full throttle and steering on the line, at Monza, Monaco and Spa): High laps no faster than an "Off at the limit" bot that drives 1.0 × line speed (fairness floor) and at most 6 % slower; neither leaves the track. Low with a driver who never brakes: stays on the track every corner and laps slower than High (measured Low/limit: Monza 1.010, Monaco 1.060, Spa 1.011).
 - Fairness: steering help On vs Off at the same input gives the same cornering grip (same max lateral acceleration).
 - Host fixed mode: `set_assist` ignored, every car gets the host's levels at start and on change.
 - Shared-sim parity: client and server `driveCar` stay bit-identical with `lineLimit`.
