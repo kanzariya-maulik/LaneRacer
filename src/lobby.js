@@ -83,7 +83,7 @@ function canJoinTeam(players, teamId, selfId) {
 
 // Join order decides who races when more than `max` players are ready
 function pickRacers(players, max = MAX_RACERS) {
-    const eligible = Object.values(players).filter(p => !p.isSpectating);
+    const eligible = Object.values(players).filter(p => !p.isSpectating && !p.disconnected);
     return { racers: eligible.slice(0, max), overflow: eligible.slice(max) };
 }
 

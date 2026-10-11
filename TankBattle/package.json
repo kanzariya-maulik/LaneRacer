@@ -1,0 +1,22 @@
+{
+  "name": "battle-city-lan",
+  "version": "1.0.0",
+  "description": "Authentic Battle City (Tank 1990) LAN Multiplayer Recreation",
+  "type": "module",
+  "main": "server/server.js",
+  "scripts": {
+    "start": "node server/server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "keywords": [
+    "battle-city",
+    "tank-1990",
+    "nes",
+    "lan-multiplayer"
+  ],
+  "author": "Antigravity",
+  "license": "ISC",
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

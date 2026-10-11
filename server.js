@@ -17,12 +17,24 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 // Serve static files from the public directory
-// no-cache: browsers check back (a cheap 304 when unchanged) instead of guessing how long a file stays fresh, so every
-// player gets the current game code after an update (stale modules otherwise linger, the terrain worker's most of all)
-app.use(express.static(path.join(__dirname, 'public'), { setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache') }));
-app.use('/data/tracks', express.static(path.join(__dirname, 'data', 'tracks')));
+// html and js: no-cache so latest code is always loaded
+// 3d models, textures and sounds: cached by browser for instant loading
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.html') || filePath.endsWith('.js')) {
+      res.setHeader('Cache-Control', 'no-cache');
+    } else {
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+    }
+  }
+}));
+app.use('/data/tracks', express.static(path.join(__dirname, 'data', 'tracks'), {
+  setHeaders: (res) => res.setHeader('Cache-Control', 'public, max-age=86400')
+}));
 // Three.js served locally so LAN play works without internet
-app.use('/vendor/three', express.static(path.join(__dirname, 'node_modules', 'three')));
+app.use('/vendor/three', express.static(path.join(__dirname, 'node_modules', 'three'), {
+  setHeaders: (res) => res.setHeader('Cache-Control', 'public, max-age=604800')
+}));
 
 // Set up socket logic
 setupSocketManager(io);

@@ -331,7 +331,7 @@ function syncBotPlayer(io) {
             }
 
             const notReady = Object.values(state.players)
-                .some(p => p.id !== state.hostId && !p.isReady && !p.isSpectating && !p.isBot);
+                .some(p => p.id !== state.hostId && !p.isReady && !p.isSpectating && !p.isBot && !p.disconnected);
             if (notReady) {
                 socket.emit('chat_msg', { username: 'SYSTEM', color: '#ff0000', msg: 'Not all players are ready!' });
                 return;

@@ -1,14 +1,21 @@
 # ╔══════════════════════════════════════════════════════════════╗
 # ║              🏎  LAN RACE — Makefile                         ║
 # ║  Usage: make <target>                                        ║
+# ║  Tank Battle: make <target>-t                                ║
 # ╚══════════════════════════════════════════════════════════════╝
 
-# ── Config ────────────────────────────────────────────────────
+# ── Config (LAN Race) ─────────────────────────────────────────
 APP       := server.js
 PORT      ?= 3232
 PID_FILE  := .lanrace.pid
 LOG_FILE  := .lanrace.log
 NODE      := node
+
+# ── Config (Tank Battle) ──────────────────────────────────────
+APP_T      := TankBattle/server.js
+PORT_T     ?= 3333
+PID_FILE_T := .tankbattle.pid
+LOG_FILE_T := .tankbattle.log
 
 # ── Colours ───────────────────────────────────────────────────
 BOLD   := \033[1m
@@ -19,7 +26,12 @@ RED    := \033[1;31m
 RESET  := \033[0m
 
 .DEFAULT_GOAL := all
-.PHONY: all dev watch help start stop kill-all restart status logs info urls install test clean
+.PHONY: all dev watch help start stop kill-all restart status logs info urls install test clean \
+        all-t dev-t watch-t help-t start-t stop-t kill-all-t restart-t status-t logs-t info-t urls-t install-t test-t clean-t
+
+# ══════════════════════════════════════════════════════════════
+#              LAN RACE TARGETS (Default)
+# ══════════════════════════════════════════════════════════════
 
 # ── Run Project (Default Target with Watch Mode) ──────────────
 all: kill-all urls
@@ -85,7 +97,7 @@ help: info
 info:
 	@printf "\n$(BOLD)$(CYAN)🏎  LAN RACE — Available Commands$(RESET)\n"
 	@printf "$(CYAN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)\n"
-	@printf "  $(GREEN)make all$(RESET)        — Kill existing server, print links, and run the project\n"
+	@printf "  $(GREEN)make all$(RESET)        — Kill existing server, print links, and run LAN Race\n"
 	@printf "  $(GREEN)make start$(RESET)      — Start the server in background and print connection links\n"
 	@printf "  $(GREEN)make stop$(RESET)       — Stop the running background server\n"
 	@printf "  $(GREEN)make kill-all$(RESET)   — Force kill all running server instances and remove PID file\n"
@@ -97,7 +109,13 @@ info:
 	@printf "  $(GREEN)make install$(RESET)    — Install npm dependencies\n"
 	@printf "  $(GREEN)make test$(RESET)       — Run project automated test suite\n"
 	@printf "  $(GREEN)make clean$(RESET)      — Remove PID and log files\n"
-	@printf "\n  $(YELLOW)PORT=XXXX make all$(RESET)   — Run on a custom port (default: $(PORT))\n\n"
+	@printf "\n  $(YELLOW)PORT=XXXX make all$(RESET)   — Run on a custom port (default: $(PORT))\n"
+	@printf "\n  $(BOLD)$(CYAN)🛡  TANK BATTLE COMMANDS (-t Suffix):$(RESET)\n"
+	@printf "  $(GREEN)make all-t$(RESET)      — Run Tank Battle in watch mode (port: $(PORT_T))\n"
+	@printf "  $(GREEN)make start-t$(RESET)    — Start Tank Battle in background\n"
+	@printf "  $(GREEN)make stop-t$(RESET)     — Stop Tank Battle server\n"
+	@printf "  $(GREEN)make test-t$(RESET)     — Run Tank Battle unit tests\n"
+	@printf "  $(GREEN)make info-t$(RESET)     — Show full list of -t commands\n\n"
 
 # ── Install Dependencies ──────────────────────────────────────
 install:
@@ -114,4 +132,103 @@ test:
 clean:
 	@printf "$(YELLOW)🧹  Cleaning PID and log files...$(RESET)\n"
 	@$(NODE) -e "const fs=require('fs'); for(const f of ['$(PID_FILE)','$(LOG_FILE)']) { if(fs.existsSync(f)) try{ fs.unlinkSync(f); }catch(e){} }"
+	@printf "$(GREEN)✅  Done.$(RESET)\n"
+
+# ══════════════════════════════════════════════════════════════
+#              TANK BATTLE TARGETS (-t Suffix)
+# ══════════════════════════════════════════════════════════════
+
+# ── Run Tank Battle (Default Target with Watch Mode) ──────────
+all-t: kill-all-t urls-t
+	@printf "$(GREEN)▶  Starting Tank Battle server (watch mode) on port $(PORT_T)...$(RESET)\n"
+	@PORT=$(PORT_T) $(NODE) --watch $(APP_T)
+
+dev-t: all-t
+watch-t: all-t
+
+# ── Start Tank Server in Background ───────────────────────────
+start-t: kill-all-t
+	@printf "$(GREEN)▶  Starting Tank Battle server in background on port $(PORT_T)...$(RESET)\n"
+	@PORT=$(PORT_T) nohup $(NODE) $(APP_T) >> $(LOG_FILE_T) 2>&1 & echo $$! > $(PID_FILE_T); \
+	sleep 1; \
+	if [ -f $(PID_FILE_T) ] && kill -0 $$(cat $(PID_FILE_T)) 2>/dev/null; then \
+		printf "$(GREEN)✅  Tank Battle server started! PID=$$(cat $(PID_FILE_T))$(RESET)\n\n"; \
+		$(MAKE) --no-print-directory urls-t; \
+	else \
+		printf "$(RED)❌  Tank Battle server failed to start. Check logs:$(RESET)\n"; \
+		tail -20 $(LOG_FILE_T) 2>/dev/null || true; \
+	fi
+
+# ── Stop Tank Server ──────────────────────────────────────────
+stop-t: kill-all-t
+
+# ── Kill All Tank Server Instances ────────────────────────────
+kill-all-t:
+	@printf "$(RED)⏹  Killing all existing Tank Battle server instances on port $(PORT_T)...$(RESET)\n"
+	@$(NODE) scripts/kill-server.js $(PORT_T) $(PID_FILE_T) 2>/dev/null || true
+	@printf "$(GREEN)✅  All Tank Battle server instances killed.$(RESET)\n"
+
+# ── Restart Tank Server ───────────────────────────────────────
+restart-t: kill-all-t start-t
+
+# ── Tank Server Status ────────────────────────────────────────
+status-t:
+	@printf "\n$(BOLD)$(CYAN)🛡  Tank Battle Server Status$(RESET)\n"
+	@printf "$(CYAN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)\n"
+	@$(NODE) -e "const fs=require('fs'); const net=require('net'); const pidFile='$(PID_FILE_T)'; const port=$(PORT_T); const s=net.createServer(); s.once('error', (e)=>{ if(e.code==='EADDRINUSE'){ const pid = fs.existsSync(pidFile) ? fs.readFileSync(pidFile,'utf8').trim() : 'Unknown'; console.log('  Status : \033[1;32m● RUNNING\033[0m\n  Port   : ' + port + (pid !== 'Unknown' ? '\n  PID    : ' + pid : '') + '\n  Log    : $(LOG_FILE_T)\n'); } else { console.log('  Status : \033[1;31m● STOPPED\033[0m\n'); } }); s.once('listening', ()=>{ console.log('  Status : \033[1;31m● STOPPED\033[0m\n'); s.close(); }); s.listen(port, '0.0.0.0');"
+
+# ── Tank Server Logs ──────────────────────────────────────────
+logs-t:
+	@if [ ! -f $(LOG_FILE_T) ]; then \
+		printf "$(YELLOW)No log file yet. Run$(RESET) $(BOLD)make start-t$(RESET) first.\n"; \
+	else \
+		printf "$(CYAN)━━ Live Tank Battle logs (Ctrl+C to exit) ━━━━━━━━━━━━$(RESET)\n"; \
+		tail -f $(LOG_FILE_T); \
+	fi
+
+# ── Connection URLs Info for Tanks ────────────────────────────
+urls-t:
+	@printf "\n$(BOLD)$(CYAN)🌐  TANK BATTLE — Access URLs$(RESET)\n"
+	@printf "$(CYAN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)\n"
+	@printf "  $(GREEN)Localhost:$(RESET)   http://localhost:$(PORT_T)\n"
+	@printf "  $(GREEN)Loopback:$(RESET)    http://127.0.0.1:$(PORT_T)\n"
+	@printf "$(BOLD)  LAN Address (share with tank players):$(RESET)\n"
+	@$(NODE) -e "const os=require('os'); const interfaces=os.networkInterfaces(); for(const name of Object.keys(interfaces)){ for(const iface of interfaces[name]){ if(iface.family==='IPv4' && !iface.internal){ console.log('  \033[1;33m▶\033[0m  http://' + iface.address + ':$(PORT_T)'); } } }" 2>/dev/null || true
+	@printf "$(CYAN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)\n\n"
+
+# ── Available Commands Info for Tanks ─────────────────────────
+help-t: info-t
+
+info-t:
+	@printf "\n$(BOLD)$(CYAN)🛡  TANK BATTLE — Available Commands (-t)$(RESET)\n"
+	@printf "$(CYAN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)\n"
+	@printf "  $(GREEN)make all-t$(RESET)        — Kill existing server, print links, and run Tank Battle\n"
+	@printf "  $(GREEN)make start-t$(RESET)      — Start Tank Battle server in background\n"
+	@printf "  $(GREEN)make stop-t$(RESET)       — Stop running background Tank Battle server\n"
+	@printf "  $(GREEN)make kill-all-t$(RESET)   — Force kill all running Tank Battle server instances\n"
+	@printf "  $(GREEN)make restart-t$(RESET)    — Restart Tank Battle server\n"
+	@printf "  $(GREEN)make status-t$(RESET)     — Show whether Tank Battle server is running\n"
+	@printf "  $(GREEN)make logs-t$(RESET)       — Tail live Tank Battle server log output\n"
+	@printf "  $(GREEN)make info-t$(RESET)       — Print all available -t make commands\n"
+	@printf "  $(GREEN)make urls-t$(RESET)       — Print Localhost and LAN IP links for Tank Battle\n"
+	@printf "  $(GREEN)make install-t$(RESET)    — Install dependencies in TankBattle folder\n"
+	@printf "  $(GREEN)make test-t$(RESET)       — Run Tank Battle automated test suite\n"
+	@printf "  $(GREEN)make clean-t$(RESET)      — Remove Tank Battle PID and log files\n"
+	@printf "\n  $(YELLOW)PORT_T=XXXX make all-t$(RESET) — Run Tank Battle on a custom port (default: $(PORT_T))\n\n"
+
+# ── Install Dependencies for Tanks ────────────────────────────
+install-t:
+	@printf "$(CYAN)📦  Installing Tank Battle dependencies...$(RESET)\n"
+	@npm --prefix TankBattle install
+	@printf "$(GREEN)✅  Done.$(RESET)\n"
+
+# ── Run Tests for Tanks ───────────────────────────────────────
+test-t:
+	@printf "$(CYAN)🧪  Running Tank Battle tests...$(RESET)\n"
+	@npm --prefix TankBattle test
+
+# ── Clean Files for Tanks ─────────────────────────────────────
+clean-t:
+	@printf "$(YELLOW)🧹  Cleaning Tank Battle PID and log files...$(RESET)\n"
+	@$(NODE) -e "const fs=require('fs'); for(const f of ['$(PID_FILE_T)','$(LOG_FILE_T)']) { if(fs.existsSync(f)) try{ fs.unlinkSync(f); }catch(e){} }"
 	@printf "$(GREEN)✅  Done.$(RESET)\n"

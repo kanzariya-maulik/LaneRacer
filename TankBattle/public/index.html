@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BATTLE TANKS LAN — 60 Hz 2D Multiplayer Arcade Combat</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220%22><text y=%2226%22 font-size=%2226%22>🛡️</text></svg>">
+</head>
+<body>
+    <!-- CRT Scanlines Filter Overlay -->
+    <div class="crt-overlay"></div>
+
+    <!-- Top Tactical Header -->
+    <header>
+        <div class="logo-area">
+            <div class="logo-title">BATTLE TANKS LAN</div>
+            <div class="logo-subtitle">60 Hz Authoritative UDP • Sub-Tile Destruction • Retro Arcade Warfare</div>
+        </div>
+        <div id="hud-net-badge" class="badge-net tcp">DISCONNECTED</div>
+    </header>
+
+    <!-- 1. Lobby Screen -->
+    <main id="screen-lobby" class="screen">
+        <div class="lobby-grid">
+            <!-- Left Column: Commander Profile & Livery -->
+            <div class="panel">
+                <div class="panel-title">1. Commander Profile</div>
+                <div class="form-group">
+                    <label for="input-username">Callsign / Nickname</label>
+                    <input type="text" id="input-username" maxlength="15" placeholder="Enter tank callsign" value="TankAce">
+                </div>
+                <button id="btn-join-lobby" class="btn-primary" style="margin-bottom: 20px;">Update Profile</button>
+
+                <div class="panel-title">Squad / Team Livery</div>
+                <div class="team-buttons">
+                    <button class="btn-team-pick active" data-team="team-red" style="border-color: #ff3344;">
+                        🔴 Red Vanguard
+                    </button>
+                    <button class="btn-team-pick" data-team="team-blue" style="border-color: #2288ff;">
+                        🔵 Blue Titans
+                    </button>
+                    <button class="btn-team-pick" data-team="team-green" style="border-color: #00ff66;">
+                        🟢 Green Legion
+                    </button>
+                    <button class="btn-team-pick" data-team="team-yellow" style="border-color: #ffd700;">
+                        🟡 Yellow Iron
+                    </button>
+                </div>
+
+                <div class="control-legend">
+                    <div class="panel-title" style="margin-bottom: 8px; border: none;">Combat Controls</div>
+                    <div class="control-item">
+                        <span>Maneuver Tank</span>
+                        <span><span class="kbd">W</span> <span class="kbd">A</span> <span class="kbd">S</span> <span class="kbd">D</span> / Arrows</span>
+                    </div>
+                    <div class="control-item">
+                        <span style="color: #ff5500; font-weight: bold;">THROW BOMB</span>
+                        <span><span class="kbd" style="color: #ff5500; border-color: #ff5500;">ENTER</span></span>
+                    </div>
+                    <div class="control-item">
+                        <span>Cannon Shell</span>
+                        <span><span class="kbd">SPACE</span></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Center Column: Arena Map & Tactical Match Setup -->
+            <div class="panel">
+                <div class="panel-title">2. Arena Map & Match Configuration</div>
+                <div class="form-group">
+                    <label for="select-map">Battlefield Arena Map</label>
+                    <select id="select-map">
+                        <option value="citadel">The Citadel — Classic Urban Grid & Fortified Center</option>
+                        <option value="velocity_oval">The Velocity Oval — Semicircle Stadium & Water Sniper Moat</option>
+                        <option value="orbital_ring">The Orbital Ring — Concentric Colosseum & 8 Radial Spokes</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="select-mode">Combat Objective Mode</label>
+                    <select id="select-mode">
+                        <option value="attack_defense">Attack + Defence — Protect Eagle HQ / Destroy Enemy Bases</option>
+                        <option value="deathmatch">Team Elimination — Annihilate All Opposing Tanks</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="select-team-mode">Squad Format</label>
+                    <select id="select-team-mode">
+                        <option value="2teams">2 Teams (Red Vanguard vs Blue Titans)</option>
+                        <option value="4teams">4 Quadrants (Red vs Blue vs Green vs Yellow)</option>
+                        <option value="3teams">3-Way Triangular Battle</option>
+                        <option value="ffa">Free-For-All (Solo Tank Survival)</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="input-lives">Tank Reserve Lives</label>
+                    <input type="number" id="input-lives" min="1" max="10" value="3">
+                </div>
+
+                <div style="flex: 1;"></div>
+                <button id="btn-start-game" class="btn-primary btn-launch">START BATTLE (HOST)</button>
+            </div>
+
+            <!-- Right Column: Squad Roster & Tactical Chat -->
+            <div class="panel">
+                <div class="panel-title">3. Connected Squad Roster</div>
+                <div id="player-roster" class="roster-list">
+                    <!-- Populated by JS -->
+                </div>
+
+                <div class="panel-title">Tactical Comms</div>
+                <div class="chat-container">
+                    <div id="chat-messages" class="chat-box"></div>
+                    <div class="chat-row">
+                        <input type="text" id="chat-input" placeholder="Radio message...">
+                        <button id="btn-send-chat" class="btn-primary" style="width: auto; padding: 8px 14px;">Send</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- 2. Active Game Screen -->
+    <main id="screen-game" class="screen hidden">
+        <!-- Top HUD -->
+        <div class="hud-top-bar">
+            <div id="hud-eagle-status" class="hud-eagle-container"></div>
+            <div class="hud-center-stats">
+                <div id="hud-lives" class="hud-lives">LIVES: ❤️ ❤️ ❤️</div>
+                <div id="hud-bomb-badge" class="hud-bomb ready">💣 [ENTER] BOMB READY</div>
+            </div>
+            <div style="width: 140px;"></div> <!-- Spacer -->
+        </div>
+
+        <!-- 832x832 Main Battle Canvas -->
+        <div class="canvas-wrapper">
+            <canvas id="game-canvas" width="832" height="832"></canvas>
+        </div>
+
+        <!-- Mini-Map Tactical Radar -->
+        <div class="radar-overlay">
+            <canvas id="radar-canvas" width="130" height="130"></canvas>
+        </div>
+
+        <!-- Floating Kill Feed -->
+        <div id="hud-kill-feed" class="hud-kill-feed"></div>
+
+        <!-- Mobile Touch Controls -->
+        <div class="touch-controls">
+            <button id="touch-btn-bomb" class="touch-btn" style="border-color: #ff4400;">💣</button>
+            <button id="touch-btn-shell" class="touch-btn" style="border-color: #ffd700;">💥</button>
+        </div>
+    </main>
+
+    <!-- 3. Countdown Overlay -->
+    <div id="screen-countdown" class="hidden">
+        <div class="countdown-box">
+            <div id="countdown-number">3</div>
+            <div style="color: #ffffff; letter-spacing: 2px; font-weight: 700;">PREPARE FOR ENGAGEMENT</div>
+        </div>
+    </div>
+
+    <!-- 4. Game Over Modal -->
+    <div id="modal-gameover" class="modal-overlay hidden">
+        <div class="modal-content">
+            <h1 id="gameover-winner" style="font-size: 2.5rem; margin-bottom: 8px;">VICTORY</h1>
+            <p id="gameover-reason" style="color: var(--text-dim); margin-bottom: 20px;"></p>
+
+            <table class="scoreboard-table">
+                <thead>
+                    <tr>
+                        <th>Commander</th>
+                        <th>Squad</th>
+                        <th>Kills</th>
+                        <th>Bombs</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody id="gameover-scoreboard"></tbody>
+            </table>
+
+            <button id="btn-return-lobby" class="btn-primary" style="margin-top: 10px;">Return to Staging Area</button>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="/socket.io/socket.io.js"></script>
+    <script type="module" src="js/app.js"></script>
+</body>
+</html>

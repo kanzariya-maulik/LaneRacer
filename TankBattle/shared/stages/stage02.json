@@ -1,0 +1,20 @@
+{
+  "stage": 2,
+  "enemies": "B*14,F*4,P*2",
+  "map13": [
+    ".............",
+    ".BBB.BBB.BBB.",
+    ".B.B.B.B.B.B.",
+    ".B.B.S.S.B.B.",
+    ".BBB.....BBB.",
+    "....WW.WW....",
+    "S.B.WW.WW.B.S",
+    "....WW.WW....",
+    ".BBB.....BBB.",
+    ".B.B.S.S.B.B.",
+    ".B.B.B.B.B.B.",
+    ".BBB.BBB.BBB.",
+    ".....BEB....."
+  ],
+  "overrides": []
+}

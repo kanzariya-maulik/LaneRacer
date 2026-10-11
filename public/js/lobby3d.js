@@ -3,7 +3,8 @@
 // interactive zoom/inspection, and instant team livery synchronization.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { loadF1Model, onF1ModelReady, buildCar, applyTeamLiveryToModel, TEAM_PALETTES } from './carModel.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { loadF1Model, onF1ModelReady, buildCar, applyTeamLiveryToModel, TEAM_PALETTES, shouldCarUse4K } from './carModel.js';
 
 let scene, camera, renderer, controls;
 let carGroup = null;
@@ -74,6 +75,10 @@ function initShowroom() {
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.18;
+
+    // PMREM studio environment reflections
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 
     // 4. Studio Lighting
     const ambLight = new THREE.AmbientLight(0xffffff, 1.2);
@@ -171,10 +176,10 @@ function initShowroom() {
 
     // Preload 4K 2026 Red Bull RB22 model asynchronously and swap seamlessly
     loadF1Model().then(() => {
-        rebuildCar();
+        if (shouldCarUse4K(currentTeam)) rebuildCar();
     });
     onF1ModelReady(() => {
-        rebuildCar();
+        if (shouldCarUse4K(currentTeam)) rebuildCar();
     });
 
     // 9. Start Render Loop
@@ -198,8 +203,8 @@ function rebuildCar() {
         carGroup = null;
     }
 
-    // High detail model for the showroom inspection
-    carGroup = buildCar('high');
+    // High detail authentic 4K 2026 model for showroom inspection
+    carGroup = buildCar('high', Infinity, currentTeam);
     applyTeamLiveryToModel(carGroup, currentTeam);
     scene.add(carGroup);
 }
@@ -245,6 +250,10 @@ function stopLoop() {
 // Global hooks for app.js and socket events
 window.updateHeroCar3D = (teamId) => {
     setTeam(teamId);
+};
+
+window.rebuildHero3D = () => {
+    rebuildCar();
 };
 
 window.setHero3DActive = (active) => {

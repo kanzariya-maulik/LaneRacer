@@ -8,7 +8,9 @@
     "watch": "node --watch server.js",
     "kill": "node scripts/kill-server.js",
     "test": "node --test test/*.test.js",
-    "tracks": "node scripts/import-tracks.js && node scripts/import-pits.js && node scripts/import-elevation.js"
+    "tracks": "node scripts/import-tracks.js && node scripts/import-pits.js && node scripts/import-elevation.js",
+    "tank": "node TankBattle/server.js",
+    "tank:dev": "node --watch TankBattle/server.js"
   },
   "keywords": [],
   "author": "",

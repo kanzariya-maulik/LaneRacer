@@ -1,0 +1,580 @@
+/* Tactical Retro-Arcade Military Stylesheet for TankBattle LAN */
+
+:root {
+    --bg-dark: #090c10;
+    --bg-panel: #111722;
+    --bg-card: #182030;
+    --border-color: #26354a;
+    --accent-cyan: #00e5ff;
+    --accent-green: #00ff66;
+    --accent-yellow: #ffd700;
+    --accent-red: #ff3344;
+    --accent-blue: #2288ff;
+    --text-main: #e2e8f0;
+    --text-dim: #7e8c9f;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    user-select: none;
+}
+
+body {
+    background-color: var(--bg-dark);
+    color: var(--text-main);
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+    overflow: hidden;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* CRT Scanlines Overlay Filter */
+.crt-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    pointer-events: none;
+    background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%);
+    background-size: 100% 4px;
+    z-index: 9999;
+    opacity: 0.4;
+}
+
+/* Header */
+header {
+    background-color: var(--bg-panel);
+    border-bottom: 2px solid var(--border-color);
+    padding: 8px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.logo-area {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.logo-title {
+    font-size: 1.3rem;
+    font-weight: 800;
+    letter-spacing: 2px;
+    color: var(--accent-yellow);
+    text-shadow: 0 0 10px rgba(255, 215, 0, 0.4);
+}
+
+.logo-subtitle {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+/* Screen Management */
+.screen {
+    flex: 1;
+    display: flex;
+    position: relative;
+    overflow: hidden;
+}
+
+.hidden {
+    display: none !important;
+}
+
+/* Lobby Grid */
+.lobby-grid {
+    width: 100%;
+    max-width: 1300px;
+    margin: 20px auto;
+    display: grid;
+    grid-template-columns: 340px 1fr 340px;
+    gap: 20px;
+    padding: 0 20px;
+    height: calc(100vh - 120px);
+}
+
+.panel {
+    background: var(--bg-panel);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.panel-title {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: var(--accent-cyan);
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 8px;
+}
+
+/* Form Controls */
+.form-group {
+    margin-bottom: 16px;
+}
+
+label {
+    display: block;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+input[type="text"], input[type="number"], select {
+    width: 100%;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 10px 12px;
+    color: var(--text-main);
+    font-size: 0.95rem;
+    outline: none;
+    transition: border 0.2s;
+}
+
+input:focus, select:focus {
+    border-color: var(--accent-cyan);
+}
+
+/* Team Selection Buttons */
+.team-buttons {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 8px;
+}
+
+.btn-team-pick {
+    background: var(--bg-card);
+    border: 2px solid var(--border-color);
+    border-radius: 6px;
+    padding: 12px;
+    color: var(--text-main);
+    font-weight: 600;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-align: center;
+}
+
+.btn-team-pick:hover {
+    border-color: #ffffff;
+}
+
+.btn-team-pick.active {
+    box-shadow: 0 0 12px rgba(255, 255, 255, 0.2);
+}
+
+.btn-team-pick[data-team="team-red"].active { border-color: var(--accent-red); color: var(--accent-red); }
+.btn-team-pick[data-team="team-blue"].active { border-color: var(--accent-blue); color: var(--accent-blue); }
+.btn-team-pick[data-team="team-green"].active { border-color: var(--accent-green); color: var(--accent-green); }
+.btn-team-pick[data-team="team-yellow"].active { border-color: var(--accent-yellow); color: var(--accent-yellow); }
+
+/* Primary Action Buttons */
+.btn-primary {
+    background: linear-gradient(135deg, #0088ff, #0055cc);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 12px 20px;
+    font-size: 0.95rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: transform 0.1s, opacity 0.2s;
+    width: 100%;
+}
+
+.btn-primary:hover:not(:disabled) {
+    opacity: 0.9;
+    transform: translateY(-1px);
+}
+
+.btn-primary:disabled {
+    background: #334155;
+    color: #64748b;
+    cursor: not-allowed;
+}
+
+.btn-launch {
+    background: linear-gradient(135deg, #00ff66, #009933);
+    color: #051a0b;
+    font-size: 1.1rem;
+    font-weight: 800;
+    padding: 16px;
+    box-shadow: 0 0 20px rgba(0, 255, 102, 0.3);
+    margin-top: 10px;
+}
+
+/* Control Legend */
+.control-legend {
+    background: var(--bg-card);
+    border-radius: 6px;
+    padding: 14px;
+    margin-top: 16px;
+}
+
+.control-item {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    font-size: 0.85rem;
+}
+
+.kbd {
+    background: #232d3f;
+    border: 1px solid #3c4d69;
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-family: monospace;
+    font-weight: bold;
+    color: var(--accent-yellow);
+}
+
+/* Player Roster */
+.roster-list {
+    flex: 1;
+    overflow-y: auto;
+    margin-bottom: 12px;
+}
+
+.player-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 10px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.player-color-box {
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+}
+
+.player-name {
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+.badge-host {
+    background: var(--accent-yellow);
+    color: #000;
+    font-size: 0.65rem;
+    font-weight: 800;
+    padding: 2px 5px;
+    border-radius: 3px;
+    margin-left: 6px;
+}
+
+.badge-you {
+    background: var(--accent-cyan);
+    color: #000;
+    font-size: 0.65rem;
+    font-weight: 800;
+    padding: 2px 5px;
+    border-radius: 3px;
+    margin-left: 6px;
+}
+
+.player-sub {
+    font-size: 0.7rem;
+    color: var(--text-dim);
+}
+
+/* Chat */
+.chat-container {
+    height: 220px;
+    display: flex;
+    flex-direction: column;
+}
+
+.chat-box {
+    flex: 1;
+    overflow-y: auto;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 8px;
+    font-size: 0.8rem;
+    margin-bottom: 8px;
+}
+
+.chat-msg {
+    margin-bottom: 4px;
+    word-break: break-word;
+}
+
+.chat-msg.system {
+    color: var(--accent-cyan);
+    font-style: italic;
+}
+
+.chat-row {
+    display: flex;
+    gap: 8px;
+}
+
+/* In-Game HUD Layout */
+#screen-game {
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: #080b0f;
+}
+
+.hud-top-bar {
+    position: absolute;
+    top: 8px;
+    left: 20px;
+    right: 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    pointer-events: none;
+    z-index: 10;
+}
+
+.hud-eagle-container {
+    display: flex;
+    gap: 12px;
+}
+
+.eagle-badge {
+    background: rgba(17, 23, 34, 0.85);
+    border: 1px solid var(--border-color);
+    padding: 6px 14px;
+    border-radius: 4px;
+    font-weight: 700;
+    font-size: 0.85rem;
+    letter-spacing: 1px;
+}
+
+.eagle-badge.alive { border-color: var(--accent-yellow); color: var(--accent-yellow); }
+.eagle-badge.dead { border-color: #555555; color: #777777; text-decoration: line-through; }
+
+.hud-center-stats {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.hud-lives {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--accent-green);
+    background: rgba(17, 23, 34, 0.85);
+    padding: 6px 14px;
+    border-radius: 4px;
+    border: 1px solid var(--border-color);
+}
+
+.hud-bomb {
+    padding: 8px 18px;
+    border-radius: 4px;
+    font-weight: 800;
+    font-size: 0.9rem;
+    letter-spacing: 1px;
+    transition: all 0.2s;
+}
+
+.hud-bomb.ready {
+    background: linear-gradient(135deg, #ff4400, #cc2200);
+    color: #ffffff;
+    box-shadow: 0 0 16px rgba(255, 68, 0, 0.6);
+    border: 1px solid #ffaa00;
+}
+
+.hud-bomb.cooldown {
+    background: #1e2633;
+    color: #64748b;
+    border: 1px solid #334155;
+}
+
+.badge-net {
+    font-size: 0.75rem;
+    font-family: monospace;
+    padding: 4px 10px;
+    border-radius: 4px;
+}
+
+.badge-net.udp {
+    background: rgba(0, 255, 102, 0.15);
+    color: var(--accent-green);
+    border: 1px solid var(--accent-green);
+}
+
+.badge-net.tcp {
+    background: rgba(255, 170, 0, 0.15);
+    color: var(--accent-yellow);
+    border: 1px solid var(--accent-yellow);
+}
+
+/* Canvas Area */
+.canvas-wrapper {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    position: relative;
+    border: 3px solid #222d3d;
+    box-shadow: 0 0 40px rgba(0, 0, 0, 0.8);
+    background: #0f141c;
+}
+
+#game-canvas {
+    display: block;
+    image-rendering: pixelated;
+}
+
+/* Tactical Radar Overlay */
+.radar-overlay {
+    position: absolute;
+    bottom: 20px;
+    right: 20px;
+    background: rgba(15, 20, 28, 0.9);
+    border: 2px solid var(--border-color);
+    border-radius: 6px;
+    padding: 4px;
+    box-shadow: 0 0 15px rgba(0, 0, 0, 0.6);
+}
+
+#radar-canvas {
+    display: block;
+}
+
+/* Kill Feed */
+.hud-kill-feed {
+    position: absolute;
+    bottom: 20px;
+    left: 20px;
+    pointer-events: none;
+    display: flex;
+    flex-direction: column-reverse;
+    gap: 6px;
+}
+
+.toast-item {
+    background: rgba(17, 23, 34, 0.85);
+    border-left: 3px solid var(--accent-yellow);
+    padding: 6px 12px;
+    font-size: 0.8rem;
+    border-radius: 0 4px 4px 0;
+    color: #ffffff;
+    animation: fadeIn 0.2s ease-out;
+}
+
+/* Countdown Overlay */
+#screen-countdown {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 100;
+}
+
+.countdown-box {
+    text-align: center;
+}
+
+#countdown-number {
+    font-size: 7rem;
+    font-weight: 900;
+    color: var(--accent-yellow);
+    text-shadow: 0 0 30px rgba(255, 215, 0, 0.8);
+}
+
+/* Game Over Modal */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.85);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 200;
+}
+
+.modal-content {
+    background: var(--bg-panel);
+    border: 2px solid var(--accent-cyan);
+    border-radius: 8px;
+    padding: 30px;
+    width: 500px;
+    text-align: center;
+    box-shadow: 0 0 40px rgba(0, 229, 255, 0.2);
+}
+
+.scoreboard-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 20px 0;
+    font-size: 0.85rem;
+}
+
+.scoreboard-table th, .scoreboard-table td {
+    padding: 8px;
+    border-bottom: 1px solid var(--border-color);
+    text-align: center;
+}
+
+.scoreboard-table th {
+    color: var(--accent-cyan);
+    font-weight: 700;
+}
+
+/* Touch Controls for Mobile/Tablets */
+.touch-controls {
+    display: none;
+    position: absolute;
+    bottom: 20px;
+    left: 20px;
+    right: 20px;
+    justify-content: space-between;
+    pointer-events: none;
+    z-index: 50;
+}
+
+.touch-btn {
+    pointer-events: auto;
+    width: 70px;
+    height: 70px;
+    border-radius: 50%;
+    border: 2px solid white;
+    background: rgba(0, 0, 0, 0.6);
+    color: white;
+    font-size: 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateX(-10px); }
+    to { opacity: 1; transform: translateX(0); }
+}

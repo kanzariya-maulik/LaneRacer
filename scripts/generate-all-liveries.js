@@ -69,80 +69,81 @@ function encodePng(w, h, rgbBuffer) {
   ]);
 }
 
+// Authentic team livery color configurations matching the classic procedural model paint styling
 const TEAMS_CONFIG = {
   ferrari: {
-    // Scuderia Rosso Corsa with Giallo Modena yellow airbox accents & black carbon stripes
-    base: [225, 10, 25],
-    secondary: [255, 220, 0],   // Yellow
-    tertiary: [24, 24, 26],      // Carbon black stripe
-    highlight: [245, 245, 245]   // White
+    // Scuderia Ferrari: Rosso Corsa red, Giallo Modena yellow aero flowline, racing white
+    base: [216, 10, 26],
+    accent1: [255, 218, 0],       // Yellow racing stripes
+    accent2: [248, 248, 250],     // White accent
+    highlight: [248, 248, 250]
   },
   mercedes: {
-    // Silver Arrow with Petronas turquoise flowlines & neon yellow driver highlights
-    base: [198, 204, 212],
-    secondary: [235, 240, 45],   // Neon yellow
-    tertiary: [0, 210, 190],     // Petronas Teal
-    highlight: [0, 210, 190]     // Petronas Teal
+    // Mercedes-AMG Petronas: Obsidian Black body with glowing Petronas turquoise flowlines
+    base: [18, 19, 22],
+    accent1: [0, 210, 190],       // Petronas Turquoise flowlines
+    accent2: [200, 208, 216],     // Silver Arrow accent
+    highlight: [0, 210, 190]
   },
   mclaren: {
-    // Papaya Orange with Velocity Blue aerodynamic accents & carbon black stripes
+    // McLaren F1 Team: Radiant Papaya Orange with Velocity Blue aerodynamic streaks
     base: [255, 128, 0],
-    secondary: [20, 130, 255],   // Velocity Blue
-    tertiary: [24, 24, 28],      // Carbon black
-    highlight: [20, 130, 255]    // Velocity Blue
+    accent1: [20, 130, 255],      // Velocity Blue
+    accent2: [28, 28, 32],        // Anthracite Carbon
+    highlight: [20, 130, 255]
   },
   astonmartin: {
-    // British Racing Emerald Green with Lime Essence aerodynamic accents
+    // Aston Martin Aramco: Deep British Racing Green with Lime Essence accent stripes
     base: [0, 89, 79],
-    secondary: [206, 220, 0],    // Lime Essence
-    tertiary: [206, 220, 0],     // Lime Essence
-    highlight: [245, 245, 245]   // White
+    accent1: [206, 220, 0],       // Lime Essence
+    accent2: [245, 245, 245],     // White accent
+    highlight: [206, 220, 0]
   },
   alpine: {
-    // Alpine French Royal Blue with BWT Racing Pink aerodynamic streaks
+    // BWT Alpine F1 Team: French Royal Blue with vibrant BWT Racing Pink aerodynamic streaks
     base: [0, 120, 215],
-    secondary: [255, 135, 188],  // BWT Pink
-    tertiary: [255, 135, 188],   // BWT Pink
-    highlight: [245, 245, 245]   // French Tricolore White
+    accent1: [255, 135, 188],     // BWT Racing Pink
+    accent2: [245, 245, 248],     // French White
+    highlight: [255, 135, 188]
   },
   williams: {
-    // Williams Heritage Deep Navy Blue with Electric Cyan & Duracell Copper Orange
-    base: [4, 30, 80],
-    secondary: [255, 110, 20],   // Duracell Copper
-    tertiary: [0, 163, 224],     // Electric Cyan
-    highlight: [0, 163, 224]     // Electric Cyan
+    // Williams Racing: Heritage Deep Navy Blue with Electric Cyan chevron speedlines
+    base: [4, 30, 66],
+    accent1: [0, 163, 224],       // Electric Cyan
+    accent2: [225, 20, 32],       // Racing Red nose tip
+    highlight: [0, 163, 224]
   },
   alphatauri: {
-    // Midnight Matte Navy with Alpine Pure White bodywork & electric blue accents
+    // Visa Cash App RB: Midnight Navy with crisp Alpine Pure White engine cover & nose
     base: [2, 43, 68],
-    secondary: [245, 245, 245],  // Matte White
-    tertiary: [245, 245, 245],   // Matte White
-    highlight: [37, 99, 235]     // Electric Blue
+    accent1: [245, 245, 245],     // Pure White
+    accent2: [37, 99, 235],       // Electric Blue
+    highlight: [245, 245, 245]
   },
   alfaromeo: {
-    // Biscione Crimson Burgundy with Quadrifoglio Pure White & carbon black
+    // Alfa Romeo Stake: Biscione Crimson Burgundy with Carbon Obsidian aero panels
     base: [152, 30, 50],
-    secondary: [245, 245, 245],  // White
-    tertiary: [22, 22, 24],      // Carbon black
-    highlight: [245, 245, 245]   // White
+    accent1: [20, 20, 22],        // Carbon Obsidian Black
+    accent2: [245, 245, 248],     // Quadrifoglio White
+    highlight: [245, 245, 248]
   },
   haas: {
-    // Arctic Pure White body with MoneyGram Racing Red stripes & graphite black
+    // Haas F1 Team: Arctic Pure White body with MoneyGram Racing Red streaks
     base: [242, 242, 244],
-    secondary: [225, 6, 0],      // MoneyGram Red
-    tertiary: [225, 6, 0],       // Red
-    highlight: [30, 31, 34]      // Graphite
+    accent1: [225, 6, 0],         // MoneyGram Red
+    accent2: [28, 28, 30],        // Graphite Black
+    highlight: [225, 6, 0]
   },
   'redbull-suzuka': {
-    // Pearlescent Pure White Special Edition with Hinomaru Crimson Red
+    // Red Bull White Edition: Pearlescent Pure White with Hinomaru Crimson Red
     base: [246, 246, 248],
-    secondary: [225, 6, 0],      // Red
-    tertiary: [225, 6, 0],       // Red
-    highlight: [26, 26, 30]      // Graphite
+    accent1: [225, 6, 0],         // Hinomaru Red
+    accent2: [225, 6, 0],         // Hinomaru Red
+    highlight: [24, 24, 28]
   }
 };
 
-const outW = 2048, outH = 2048;
+const outW = width, outH = height; // Full native 4K resolution (4096 x 4096)
 const srcStride = 1 + width * 3;
 
 for (const [teamId, cfg] of Object.entries(TEAMS_CONFIG)) {
@@ -151,44 +152,45 @@ for (const [teamId, cfg] of Object.entries(TEAMS_CONFIG)) {
   let outIdx = 0;
   
   for (let y = 0; y < outH; y++) {
-    const sy = y * 2;
+    const rowOffset = y * srcStride + 1;
     for (let x = 0; x < outW; x++) {
-      const sx = x * 2;
-      const o = sy * srcStride + 1 + sx * 3;
+      const o = rowOffset + x * 3;
       const r = raw[o], g = raw[o+1], b = raw[o+2];
       
-      if (r < 15 && g < 15 && b < 15) {
-        // Unpainted carbon fiber / floor / shadow
-        rgbOut[outIdx] = r;
-        rgbOut[outIdx+1] = g;
-        rgbOut[outIdx+2] = b;
-      } else if (b > 15 && r < 40 && g < 40) {
-        // Primary Bodywork base paint (originally dark navy blue)
-        // Modulate with subtle surface lighting / curvature shading
-        const lum = b / 49;
-        rgbOut[outIdx] = Math.min(255, Math.round(cfg.base[0] * lum));
+      const isUnpaintedCarbon = (r < 18 && g < 18 && b < 18);
+      const isBullRed = (r > 130 && g < 70 && b < 70) || (r > 140 && g > 20 && b < 60 && r > g * 1.5);
+      const isBullYellow = (r > 140 && g > 80 && b < 70);
+      const isNavyPaint = (b > 15 && r < 60 && g < 60);
+      const isSponsorArea = (r > 175 && g > 175 && b > 175);
+
+      if (isUnpaintedCarbon) {
+        // High-definition carbon fiber underbody / diffuser / floor (preserve authentic ambient occlusion)
+        rgbOut[outIdx]   = Math.min(26, r + 4);
+        rgbOut[outIdx+1] = Math.min(26, g + 4);
+        rgbOut[outIdx+2] = Math.min(28, b + 4);
+      } else if (isBullRed) {
+        // Razor-sharp aerodynamic flowlines / team racing accent stripes
+        rgbOut[outIdx]   = cfg.accent1[0];
+        rgbOut[outIdx+1] = cfg.accent1[1];
+        rgbOut[outIdx+2] = cfg.accent1[2];
+      } else if (isBullYellow) {
+        // Nose crest / engine fin secondary accent
+        rgbOut[outIdx]   = cfg.accent2[0];
+        rgbOut[outIdx+1] = cfg.accent2[1];
+        rgbOut[outIdx+2] = cfg.accent2[2];
+      } else if (isNavyPaint || isSponsorArea) {
+        // Clean, rich, ultra-high-resolution team automotive bodywork paint (no mottled sponsor letters)
+        // Subtle ambient occlusion modulation from surface curvature
+        const lum = isNavyPaint ? Math.max(0.85, Math.min(1.15, b / 38)) : 1.0;
+        rgbOut[outIdx]   = Math.min(255, Math.round(cfg.base[0] * lum));
         rgbOut[outIdx+1] = Math.min(255, Math.round(cfg.base[1] * lum));
         rgbOut[outIdx+2] = Math.min(255, Math.round(cfg.base[2] * lum));
-      } else if (r > 160 && g > 110 && b < 60) {
-        // Secondary graphics (originally Red Bull yellow)
-        rgbOut[outIdx] = cfg.secondary[0];
-        rgbOut[outIdx+1] = cfg.secondary[1];
-        rgbOut[outIdx+2] = cfg.secondary[2];
-      } else if (r > 160 && g < 80 && b < 60) {
-        // Tertiary graphics (originally Red Bull red stripes)
-        rgbOut[outIdx] = cfg.tertiary[0];
-        rgbOut[outIdx+1] = cfg.tertiary[1];
-        rgbOut[outIdx+2] = cfg.tertiary[2];
-      } else if (r > 160 && g > 160 && b > 160) {
-        // Sponsor / number plates (originally white)
-        rgbOut[outIdx] = cfg.highlight[0];
-        rgbOut[outIdx+1] = cfg.highlight[1];
-        rgbOut[outIdx+2] = cfg.highlight[2];
       } else {
-        // Edge transitions
-        rgbOut[outIdx] = r;
-        rgbOut[outIdx+1] = g;
-        rgbOut[outIdx+2] = b;
+        // Smooth subpixel antialiasing with team base color
+        const f = 0.72;
+        rgbOut[outIdx]   = Math.round(r * (1 - f) + cfg.base[0] * f);
+        rgbOut[outIdx+1] = Math.round(g * (1 - f) + cfg.base[1] * f);
+        rgbOut[outIdx+2] = Math.round(b * (1 - f) + cfg.base[2] * f);
       }
       outIdx += 3;
     }
@@ -197,6 +199,6 @@ for (const [teamId, cfg] of Object.entries(TEAMS_CONFIG)) {
   const pngData = encodePng(outW, outH, rgbOut);
   const filePath = path.join(outDir, `${teamId}.png`);
   fs.writeFileSync(filePath, pngData);
-  console.log(`Generated ${teamId}.png (${(pngData.length / 1024).toFixed(1)} KB) in ${Date.now() - tStart} ms`);
+  console.log(`Generated 4K ${teamId}.png (${(pngData.length / 1024).toFixed(1)} KB) in ${Date.now() - tStart} ms`);
 }
-console.log('All team livery textures successfully generated!');
+console.log('All team livery textures successfully generated at full 4K resolution!');

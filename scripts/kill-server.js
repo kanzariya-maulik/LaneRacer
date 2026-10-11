@@ -6,7 +6,7 @@ const path = require('path');
 const net = require('net');
 
 const port = parseInt(process.env.PORT || process.argv[2] || '3232', 10);
-const pidFile = path.join(__dirname, '..', '.lanrace.pid');
+const pidFile = path.join(__dirname, '..', process.argv[3] || process.env.PID_FILE || '.lanrace.pid');
 
 function isPortInUse(p) {
   return new Promise((resolve) => {

@@ -23,22 +23,22 @@ export const SKIES = {
 // (sodium orange over the big cities, near black in the Ardennes and the Styrian hills), how many stars that light pollution
 // leaves, and the race floodlights (sun: colour, power, height) that light the track; windows: share of lit windows.
 // Sakhir is the real night race (~500 light columns of white floodlight); the others get the same kind of rig to race by
-const night = (top, horizon, stars, windows, o = {}) => ({ top, horizon, stars, windows, sun: '#eef2ff', power: 1.6, elevation: 72, azimuth: 30, hemi: 0.45, ...o });
+const night = (top, horizon, stars, windows, o = {}) => ({ top, horizon, stars, windows, sun: '#f4f8ff', power: 4.2, elevation: 76, azimuth: 32, hemi: 1.45, ...o });
 export const NIGHTS = {
     monza:       night('#0b1020', '#2c2a33', 0.3, 0.5),                        // Milan's glow to the south, dark royal park
-    spa:         night('#05080f', '#10141c', 0.95, 0.4, { hemi: 0.35 }),       // Ardennes forest: black, full star field
-    silverstone: night('#0c0f18', '#26252b', 0.45, 0.45, { hemi: 0.5 }),       // rural Northamptonshire, cloud lit from below
+    spa:         night('#05080f', '#10141c', 0.95, 0.4, { hemi: 1.05 }),       // Ardennes forest: black, full star field
+    silverstone: night('#0c0f18', '#26252b', 0.45, 0.45, { hemi: 1.1 }),       // rural Northamptonshire, cloud lit from below
     suzuka:      night('#0a0f1e', '#272834', 0.4, 0.55),                       // Suzuka city and the lit Ferris wheel
-    sakhir:      night('#0a1226', '#3a2c26', 0.15, 0.6, { sun: '#f4f6ff', power: 2.2, hemi: 0.55 }), // the real night race: desert, Manama amber
-    interlagos:  night('#14121a', '#4a3226', 0.05, 0.75, { hemi: 0.55 }),      // inside São Paulo: heavy orange skyglow
+    sakhir:      night('#0a1226', '#3a2c26', 0.15, 0.6, { sun: '#f8fafc', power: 3.8, hemi: 1.25 }), // the real night race: desert, Manama amber
+    interlagos:  night('#14121a', '#4a3226', 0.05, 0.75, { hemi: 1.15 }),      // inside São Paulo: heavy orange skyglow
     cota:        night('#090d1a', '#2a2630', 0.4, 0.5),                        // Austin on the north-west horizon
     zandvoort:   night('#070b16', '#1d2029', 0.55, 0.55),                      // seaside town, the North Sea black beyond
-    spielberg:   night('#04070e', '#0e121a', 1, 0.35, { hemi: 0.35 }),         // Styrian Alps: the darkest sky here
+    spielberg:   night('#04070e', '#0e121a', 1, 0.35, { hemi: 1.05 }),         // Styrian Alps: the darkest sky here
     montreal:    night('#0d1020', '#34292b', 0.15, 0.7),                       // island in the river, downtown skyline lit
     hungaroring: night('#0a0e1b', '#2b2730', 0.35, 0.5),                       // Budapest's glow to the south-west
-    monaco:      night('#0e1222', '#3e2f2a', 0.1, 0.85, { hemi: 0.6 }),        // the harbour city lit all around the streets
+    monaco:      night('#0e1222', '#3e2f2a', 0.1, 0.85, { hemi: 1.25 }),       // the harbour city lit all around the streets
     imola:       night('#090d1a', '#25242c', 0.45, 0.55),                      // town and the Santerno valley
-    buddh:       night('#13111a', '#4a3324', 0.05, 0.6, { hemi: 0.55 }),       // Greater Noida, Delhi's orange glow to the north-west
+    buddh:       night('#13111a', '#4a3324', 0.05, 0.6, { hemi: 1.15 }),       // Greater Noida, Delhi's orange glow to the north-west
     oval:        night('#0b1020', '#2c2a33', 0.4, 0.5),
     ring:        night('#0a1226', '#3a2c26', 0.5, 0.4),
 };

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { buildCar, liveryTexture as carLivery, WHEEL_RADIUS, loadF1Model, getF1Template, onF1ModelReady, applyTeamLiveryToModel } from './carModel.js';
+import { buildCar, liveryTexture as carLivery, WHEEL_RADIUS, loadF1Model, onF1ModelReady, applyTeamLiveryToModel, shouldCarUse4K } from './carModel.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { keyboardStep, gamepadInput, liftOffBrake } from './input.js';
@@ -55,10 +55,10 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: Q.antialias, power
 // start in profiles); errors are a developer concern, the console still shows WebGL's own
 renderer.debug.checkShaderErrors = false;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.0;
+renderer.toneMappingExposure = 1.18;
 let res = { ...ratioRange(level, window.devicePixelRatio), good: 0 };
-res.ratio = res.start;
-renderer.setPixelRatio(res.ratio);
+res.ratio = Math.max(1.0, res.start);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, res.ratio));
 
 const SKY = 0x9cc8ef;
 const scene = new THREE.Scene();
@@ -66,6 +66,15 @@ scene.background = new THREE.Color(SKY);
 const camera = new THREE.PerspectiveCamera(56, 1, 1.5, Q.far);
 const hemi = new THREE.HemisphereLight(0xe8f4ff, 0x4f7a2a, 1.4);
 scene.add(hemi);
+
+// Dynamic stadium floodlight & rim illumination rig:
+// Simulates overhead stadium gantry floodlights and camera chase lights
+// guaranteeing vibrant specular glints, clearcoat lacquer gloss, and contour depth
+const stadiumFollowLight = new THREE.DirectionalLight(0xf4f8ff, 2.2);
+const stadiumFillLight = new THREE.DirectionalLight(0xa8cbff, 1.4);
+scene.add(stadiumFollowLight, stadiumFollowLight.target);
+scene.add(stadiumFillLight, stadiumFillLight.target);
+
 // Sky: a dome around the camera, zenith colour fading to the horizon (= the fog), set per circuit (themes.js)
 const skyDome = (() => {
     const g = new THREE.SphereGeometry(1, 24, 12);
@@ -102,7 +111,23 @@ function applySky(sky) {
     sun.color.set(sky.sun);
     sun.intensity = sky.power;
     hemi.intensity = sky.hemi;
-    hemi.color.copy(top).lerp(new THREE.Color(0xffffff), 0.5);
+    if (sky.stars !== undefined) {
+        hemi.color.setHex(0xe8f0ff); // bright crisp stadium floodlight ambient bounce
+        hemi.groundColor.setHex(0x687888); // bright asphalt/grass bounce
+        hemi.intensity = (sky.hemi || 1.15) * 1.35;
+        renderer.toneMappingExposure = 1.22;
+        stadiumFollowLight.color.setHex(0xf4f8ff);
+        stadiumFollowLight.intensity = 2.4;
+        stadiumFillLight.color.setHex(0xa8cbff);
+        stadiumFillLight.intensity = 1.5;
+    } else {
+        hemi.color.copy(top).lerp(new THREE.Color(0xffffff), 0.5);
+        renderer.toneMappingExposure = 1.16;
+        stadiumFollowLight.color.setHex(0xffffff);
+        stadiumFollowLight.intensity = 1.2;
+        stadiumFillLight.color.setHex(0xd0e2ff);
+        stadiumFillLight.intensity = 0.8;
+    }
     stars.visible = !!sky.stars;
     stars.geometry.setDrawRange(0, Math.round(STARS * (sky.stars || 0)));
     if (scene.fog) scene.fog.near = sky.stars !== undefined ? 1500 : 3000; // night: the land fades into the dark sooner
@@ -2329,7 +2354,7 @@ function buildWorld(t) {
         normalMap: grassNormalMap(),
         roughness: 0.88,
         metalness: 0.02,
-        color: night ? 0x3a4250 : 0xffffff
+        color: night ? 0x98a8b8 : 0xffffff
     }));
     ground.receiveShadow = true;
     world.add(ground);
@@ -2390,12 +2415,12 @@ function buildWorld(t) {
             metalness: 0.02
         }));
     }
-    world.add(strip(rp, signed(-1, roadTo[-1]), roadTo[1], 0.6, all, solid('#4a505a'), {
+    world.add(strip(rp, signed(-1, roadTo[-1]), roadTo[1], 0.6, all, solid(night ? '#687280' : '#4a505a'), {
         map: asphaltTexture(),
         normalMap: asphaltNormalMap(),
         repeatM: 8,
-        roughness: 0.82,
-        metalness: 0.06
+        roughness: night ? 0.62 : 0.82,
+        metalness: night ? 0.12 : 0.06
     }));
     // White lines on the track limits (t.edgeR / edgeL: judged there); beyond them the road carries on as asphalt run-off
     // to the drawn edge (Track.js: the road 2x the real width, the lines 4/3)
@@ -2538,8 +2563,12 @@ function buildWorld(t) {
 // past CAR_LOD_M from the camera (only the few cars near you need every curve)
 const CAR_DETAIL = { low: 'low', medium: 'mid', high: 'high' }, CAR_LOD_M = 120;
 const carTemplates = {};
-const carTemplateFor = () => (carTemplates[level] ||= buildCar(CAR_DETAIL[level] || 'mid', CAR_LOD_M * scale));
-let carTemplate = null; // the current level's (wheel batches are built from it)
+const carTemplateFor = (teamId = 'redbull') => {
+    const use4K = shouldCarUse4K(teamId);
+    const key = `${level}_${use4K ? '4k' : 'classic'}`;
+    return (carTemplates[key] ||= buildCar(CAR_DETAIL[level] || 'mid', CAR_LOD_M * scale, teamId));
+};
+let carTemplate = null; // the current level's base template (wheel batches are built from it)
 const liveryTexture = (teamId) => carLivery(teamId, Q.anisotropy);
 
 function dropCar(id) {
@@ -2589,21 +2618,25 @@ function blobShadow(strength = 1) {
     return m;
 }
 
-// Generated once: a soft studio reflection for car paint only (Medium/High); not applied to the outdoor scene
+// Generated once: a soft studio reflection for car paint only (Medium/High)
 let envTex = null;
 function envTexture() {
     if (!envTex) {
         envTex = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+        scene.environment = envTex;
     }
     return envTex;
 }
 
-// When the 2026 Red Bull RB22 3D model finishes downloading, upgrade all cars
+// When the 2026 Red Bull RB22 3D model finishes downloading, upgrade 4K cars
 onF1ModelReady((template) => {
     for (const k in carTemplates) delete carTemplates[k];
-    carTemplate = carTemplateFor();
+    carTemplate = carTemplateFor('classic');
     for (const cid in cars) {
         const carObj = cars[cid];
+        // Only upgrade cars configured for 4K (e.g. Red Bull in hybrid mode, or all cars in 4K mode)
+        if (!shouldCarUse4K(carObj.teamId)) continue;
+
         const bodyLod = carObj.root.getObjectByName('bodyLOD');
         if (bodyLod && !carObj.root.getObjectByName('f1Model')) {
             while (bodyLod.levels.length > 0) {
@@ -2616,7 +2649,6 @@ onF1ModelReady((template) => {
             f1.traverse((o) => {
                 if (o.isMesh && Q.envMap) {
                     o.material.envMap = envTexture();
-                    o.material.envMapIntensity = night ? 0.12 : 0.35;
                 }
             });
             bodyLod.addLevel(f1, 0);
@@ -2628,6 +2660,21 @@ onF1ModelReady((template) => {
     }
 });
 
+window.refreshCarLiveries = () => {
+    for (const cid in cars) {
+        const carObj = cars[cid];
+        const lp = clientState.players[cid];
+        if (!carObj || !lp) continue;
+        const f1Model = carObj.root.getObjectByName('f1Model');
+        if (f1Model) {
+            applyTeamLiveryToModel(f1Model, lp.teamId);
+            f1Model.traverse((o) => {
+                if (o.isMesh && Q.envMap) o.material.envMap = envTexture();
+            });
+        }
+    }
+};
+
 function makeCar(id) {
     const lp = clientState.players[id];
     if (!lp) return null;
@@ -2635,29 +2682,36 @@ function makeCar(id) {
     const wheels = [];
     let drsWing = null;
     let rearLight = null;
-    carTemplate = carTemplateFor();
-    if (carTemplate) {
-        const model = carTemplate.clone(true);
+    carTemplate = carTemplateFor('classic');
+    const tpl = carTemplateFor(lp.teamId);
+    if (tpl) {
+        const model = tpl.clone(true);
         drsWing = model.getObjectByName('drsWing');
         const f1Model = model.getObjectByName('f1Model');
         if (f1Model) {
             applyTeamLiveryToModel(f1Model, lp.teamId);
             rearLight = f1Model.getObjectByName('Object_10');
+            if (drsWing) drsWing.visible = false;
+        } else {
+            if (drsWing) drsWing.visible = true;
         }
         const map = liveryTexture(lp.teamId);
         model.traverse((o) => {
             if (!o.isMesh) return;
             o.castShadow = true;
-            o.material = o.material.clone(); // per-car materials so ghost opacity doesn't leak to other cars
             if (o.material.name === 'livery') {
+                o.material = o.material.clone();
                 o.material.map = map;
                 o.material.color.set(0xffffff);
                 o.material.needsUpdate = true;
-            }
-            if (Q.envMap) {
+                if (Q.envMap) {
+                    o.material.envMap = envTexture();
+                    o.material.metalness = 0.14;
+                    o.material.roughness = 0.28;
+                    o.material.envMapIntensity = 0.65;
+                }
+            } else if (Q.envMap) {
                 o.material.envMap = envTexture();
-                o.material.envMapIntensity = night ? 0.12 : 0.45; // subtle studio reflection
-                if (o.material.name === 'livery') { o.material.metalness = 0.1; o.material.roughness = 0.35; }
             }
         });
         for (const name of ['wheel_FL', 'wheel_FR', 'wheel_RL', 'wheel_RR']) {
@@ -2700,6 +2754,11 @@ function updateCars(dt) {
     for (const id in gs) {
         const s = gs[id];
         let car = cars[id];
+        const lp = clientState.players[id];
+        if (car && lp && lp.teamId !== car.teamId) {
+            dropCar(id);
+            car = null;
+        }
         if (!car) {
             car = makeCar(id);
             if (!car) continue;
@@ -2934,7 +2993,21 @@ function updateWheelBatch() {
         const parts = [];
         carTemplate.getObjectByName('wheel_FL')?.traverse((o) => { if (o.isMesh) parts.push(o); });
         wheelBatch = parts.map((part) => {
-            const mesh = new THREE.InstancedMesh(part.geometry, part.material, 4 * 24);
+            let mat = part.material;
+            if (part.material?.name === 'rim') {
+                mat = part.material.clone();
+                mat.roughness = 0.16;
+                mat.metalness = 0.88;
+                if (Q.envMap) {
+                    mat.envMap = envTexture();
+                    mat.envMapIntensity = 1.25;
+                }
+            } else if (part.material?.name === 'tyre') {
+                mat = part.material.clone();
+                mat.roughness = 0.78;
+                mat.metalness = 0.04;
+            }
+            const mesh = new THREE.InstancedMesh(part.geometry, mat, 4 * 24);
             mesh.frustumCulled = false;
             mesh.castShadow = true; // tyres shadow the track like the body does
             mesh.count = 0;
@@ -2992,6 +3065,22 @@ function updateCamera(dt) {
     const q = snapLight({ x: p.x, y: p.y, z: p.z }, SUN_OFF, 720 / (Q.shadows || 1024));
     sun.position.set(q.x + SUN_OFF.x, q.y + SUN_OFF.y, q.z + SUN_OFF.z);
     sun.target.position.set(q.x, q.y, q.z);
+
+    // Dynamic stadium floodlight & rim lighting rig follows the player car:
+    // Aligned to illuminate rear surfaces, diffuser, and aerodynamic contours
+    stadiumFollowLight.position.set(
+        p.x - Math.cos(h + 0.25) * 16 * scale,
+        p.y + 18 * scale,
+        p.z - Math.sin(h + 0.25) * 16 * scale
+    );
+    stadiumFollowLight.target.position.set(p.x + Math.cos(h) * 2 * scale, p.y + 0.3 * scale, p.z + Math.sin(h) * 2 * scale);
+
+    stadiumFillLight.position.set(
+        p.x + Math.cos(h + 1.1) * 20 * scale,
+        p.y + 14 * scale,
+        p.z + Math.sin(h + 1.1) * 20 * scale
+    );
+    stadiumFillLight.target.position.set(p.x, p.y, p.z);
 }
 
 // ---------- HUD + minimap ----------

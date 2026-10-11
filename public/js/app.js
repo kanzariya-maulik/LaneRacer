@@ -81,6 +81,12 @@ function remembered(id, key, fallback, onChange) {
     return sel;
 }
 
+// Car models & liveries mode (4k models for all teams with authentic team liveries)
+remembered('car-models-select', 'lanrace.carModelMode', '4k', (val) => {
+    window.setCarModelMode?.(val);
+    window.rebuildHero3D?.();
+});
+
 let lastJoin = null; // declared before the assist restore below reads it (join / reconnect state)
 
 // ── Assist sliders ──────────────────────────────────────────────────────────

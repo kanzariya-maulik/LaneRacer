@@ -88,7 +88,13 @@ export function loadF1Model() {
                         if (child.isMesh) {
                             child.castShadow = true;
                             child.receiveShadow = true;
+                            if (child.geometry) child.geometry._isShared = true;
                             if (child.material) {
+                                child.material._isShared = true;
+                                if ('specularIntensity' in child.material) {
+                                    child.material.specularIntensity = 1.0;
+                                    child.material.specularColor = new THREE.Color(0xffffff);
+                                }
                                 if (child.material.map) {
                                     child.material.map.anisotropy = 16;
                                     child.material.map.generateMipmaps = true;
@@ -148,11 +154,13 @@ export function loadF1Model() {
                 undefined,
                 (err) => {
                     console.warn('Could not load /model/2026_redbull_rb22.glb, fallback to procedural car:', err);
+                    gltfPromise = null;
                     resolve(null);
                 }
             );
         } catch (e) {
             console.warn('GLTFLoader error, fallback to procedural car:', e);
+            gltfPromise = null;
             resolve(null);
         }
     });
@@ -167,6 +175,41 @@ export function onF1ModelReady(cb) {
 
 export function getF1Template() {
     return gltfCarTemplate;
+}
+
+export function getCarModelMode() {
+    if (typeof window !== 'undefined' && window.lanraceCarModelPreference) {
+        return window.lanraceCarModelPreference;
+    }
+    if (typeof localStorage !== 'undefined') {
+        try {
+            const stored = localStorage.getItem('lanrace.carModelMode');
+            if (stored) return stored;
+        } catch (e) {}
+    }
+    return '4k'; // 4K 2026 F1 models for ALL teams!
+}
+
+export function setCarModelMode(mode) {
+    if (typeof window !== 'undefined') {
+        window.lanraceCarModelPreference = mode;
+    }
+    if (typeof localStorage !== 'undefined') {
+        try {
+            localStorage.setItem('lanrace.carModelMode', mode);
+        } catch (e) {}
+    }
+}
+
+if (typeof window !== 'undefined') {
+    window.setCarModelMode = setCarModelMode;
+    window.getCarModelMode = getCarModelMode;
+}
+
+export function shouldCarUse4K(teamId) {
+    const mode = getCarModelMode();
+    if (mode === 'classic') return false;
+    return true; // 4K 2026 F1 model for ALL teams!
 }
 
 export const TEAM_PALETTES = {
@@ -309,7 +352,12 @@ export function getTeamLiveryTexture(teamId) {
             loadedTex.minFilter = THREE.LinearMipmapLinearFilter;
             loadedTex.magFilter = THREE.LinearFilter;
             loadedTex.anisotropy = 16;
+            loadedTex.flipY = false;
             loadedTex.needsUpdate = true;
+            if (typeof window !== 'undefined') {
+                window.rebuildHero3D?.();
+                window.refreshCarLiveries?.();
+            }
         },
         undefined,
         (err) => {
@@ -323,6 +371,7 @@ export function getTeamLiveryTexture(teamId) {
     tex.minFilter = THREE.LinearMipmapLinearFilter;
     tex.magFilter = THREE.LinearFilter;
     tex.anisotropy = 16;
+    tex.flipY = false;
     teamLiveryTextures[teamId] = tex;
     return tex;
 }
@@ -333,6 +382,11 @@ export function preloadTeamLiveries() {
             getTeamLiveryTexture(teamId);
         }
     }
+}
+
+// Start background preloading of 4K liveries immediately in browser environments
+if (typeof window !== 'undefined') {
+    preloadTeamLiveries();
 }
 
 export function applyTeamLiveryToModel(model, teamId) {
@@ -348,6 +402,7 @@ export function applyTeamLiveryToModel(model, teamId) {
 
         if (o.material?.name === 'livery') {
             o.material.map = liveryTexture(teamId);
+            o.material.color.setHex(0xffffff);
             o.material.needsUpdate = true;
         }
 
@@ -368,14 +423,24 @@ export function applyTeamLiveryToModel(model, teamId) {
                 o.material.map.wrapT = THREE.RepeatWrapping;
                 o.material.map.anisotropy = 16;
                 o.material.map.colorSpace = THREE.SRGBColorSpace;
+                o.material.map.generateMipmaps = true;
+                o.material.map.minFilter = THREE.LinearMipmapLinearFilter;
+                o.material.map.magFilter = THREE.LinearFilter;
                 o.material.map.needsUpdate = true;
             }
-            o.material.roughness = pal.gloss || 0.18;
-            o.material.metalness = pal.metal || 0.16;
-            if ('clearcoat' in o.material) {
-                o.material.clearcoat = 0.95;
-                o.material.clearcoatRoughness = 0.05;
+            if ('specularIntensity' in o.material) {
+                o.material.specularIntensity = 1.0;
+                o.material.specularColor = new THREE.Color(0xffffff);
             }
+            o.material.roughness = pal.gloss || 0.16;
+            o.material.metalness = pal.metal || 0.14;
+            if ('clearcoat' in o.material) {
+                o.material.clearcoat = 1.0;
+                o.material.clearcoatRoughness = 0.03;
+            }
+            if ('reflectivity' in o.material) o.material.reflectivity = 0.95;
+            if ('ior' in o.material) o.material.ior = 1.52;
+            o.material.envMapIntensity = 1.25;
             o.material.needsUpdate = true;
         }
 
@@ -388,6 +453,10 @@ export function applyTeamLiveryToModel(model, teamId) {
                 o.material.polygonOffset = true;
                 o.material.polygonOffsetFactor = -1.5;
                 o.material.polygonOffsetUnits = -3;
+                if ('specularIntensity' in o.material) {
+                    o.material.specularIntensity = 1.0;
+                    o.material.specularColor = new THREE.Color(0xffffff);
+                }
                 if (o.material.map) {
                     o.material.map.anisotropy = 16;
                     o.material.map.generateMipmaps = true;
@@ -407,22 +476,64 @@ export function applyTeamLiveryToModel(model, teamId) {
                 o.material.map = null;
                 o.material.color.setHex(pal.trimColor || pal.accent);
             }
-            o.material.roughness = 0.18;
+            if ('specularIntensity' in o.material) {
+                o.material.specularIntensity = 1.0;
+                o.material.specularColor = new THREE.Color(0xffffff);
+            }
+            o.material.roughness = 0.16;
             o.material.metalness = pal.metal || 0.20;
             if ('clearcoat' in o.material) {
-                o.material.clearcoat = 0.92;
-                o.material.clearcoatRoughness = 0.06;
+                o.material.clearcoat = 0.95;
+                o.material.clearcoatRoughness = 0.04;
             }
+            o.material.envMapIntensity = 1.20;
             o.material.needsUpdate = true;
         }
 
-        // Object_4 & Object_7: Front and rear wings
-        if (o.name === 'Object_4' || o.name === 'Object_7' || o.material?.name?.includes('carbon1') || o.material?.name?.includes('carbon3')) {
-            if (isRedBullCar) {
-                o.material.color.setHex(0xffffff);
-            } else if (pal.wingColor) {
-                o.material.color.setHex(pal.wingColor);
+        // Object_4, Object_7, Object_8, Object_18: Front & rear wings, beam wing, diffuser, underfloor carbon
+        if (o.name === 'Object_4' || o.name === 'Object_7' || o.name === 'Object_8' || o.name === 'Object_18' || o.material?.name?.includes('carbon')) {
+            o.material.color.setHex(0xffffff);
+            if ('specularIntensity' in o.material) {
+                o.material.specularIntensity = 1.0;
+                o.material.specularColor = new THREE.Color(0xffffff);
             }
+            o.material.roughness = 0.22;
+            o.material.metalness = 0.15;
+            if ('clearcoat' in o.material) {
+                o.material.clearcoat = 0.65;
+                o.material.clearcoatRoughness = 0.10;
+            }
+            o.material.envMapIntensity = 1.15;
+            o.material.needsUpdate = true;
+        }
+
+        // Object_22: Titanium exhaust pipe
+        if (o.name === 'Object_22' || o.material?.name?.includes('chrome')) {
+            if ('specularIntensity' in o.material) {
+                o.material.specularIntensity = 1.0;
+                o.material.specularColor = new THREE.Color(0xffffff);
+            }
+            o.material.roughness = 0.08;
+            o.material.metalness = 0.96;
+            o.material.envMapIntensity = 1.5;
+            o.material.needsUpdate = true;
+        }
+
+        // Object_20: Windscreen
+        if (o.name === 'Object_20' || o.material?.name?.includes('glass')) {
+            o.material.transparent = true;
+            o.material.opacity = 0.55;
+            o.material.roughness = 0.04;
+            o.material.metalness = 0.1;
+            if ('specularIntensity' in o.material) {
+                o.material.specularIntensity = 1.0;
+                o.material.specularColor = new THREE.Color(0xffffff);
+            }
+            if ('clearcoat' in o.material) {
+                o.material.clearcoat = 1.0;
+                o.material.clearcoatRoughness = 0.02;
+            }
+            o.material.envMapIntensity = 1.35;
             o.material.needsUpdate = true;
         }
 
@@ -430,9 +541,20 @@ export function applyTeamLiveryToModel(model, teamId) {
         if (o.name === 'Object_29' || o.material?.name?.includes('mirror')) {
             if (isRedBullCar) {
                 o.material.color.setHex(0x0e1b30);
-            } else if (pal.mirrorColor) {
-                o.material.color.setHex(pal.mirrorColor);
+            } else {
+                o.material.color.setHex(pal.mirrorColor || pal.primary);
             }
+            if ('specularIntensity' in o.material) {
+                o.material.specularIntensity = 1.0;
+                o.material.specularColor = new THREE.Color(0xffffff);
+            }
+            o.material.roughness = 0.18;
+            o.material.metalness = pal.metal || 0.18;
+            if ('clearcoat' in o.material) {
+                o.material.clearcoat = 0.95;
+                o.material.clearcoatRoughness = 0.04;
+            }
+            o.material.envMapIntensity = 1.2;
             o.material.needsUpdate = true;
         }
 
@@ -441,8 +563,8 @@ export function applyTeamLiveryToModel(model, teamId) {
             o.material = new THREE.MeshStandardMaterial({
                 color: 0x220000,
                 emissive: 0xff1010,
-                emissiveIntensity: 0.4,
-                roughness: 0.2,
+                emissiveIntensity: 0.8,
+                roughness: 0.15,
                 metalness: 0.8
             });
         }
@@ -450,15 +572,17 @@ export function applyTeamLiveryToModel(model, teamId) {
 }
 
 let wheels = null;
-// detail: 'low' | 'mid' | 'high'; lodM: world units past which the light body is drawn instead
-export function buildCar(detail = 'mid', lodM = Infinity) {
+// detail: 'low' | 'mid' | 'high'; lodM: world units past which the light body is drawn instead; teamId: team livery identifier
+export function buildCar(detail = 'mid', lodM = Infinity, teamId = 'redbull') {
     const root = new THREE.Group(), body = new THREE.LOD();
     body.name = 'bodyLOD';
     const mat = new THREE.MeshStandardMaterial({ name: 'livery', roughness: 0.38, metalness: 0.22 });
     const near = new THREE.Mesh(bodyGeometry(detail), mat);
     near.name = 'body';
 
-    if (gltfCarTemplate) {
+    const use4K = shouldCarUse4K(teamId);
+
+    if (use4K && gltfCarTemplate) {
         const gltfClone = gltfCarTemplate.clone(true);
         gltfClone.name = 'f1Model';
         body.addLevel(gltfClone, 0);
@@ -477,14 +601,15 @@ export function buildCar(detail = 'mid', lodM = Infinity) {
     }
     root.add(body);
 
-    // DRS Rear Wing Flap (only visible for fallback procedural body; 2026 model has integrated rear wing)
+    // DRS Rear Wing Flap
+    // Visible for procedural body; 2026 4K GLTF model has integrated rear wing
     const drsGroup = new THREE.Group();
     drsGroup.name = 'drsWing';
     drsGroup.position.set(-2.25, 0.91, 0);
     const drsMesh = new THREE.Mesh(drsFlapGeometry(detail), mat);
     drsMesh.name = 'drsFlap';
     drsGroup.add(drsMesh);
-    if (gltfCarTemplate) drsGroup.visible = false;
+    if (use4K && gltfCarTemplate) drsGroup.visible = false;
     root.add(drsGroup);
 
     const { tyre, cover } = (wheels ||= wheelGeometries(detail === 'high' ? 64 : detail === 'mid' ? 44 : 28));
