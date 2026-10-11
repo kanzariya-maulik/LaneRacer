@@ -827,3 +827,20 @@ body.touch #tyre-card { bottom: 180px; }
 #coach-line.bad { border-bottom-color: #e10600; } #coach-line.tip { border-bottom-color: #3b82f6; }
 #coach-line.hidden { display: none; }
 @media (max-width: 600px) { #coach-line { bottom: 330px; } }
+
+/* Qualifying: session clock, knocked-out chip, results between segments, drop zone in the tower */
+#quali-clock { position: absolute; top: var(--pad); left: 50%; transform: translateX(-50%); padding: 6px 16px; border-radius: 6px; background: rgba(0,0,0,0.7); color: #fff; font-weight: 900; font-size: 1.2rem; letter-spacing: 0.06em; pointer-events: none; white-space: nowrap; }
+#quali-clock.low { color: #ff4d4d; }
+#quali-clock.flag { background: repeating-conic-gradient(#111 0 25%, #eee 0 50%) 0 0 / 16px 16px; color: #fff; text-shadow: 0 0 4px #000, 0 0 8px #000; }
+#ko-chip { position: absolute; top: calc(var(--pad) + 2.6em); left: 50%; transform: translateX(-50%); padding: 3px 10px; border-radius: 4px; background: #b91c1c; color: #fff; font-size: 0.8rem; font-weight: 800; pointer-events: none; }
+#quali-break { position: absolute; left: 50%; top: 18%; transform: translateX(-50%); width: min(420px, calc(100vw - 32px)); padding: 14px 18px; border-radius: 10px; background: rgba(10,10,14,0.88); color: #fff; pointer-events: none; }
+#qb-head { font-weight: 900; letter-spacing: 0.1em; margin-bottom: 8px; }
+#qb-list { margin: 0; padding: 0; list-style: none; font-size: 0.9rem; white-space: pre; }
+#qb-list li { padding: 3px 6px; border-radius: 3px; }
+#qb-list li.out { color: #ff6b6b; }
+#qb-list li.me { background: rgba(255,255,255,0.12); }
+#qb-foot { margin-top: 10px; font-weight: 800; color: #facc15; }
+#quali-clock.hidden, #ko-chip.hidden, #quali-break.hidden { display: none; }
+#leaderboard-list li.drop { background: rgba(220,38,38,0.28); }
+#leaderboard-list li.out { opacity: 0.5; }
+.tt-tag.out { background: #555; }

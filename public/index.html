@@ -151,8 +151,10 @@
                                     </label>
                                     <label>Qualifying
                                         <select id="setting-quali">
-                                            <option value="1" selected>On</option>
-                                            <option value="0">Off</option>
+                                            <option value="full" selected>Full (Q1 · Q2 · Q3)</option>
+                                            <option value="short">Short</option>
+                                            <option value="oneshot">One-shot</option>
+                                            <option value="off">Off</option>
                                         </select>
                                     </label>
                                     <label>Collisions
@@ -190,12 +192,6 @@
                                             <option value="1" selected>On</option>
                                             <option value="0">Off</option>
                                         </select>
-                                    </label>
-                                    <label class="quali-only">Out-laps
-                                        <input type="number" id="setting-outlaps" min="1" max="3" value="1" title="Untimed laps before timing starts (1 = pits to the line)">
-                                    </label>
-                                    <label class="quali-only">Timed laps
-                                        <input type="number" id="setting-qualilaps" min="1" max="10" value="2">
                                     </label>
                                 </div>
                                 <button id="btn-start" class="btn success">Start Race</button>
@@ -272,7 +268,10 @@
             <div id="sector-flash" class="hidden"></div>
             <div id="race-msg" class="hidden"></div>
             <div id="coach-line" class="hidden"></div>
-            <div id="steward-card" class="hidden"><b id="sc-head"></b><small id="sc-tip"></small></div>
+            <div id="quali-clock" class="hidden"></div>
+<div id="ko-chip" class="hidden"></div>
+<div id="quali-break" class="hidden"><div id="qb-head"></div><ol id="qb-list"></ol><div id="qb-foot"></div></div>
+<div id="steward-card" class="hidden"><b id="sc-head"></b><small id="sc-tip"></small></div>
             <div id="ghost-tag" class="hidden">GHOST — FIRST CORNERS</div>
             <div id="fl-card" class="hidden">
                 <div class="fl-head"><svg class="stopwatch" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13.5" r="8" fill="none" stroke="currentColor" stroke-width="2.4"/><rect x="9.5" y="1.5" width="5" height="2.6" rx="1" fill="currentColor"/><path d="M12 13.5V8.6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="M18.4 5.6l1.6-1.6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg><span>FASTEST LAP</span></div>

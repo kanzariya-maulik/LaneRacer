@@ -336,6 +336,9 @@ socket.on('quali_clock', (d) => {
     window.onQualiClock?.(d); // game3d: the predictor's track evolution
 });
 
+socket.on('quali_lap', (d) => window.onQualiLap?.(d));
+socket.on('quali_segment', (d) => window.showQualiBreak?.(d));
+
 socket.on('session', ({ phase, endsInMs }) => {
     clientState.session = { phase, endsAt: endsInMs === null ? null : Date.now() + endsInMs };
 });

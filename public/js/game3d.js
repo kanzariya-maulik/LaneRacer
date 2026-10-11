@@ -11,6 +11,7 @@ import { themeOf, LANDS, SKIES, nightOf } from './themes.js';
 import { SnapshotBuffer, RenderClock, sample, samplePresent, decodeFlags } from './netsync.js';
 import { Predictor, STEP_S } from './predict.js';
 import { stewardText } from './steward.js';
+import { clockText, lapBanner, fmtLap } from './qualiText.js';
 import { Gearbox, shiftLights } from './audio/gearbox.js';
 import { estimateLoad } from './audio/mix.js';
 import * as Sound from './audio/audio.js';
@@ -207,7 +208,7 @@ const WATCH_DELAY_MS = 2000;
 let finishedAt = null, ownView = false;
 function watchingAfterFinish() {
     const gs = clientState.gameState, me = gs?.[clientState.me];
-    if (!me || !me.finished || isSpectator()) { finishedAt = null; ownView = false; return false; }
+    if (!me || !(me.finished || me.qualiOut) || isSpectator()) { finishedAt = null; ownView = false; return false; } // knocked out in qualifying: watch too
     finishedAt ??= performance.now();
     if (ownView || performance.now() - finishedAt < WATCH_DELAY_MS) return false;
     spectateId = watchTarget(rankedCarIds(), clientState.me, (id) => !!gs[id]?.finished, spectateId);
@@ -2169,6 +2170,18 @@ function updateHUD(withTower = true) {
         }
     }
 
+    // Qualifying: session clock and the knocked-out chip
+    const qc = clientState.qualiClock, inQuali = clientState.status === 'QUALIFYING' && !!qc;
+    const clockStr = inQuali ? clockText({ ...qc, endsInMs: qc.endsInMs - (performance.now() - qc.at) }, { onTimedLap: me?.lapStart !== null && me?.lapStart !== undefined }) : '';
+    if (clockStr !== hudQClock) {
+        hudQClock = clockStr;
+        const el = $('quali-clock');
+        el.textContent = clockStr;
+        el.className = !clockStr ? 'hidden' : qc.qphase === 'flag' ? 'flag' : qc.qphase === 'running' && qc.format !== 'oneshot' && qc.endsInMs - (performance.now() - qc.at) < 60000 ? 'low' : '';
+    }
+    const ko = inQuali && me?.qualiOut ? `KNOCKED OUT${koPos ? ' — P' + koPos : ''}` : '';
+    if ($('ko-chip').textContent !== ko) { $('ko-chip').textContent = ko; $('ko-chip').classList.toggle('hidden', !ko); }
+
     if (withTower) {
         // Timing tower
         const quali = clientState.status === 'QUALIFYING' || clientState.status === 'QUALI_RESULTS'; // ghosts also mean collisions off
@@ -2194,6 +2207,8 @@ function updateHUD(withTower = true) {
             if (p.compound) li.append(el('span', `tt-tyre tyre-${p.compound}`, `${p.compound}${p.stops ? ' ' + p.stops : ''}`));
             const tags = helpTags(lp.assist); if (tags) li.append(el('span', 'tt-tag help', tags));
             if (p.penalty) li.append(el('span', 'tt-tag pen', `+${p.penalty}s`));
+            if (quali && p.qualiOut) { li.classList.add('out'); li.append(el('span', 'tt-tag out', 'OUT')); }
+            else if (quali && p.rank > (clientState.qualiClock?.survive ?? Infinity)) li.classList.add('drop'); // knock-out zone
             if (clientState.fastestLap?.id === id) { // purple stopwatch: fastest lap of the session
                 const fl = el('span', 'tt-fl');
                 fl.innerHTML = STOPWATCH;
@@ -2298,7 +2313,7 @@ const ownFrame = { rpm: 0, load: 0, limiter: false, pit: false, speedMs: 0 };
 const listenerFrame = { x: 0, y: 0, fx: 1, fy: 0, vx: 0, vy: 0 }, sndFrame = { own: null, others: soundOthers, listener: listenerFrame };
 const silentFrame = { own: null, others: [], listener: listenerFrame };
 const camDir = new THREE.Vector3();
-let lastDrs = false, hudLit = -1, hudFlash = null, hudGear = '', hudPick = '', pickIdx = null, hudHadStop = false, hudGoUntil = 0, hudLastStop, hudPrevPhase = null, hudGhost = false, bannerText = '', bannerUntil = 0;
+let hudQClock = '', lastDrs = false, hudLit = -1, hudFlash = null, hudGear = '', hudPick = '', pickIdx = null, hudHadStop = false, hudGoUntil = 0, hudLastStop, hudPrevPhase = null, hudGhost = false, bannerText = '', bannerUntil = 0;
 function updateSound(dt) {
     const gs = clientState.gameState, me = gs[clientState.me], racing = !!me && !isSpectator();
     const followId = racing && !watchingAfterFinish() ? clientState.me : spectateId; // dash and engine: the car on screen
@@ -2406,7 +2421,38 @@ window.syncTyres = () => {
     if (me) predictor?.setTyres({ compound: me.compound, wearPerM: me.wearPerM });
 };
 
-window.onQualiClock = (d) => { if (predictor) predictor.gripEvo = d.evo; }; // track evolution, same as the server's
+window.onQualiClock = (d) => {
+    if (predictor) predictor.gripEvo = d.evo; // track evolution, same as the server's
+    if (d.qphase === 'running') document.getElementById('quali-break').classList.add('hidden'); // next segment under way
+};
+// A timed lap: your own banner (improved / drop zone / pole); everyone hears about a new provisional pole
+let koPos = null, qbTimer = null;
+window.onQualiLap = (d) => {
+    const name = clientState.players[d.id]?.username || '';
+    if (d.id === clientState.me) { const t = lapBanner(d, clientState.qualiClock?.survive ?? 99); if (t) window.showBanner?.(t, true); }
+    else if (d.pole) window.showBanner?.(`PROVISIONAL POLE — ${name.toUpperCase()} ${fmtLap(d.time)}`, true);
+};
+// Between segments: who's through, who's out; after the last one, pole position
+window.showQualiBreak = (d) => {
+    const box = document.getElementById('quali-break'), list = document.getElementById('qb-list'), foot = document.getElementById('qb-foot');
+    document.getElementById('qb-head').textContent = clientState.qualiClock?.format === 'full' ? `Q${d.segment} RESULTS` : 'QUALIFYING RESULTS';
+    list.replaceChildren(...d.rows.map((r, i) => {
+        const li = document.createElement('li');
+        li.className = (r.out ? 'out ' : '') + (r.id === clientState.me ? 'me' : '');
+        const name = clientState.players[r.id]?.username || r.id;
+        li.textContent = `${i + 1}  ${name}  ${r.time === null ? '—' : fmtLap(r.time)}  ${i && r.gap !== null ? '+' + r.gap.toFixed(3) : ''}  ${d.next ? (r.out ? 'KNOCKED OUT' : 'THROUGH') : ''}`;
+        if (r.id === clientState.me && r.out) koPos = i + 1;
+        return li;
+    }));
+    const pole = d.rows[0];
+    const until = performance.now() + d.breakMs;
+    clearInterval(qbTimer);
+    const tick = () => { foot.textContent = d.next ? `Q${d.next} starts in 0:${String(Math.max(0, Math.ceil((until - performance.now()) / 1000))).padStart(2, '0')}`
+        : pole && pole.time !== null ? `POLE POSITION — ${(clientState.players[pole.id]?.username || '').toUpperCase()} ${fmtLap(pole.time)}` : ''; };
+    tick();
+    if (d.next) qbTimer = setInterval(tick, 250);
+    box.classList.remove('hidden');
+};
 
 window.initGameVisuals = () => {
     netBuf = new SnapshotBuffer();
@@ -2414,6 +2460,7 @@ window.initGameVisuals = () => {
     predictor = new Predictor(clientState.trackData, clientState.gameState?.[clientState.me]?.assist || 'off');
     predictor.box = clientState.gameState?.[clientState.me]?.box || null; // the pit stop guide drives into it
     predictor.gripEvo = clientState.status === 'QUALIFYING' ? clientState.qualiClock?.evo : undefined;
+    clearInterval(qbTimer); document.getElementById('quali-break')?.classList.add('hidden'); koPos = null; hudQClock = null;
     lastPick = null; hudLastStop = undefined; hudPrevPhase = null; hudGhost = false; $('ghost-tag')?.classList.add('hidden'); clearTimeout(stewardTimer); $('steward-card')?.classList.add('hidden'); bannerUntil = 0; // the first meta seen is the baseline, not a new stop
     clearTimeout(coachTimer); $('coach-line')?.classList.add('hidden'); stewardAtS = contactAtS = -Infinity;
     window.syncTyres();

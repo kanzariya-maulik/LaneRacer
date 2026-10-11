@@ -18,8 +18,6 @@ const hostSettings = document.getElementById('host-settings');
 const setTrack = document.getElementById('setting-track');
 const setLaps = document.getElementById('setting-laps');
 const setQuali = document.getElementById('setting-quali');
-const setOutLaps = document.getElementById('setting-outlaps');
-const setQualiLaps = document.getElementById('setting-qualilaps');
 const setCollisions = document.getElementById('setting-collisions');
 const setGhost = document.getElementById('setting-ghost');
 const setTyres = document.getElementById('setting-tyres');
@@ -301,9 +299,7 @@ function emitSettings() {
         trackId: setTrack.value,
         timeOfDay: setTime.value,
         maxLaps: parseInt(setLaps.value, 10),
-        qualifying: setQuali.value === '1',
-        outLaps: parseInt(setOutLaps.value, 10),
-        qualiLaps: parseInt(setQualiLaps.value, 10),
+        qualiFormat: setQuali.value,
         collisions: setCollisions.value === '1',
         ghostStart: setGhost.value === '1',
         tyreWear: setTyres.value === '1',
@@ -314,8 +310,6 @@ function emitSettings() {
 setTrack.addEventListener('change', emitSettings);
 setLaps.addEventListener('change', emitSettings);
 setQuali.addEventListener('change', emitSettings);
-setOutLaps.addEventListener('change', emitSettings);
-setQualiLaps.addEventListener('change', emitSettings);
 setCollisions.addEventListener('change', emitSettings);
 setGhost.addEventListener('change', emitSettings);
 setTyres.addEventListener('change', emitSettings);
@@ -425,9 +419,7 @@ window.updateSettingsUI = () => {
     setTrack.value = clientState.settings.trackId;
     setLaps.value = clientState.settings.maxLaps;
     setTime.value = clientState.settings.timeOfDay === 'night' ? 'night' : 'day';
-    setQuali.value = clientState.settings.qualifying ? '1' : '0';
-    setOutLaps.value = clientState.settings.outLaps ?? 1;
-    setQualiLaps.value = clientState.settings.qualiLaps ?? 2;
+    setQuali.value = clientState.settings.qualiFormat ?? (clientState.settings.qualifying ? 'short' : 'off');
     document.querySelectorAll('.quali-only').forEach((el) => el.classList.toggle('hidden', !clientState.settings.qualifying));
     setCollisions.value = clientState.settings.collisions === false ? '0' : '1';
     setGhost.value = clientState.settings.ghostStart === false ? '0' : '1';
@@ -444,7 +436,7 @@ window.updateSettingsUI = () => {
     // Header chips and the read-only view non-hosts see
     const s = clientState.settings;
     const track = setTrack.selectedOptions[0]?.textContent || s.trackId;
-    const out = s.outLaps ?? 1, timed = s.qualiLaps ?? 2, quali = s.qualifying ? `${out} out + ${timed} timed` : 'Off';
+    const quali = { full: 'Full · Q1 / Q2 / Q3', short: 'Short', oneshot: 'One-shot', off: 'Off' }[s.qualiFormat ?? (s.qualifying ? 'short' : 'off')];
     const time = s.timeOfDay === 'night' ? 'Night' : 'Day';
     const rows = [['Track', track], ['Time', time], ['Laps', s.maxLaps], ['Qualifying', quali], ['Collisions', s.collisions === false ? 'Off' : (s.contactPenalties === false ? 'On, no penalties' : 'On, penalties') + (s.ghostStart !== false ? ', ghost start' : '')], ['Tyre wear', s.tyreWear === false ? 'Off' : 'On'],
         ['Driver help', help.mode === 'fixed' ? `Same for all: braking ${{ 0: 'Off', 50: 'Low', 100: 'High' }[help.brake]}, steering ${help.steer ? 'On' : 'Off'}` : 'Each driver chooses']];
