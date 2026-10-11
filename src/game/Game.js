@@ -4,10 +4,9 @@ const Tyres = require('../../public/js/sim/tyres.js');
 const Drive = require('../../public/js/sim/drive.js');
 const Ticker = require('../ticker');
 const { pointAt, edgeAt } = require('./Track');
+const QualiSession = require('./QualiSession');
 
 const TICK_RATE = 60;
-const QUALI_LAPS = 2;       // timed laps after the out-lap, unless the host sets qualiLaps
-const QUALI_S_PER_LAP = 120; // quali ends this long per lap of the run (out-laps + timed) even if someone never finishes
 const CP_GATE_M = 30;        // a checkpoint also counts this far past it along the lap: wide of its circle (open grass), not a cut
 const LIMIT_WARNINGS = 3;    // race: corner cuts warned before the black-and-white flag, then penalties
 const BEND_SPAN_M = 25;       // a bend's direction is read over this far either side
@@ -40,7 +39,7 @@ const STALL_S = 5, STALL_M = 1;        // lane/out: not this much further along 
 const STOP_CODE = { guide: 1, service: 2, hold: 3, lane: 4, out: 5, wait: 6 };
 
 const FLAGS = { inPit: 1, limiter: 2, drs: 4, drsAvailable: 8, finished: 16, lapValid: 32, ghost: 64 };
-const META_FIELDS = ['lap', 'checkpoint', 'rank', 'gap', 'lapsDown', 'lastLap', 'bestLap', 'lapStart', 'bestLapSectors', 'lastValid', 'penalty', 'compound', 'nextCompound', 'stops', 'compoundsUsed', 'wearPerM', 'lastStop'];
+const META_FIELDS = ['lap', 'checkpoint', 'rank', 'gap', 'lapsDown', 'lastLap', 'bestLap', 'lapStart', 'bestLapSectors', 'lastValid', 'penalty', 'compound', 'nextCompound', 'stops', 'compoundsUsed', 'wearPerM', 'lastStop', 'segBest', 'qualiOut'];
 const META_EVERY = 6; // ticks: info updates at 10 Hz
 const r1 = (v) => Math.round(v * 10) / 10;
 
@@ -55,11 +54,11 @@ function bendAt(t, i) {
     return Math.atan2(Math.sin(h2 - h1), Math.cos(h2 - h1)) / ((back + fwd) / t.scale);
 }
 
+const fmtLap = (t) => `${Math.floor(t / 60)}:${(t % 60).toFixed(3).padStart(6, '0')}`;
+
 class Game {
     // net: optional transport (src/webrtcManager.js) that sends game_state over the UDP DataChannel
     // The host's qualifying run (lobby.sanitizeSettings): timed laps, and the session limit that grows with the whole run
-    qualiLaps() { return this.settings.qualiLaps ?? QUALI_LAPS; }
-    qualiMaxS() { return QUALI_S_PER_LAP * ((this.settings.outLaps ?? 1) + this.qualiLaps()); }
 
     constructor(io, players, track, settings, onFinish, mode = 'race', net = null) {
         this.io = io;
@@ -122,6 +121,7 @@ class Game {
                 bestLapSectors: null,
                 lapValid: true,
                 ghost: mode === 'race' && settings.ghostStart !== false,
+                segBest: null, segAt: null, qualiOut: false, qualiDone: false, // qualifying segment (meta for everyone)
                 lastValid: null,
                 sectorStart: mode === 'race' ? 0 : null, // quali: untimed out-lap
                 finished: false,
@@ -134,6 +134,13 @@ class Game {
                 queue: [], lastSeq: -1, starve: 0, // prediction clients: sequenced inputs, last applied, ticks with none
             };
         });
+        if (mode === 'quali') {
+            const format = QualiSession.effectiveFormat(settings.qualiFormat || 'short', Object.keys(this.players).length);
+            const refS = (track.racingLine?.lapS || 90) * 1.15, scale = settings.qualiScale ?? 1;
+            const plan = QualiSession.segmentPlan(format, refS, scale);
+            this.quali = { format, segment: 1, phase: 'running', plan, refS, scale, endsAt: format === 'oneshot' ? 3 * refS * scale : plan[0],
+                flagCapAt: Infinity, breakEndsAt: 0, segments: [], out: new Set(), left: [], driven: 0, evo: 1 };
+        }
     }
 
     static rankPlayers(players, checkpoints) {
@@ -198,7 +205,7 @@ class Game {
         }
         const st = p.stop;
         st.age += this.dt;
-        if (st.phase === 'wait') { if (thr) go('out'); return; }
+        if (st.phase === 'wait') { if (thr && this.canLeaveBox(p)) go('out'); return; }
         if (st.phase === 'lane' || st.phase === 'out' || st.phase === 'guide') {
             // Out of the lane = past its edge and runoff (a hot entry running wide along the barrier is still in it)
             const n = p.inPit ? null : Physics.nearestOnPath(p.x, p.y, t.pit.path, false);
@@ -308,7 +315,7 @@ class Game {
 
     initPayload() {
         // Late joiners also need the quali clock and the session-best sectors (tower colours)
-        const session = this.mode === 'quali' ? { phase: 'QUALIFYING', endsInMs: Math.max(0, (this.qualiMaxS() - this.time) * 1000) } : null;
+        const session = this.mode === 'quali' ? this.qualiClock() : null;
         return { players: this.players, track: this.track, mode: this.mode, index: this.index, session, bestSectors: this.bestSectors, bestSectorIds: this.bestSectorIds, fastestLap: this.fastestLap, paused: !!this.paused };
     }
 
@@ -362,6 +369,8 @@ class Game {
     }
 
     removePlayer(id) {
+        const gone = this.players[id];
+        if (this.quali && gone && gone.segBest !== null && !gone.qualiOut) this.quali.left.push(this.qualiEntry(gone)); // keeps its time this segment
         delete this.players[id];
         this.refreshBests(); // their lap in progress no longer counts
     }
@@ -382,7 +391,7 @@ class Game {
 
     start() {
         this.io.emit('game_init', this.initPayload());
-        if (this.mode === 'quali') this.io.emit('session', { phase: 'QUALIFYING', endsInMs: this.qualiMaxS() * 1000 });
+        if (this.mode === 'quali') this.io.emit('session', { phase: 'QUALIFYING', endsInMs: this.qualiClock().endsInMs });
         this.ticker = new Ticker(1000 / TICK_RATE, () => this.timedUpdate());
         this.ticker.start();
     }
@@ -471,7 +480,7 @@ class Game {
     drive(p) {
         const t = this.track, wasLimited = p.limiter;
         const after = Drive.driveCar(p, p.input, t, this.dt);
-        if (this.mode === 'quali' && p.limiter && !wasLimited) p.lapStart = p.sectorStart = null; // crossing the pit entry line ends a timed lap
+        if (this.mode === 'quali' && p.limiter && !wasLimited) this.endRunAtPitEntry(p); // crossing the pit entry line ends a timed lap
         this.checkLimits(p, after);
         const total = t.cum[t.path.length];
         const lapS = (((t.cum[after.i] + after.t * (t.cum[after.i + 1] - t.cum[after.i]) - t.startS) % total) + total) % total;
@@ -484,7 +493,7 @@ class Game {
         const wasLimited = p.limiter;
         Drive.updatePitState(p, this.track, near, nearPit);
         // Crossing the pit entry line ends a timed lap
-        if (this.mode === 'quali' && p.limiter && !wasLimited) p.lapStart = p.sectorStart = null;
+        if (this.mode === 'quali' && p.limiter && !wasLimited) this.endRunAtPitEntry(p);
     }
 
     update() {
@@ -561,31 +570,111 @@ class Game {
             if (Object.keys(diff).length) this.io.emit('game_meta', diff);
         }
 
-        const active = ids.filter(id => !this.players[id].finished).length;
-        const over = this.mode === 'race'
-            ? active === 0
-            : active === 0 || this.time >= this.qualiMaxS();
-        if (over) {
+        if (this.mode === 'quali') { this.updateQuali(); return; }
+        if (ids.every((id) => this.players[id].finished)) {
             this.stop();
-            if (this.mode === 'quali') {
-                this.onFinish(Game.qualiOrder(Object.values(this.players)).map(p => ({ id: p.id, bestLap: p.bestLap })));
-            } else {
-                this.onFinish();
-            }
+            this.onFinish();
+        }
+    }
+
+    // ---------- qualifying session ----------
+    qualiEntry(p) { return { id: p.id, time: p.segBest, at: p.segAt, joinOrder: p.joinOrder }; }
+    canLeaveBox(p) { return !this.quali || (!p.qualiOut && !p.qualiDone && this.quali.phase === 'running'); }
+    liveIds() { return Object.keys(this.players).filter((id) => !this.players[id].qualiOut); }
+    segmentRanking() { return QualiSession.rankSegment(this.liveIds().map((id) => this.qualiEntry(this.players[id])).concat(this.quali.left)); }
+    qualiRankPlayers(list) {
+        const live = QualiSession.rankSegment(list.filter((p) => !p.qualiOut).map((p) => this.qualiEntry(p))).map((e) => this.players[e.id]);
+        return live.concat(list.filter((p) => p.qualiOut).sort((a, b) => a.joinOrder - b.joinOrder));
+    }
+    survivors() {
+        const q = this.quali, n = this.liveIds().length + q.left.length;
+        return q.format === 'full' && q.segment < 3 ? n - QualiSession.knockoutCount(n) : n;
+    }
+    qualiClock() {
+        const q = this.quali;
+        const endsInMs = q.phase === 'running' && q.format !== 'oneshot' ? Math.max(0, (q.endsAt - this.time) * 1000)
+            : q.phase === 'break' ? Math.max(0, (q.breakEndsAt - this.time) * 1000) : 0;
+        return { phase: 'QUALIFYING', segment: q.segment, format: q.format, qphase: q.phase, endsInMs, survive: this.survivors(), out: [...q.out], evo: q.evo };
+    }
+    // Crossing the pit entry line ends a timed lap; after the chequered flag it ends the run
+    endRunAtPitEntry(p) {
+        p.lapStart = p.sectorStart = null;
+        if (this.quali.phase === 'flag') p.qualiDone = true;
+    }
+    // A completed timed lap: segment best, positions, provisional pole
+    qualiLap(p, time) {
+        const q = this.quali, counts = p.lapValid && this.time - time < q.endsAt;
+        const before = this.segmentRanking(), had = p.segBest !== null, prevPos = had ? before.findIndex((e) => e.id === p.id) + 1 : null;
+        if (counts && (p.segBest === null || time < p.segBest)) { p.segBest = time; p.segAt = this.time; }
+        const after = this.segmentRanking(), pos = after.findIndex((e) => e.id === p.id) + 1;
+        const pole = counts && pos === 1 && p.segBest === time;
+        this.io.emit('quali_lap', { id: p.id, time, valid: counts, segment: q.segment, pos, prevPos, pole });
+        if (pole) this.io.emit('chat_msg', { username: 'SYSTEM', color: '#a855f7', msg: `PROVISIONAL POLE: ${p.username} ${fmtLap(time)}` });
+    }
+    // Qualifying clock: running → flag (laps started before zero may finish) → break (results, back to the boxes) → next segment / done
+    updateQuali() {
+        const q = this.quali, live = this.liveIds();
+        if (q.phase === 'running' || q.phase === 'flag') q.driven += this.dt;
+        const planned = q.plan.filter(Number.isFinite).reduce((a, b) => a + b, 0) || q.endsAt;
+        q.evo = 1 + 0.02 * Math.min(1, q.driven / planned);
+        if (q.phase === 'running' && (this.time >= q.endsAt || (q.format === 'oneshot' && live.every((id) => this.players[id].qualiDone)))) {
+            q.phase = 'flag';
+            q.flagCapAt = this.time + 1.5 * q.refS * q.scale;
+            for (const id of live) { const p = this.players[id]; if (p.lapStart === null) p.qualiDone = true; } // not on a timed lap: done
+        }
+        if (q.phase === 'flag' && (live.every((id) => this.players[id].qualiDone) || this.time >= q.flagCapAt)) this.endSegment(live);
+        else if (q.phase === 'break' && this.time >= q.breakEndsAt) this.startSegment();
+        if (this.seq % 30 === 0) this.io.emit('quali_clock', this.qualiClock());
+    }
+    endSegment(live) {
+        const q = this.quali, ranked = QualiSession.rankSegment(live.map((id) => this.qualiEntry(this.players[id])).concat(q.left));
+        const k = q.format === 'full' && q.segment < 3 ? QualiSession.knockoutCount(ranked.length) : 0;
+        const out = ranked.slice(ranked.length - k).map((e) => e.id);
+        q.segments.push({ ranked, out });
+        for (const id of out) { q.out.add(id); if (this.players[id]) this.players[id].qualiOut = true; }
+        const last = q.format !== 'full' || q.segment === 3, first = ranked[0]?.time;
+        const breakS = Math.max(3, 30 * q.scale);
+        this.io.emit('quali_segment', { segment: q.segment, rows: ranked.map((e) => ({ id: e.id, time: e.time, gap: e.time !== null && first != null ? e.time - first : null, out: out.includes(e.id) })),
+            next: last ? null : q.segment + 1, breakMs: last ? 0 : breakS * 1000 });
+        if (out.length) this.io.emit('chat_msg', { username: 'SYSTEM', color: '#ff0000', msg: `Q${q.segment}: ${out.map((id) => this.players[id]?.username || id).join(', ')} knocked out` });
+        q.left = [];
+        this.resetToBoxes();
+        if (!last) { q.phase = 'break'; q.breakEndsAt = this.time + breakS; return; }
+        q.phase = 'done';
+        this.stop();
+        this.onFinish(QualiSession.gridOrder(q.segments).map((id) => {
+            let seg = 0;
+            q.segments.forEach((s, i) => { if (s.ranked.some((e) => e.id === id)) seg = i; });
+            const time = q.segments[seg].ranked.find((e) => e.id === id).time;
+            return { id, bestLap: time, segment: seg + 1, time };
+        }));
+    }
+    startSegment() {
+        const q = this.quali;
+        q.segment++;
+        q.phase = 'running';
+        q.endsAt = this.time + q.plan[q.segment - 1];
+        q.flagCapAt = Infinity;
+        for (const p of Object.values(this.players)) Object.assign(p, { segBest: null, segAt: null, qualiDone: false });
+    }
+    resetToBoxes() {
+        for (const p of Object.values(this.players)) {
+            if (p.box) Object.assign(p, { x: p.box.x, y: p.box.y, angle: p.box.angle });
+            Object.assign(p, { vx: 0, vy: 0, speed: 0, stop: { phase: 'wait', t: 0, age: 0 }, inPit: true, lapStart: null, sectorStart: null, outLaps: 0, finished: false });
         }
     }
 
     updateRanks() {
         const list = Object.values(this.players);
         if (!list.length) return;
-        const ranked = this.mode === 'quali' ? Game.qualiOrder(list) : Game.rankPlayers(list, this.track.checkpoints);
+        const ranked = this.mode === 'quali' ? this.qualiRankPlayers(list) : Game.rankPlayers(list, this.track.checkpoints);
         const leader = ranked[0];
         const cpCount = this.track.checkpoints.length;
         ranked.forEach((p, i) => {
             p.rank = i + 1;
             if (this.mode === 'quali') {
                 p.lapsDown = 0;
-                p.gap = i > 0 && p.bestLap !== null && leader.bestLap !== null ? p.bestLap - leader.bestLap : null;
+                p.gap = i > 0 && p.segBest !== null && leader.segBest !== null ? p.segBest - leader.segBest : null;
             } else {
                 p.lapsDown = Math.floor((leader.progress - p.progress) / cpCount);
                 const mine = p.passTimes[p.progress], theirs = leader.passTimes[p.progress];
@@ -758,6 +847,7 @@ class Game {
         p.lapStart = this.time;
         this.io.emit('timing', { id: p.id, lap: p.lap, lapTime, bestLap: p.bestLap, valid: p.lapValid,
             sessionBest: this.bestSectors, bestSectorIds: this.bestSectorIds, fastestLap: this.fastestLap });
+        if (this.mode === 'quali') this.qualiLap(p, lapTime);
         this.newLap(p);
     }
 
@@ -812,21 +902,19 @@ class Game {
             }
             return;
         }
-        if (p.finished) return;
+        if (p.finished || p.qualiOut) return;
+        const q = this.quali;
         if (p.lapStart !== null) {
             p.lap++;
             this.recordLap(p);
-            if (p.lap >= this.qualiLaps()) { // run complete: park the car
-                p.stop = null;
-                p.finished = true;
-                p.lapStart = null;
-                p.sectorStart = null;
-                p.vx = p.vy = p.speed = 0;
+            if (q.phase !== 'running' || this.time >= q.endsAt || q.format === 'oneshot') { // chequered flag, or the one-shot lap: run over
+                p.qualiDone = true;
+                p.lapStart = p.sectorStart = null;
             }
-            return; // recordLap already started the next flying lap at the line
+            return; // otherwise recordLap already started the next flying lap at the line
         }
         // Out-laps: untimed crossings after pit exit (one in the pit lane doesn't count); timing starts at the last one
-        if (p.inPit) return;
+        if (p.inPit || p.qualiDone || q.phase !== 'running') return;
         p.outLaps = (p.outLaps || 0) + 1;
         if (p.outLaps < (this.settings.outLaps ?? 1)) return;
         p.lapStart = this.time;

@@ -33,7 +33,7 @@ test('sanitizeSettings clamps and ignores garbage', () => {
     );
     assert.deepStrictEqual(
         lobby.sanitizeSettings(DEFAULTS, { trackId: 'spa', maxLaps: 0, qualifying: false }, TRACK_IDS),
-        { trackId: 'spa', maxLaps: 1, qualifying: false },
+        { trackId: 'spa', maxLaps: 1, qualifying: false, qualiFormat: 'off' },
     );
     assert.deepStrictEqual(
         lobby.sanitizeSettings(DEFAULTS, { maxLaps: 4.6, qualiMinutes: 5 }, TRACK_IDS),

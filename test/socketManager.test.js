@@ -41,7 +41,7 @@ function advance(t, ms) {
 function join(io, id, teamId, quali) {
     const s = io.connect(id);
     s.fire('join_lobby', { username: id.toUpperCase(), teamId });
-    if (quali !== undefined) s.fire('update_settings', { trackId: 'monza', maxLaps: 1, qualifying: !!quali });
+    if (quali !== undefined) s.fire('update_settings', { trackId: 'monza', maxLaps: 1, qualifying: !!quali, qualiScale: 0.02 }); // short clocks
     else s.fire('toggle_ready', true);
     return s;
 }
@@ -97,9 +97,9 @@ test('qualifying → results → race grid in best-lap order', (t) => {
     const quali = io.events('game_init').at(-1);
     assert.strictEqual(quali.mode, 'quali');
 
-    Object.assign(quali.players.a, { bestLap: 85, finished: true });
-    Object.assign(quali.players.b, { bestLap: 80, finished: true });
-    advance(t, 50);
+    Object.assign(quali.players.a, { segBest: 85, segAt: 1 });
+    Object.assign(quali.players.b, { segBest: 80, segAt: 2 });
+    advance(t, 13000); // the short session's clock (scaled), then the flag: everyone parked
     assert.ok(io.events('status_change').includes('QUALI_RESULTS'));
     assert.deepStrictEqual(io.events('quali_results').at(-1).map(r => [r.id, r.position]), [['b', 1], ['a', 2]]);
 
@@ -120,7 +120,7 @@ test('no quali times → join-order grid', (t) => {
     const a = join(io, 'a', 'ferrari', 1);
     const b = join(io, 'b', 'haas');
     a.fire('start_game');
-    advance(t, 360 * 1000 + 100); // nobody ever crosses the line: the 6-minute cap ends quali
+    advance(t, 13000); // nobody ever sets a time: the clock ends quali
     advance(t, 8000);
     const race = io.events('game_init').at(-1);
     assert.strictEqual(race.mode, 'race');
@@ -138,9 +138,9 @@ test('disconnect during results drops driver from the grid', (t) => {
     const b = join(io, 'b', 'haas');
     a.fire('start_game');
     const quali = io.events('game_init').at(-1);
-    Object.assign(quali.players.a, { bestLap: 85, finished: true });
-    Object.assign(quali.players.b, { bestLap: 80, finished: true });
-    advance(t, 50);
+    Object.assign(quali.players.a, { segBest: 85, segAt: 1 });
+    Object.assign(quali.players.b, { segBest: 80, segAt: 2 });
+    advance(t, 13000); // the short session's clock (scaled), then the flag: everyone parked
     b.fire('disconnect');
     advance(t, 8000);
     const race = io.events('game_init').at(-1);

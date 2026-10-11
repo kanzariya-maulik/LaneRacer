@@ -12,7 +12,7 @@ const state = {
     status: 'LOBBY', // LOBBY, QUALIFYING, QUALI_RESULTS, COUNTDOWN, RACE, FINISHED
     players: {},
     hostId: null,
-    settings: { trackId: 'monza', maxLaps: 3, qualifying: true, collisions: true, tyreWear: true, contactPenalties: true, ghostStart: true, timeOfDay: 'day', outLaps: 1, qualiLaps: 2, help: { mode: 'choose', steer: 100, brake: 100 } }
+    settings: { trackId: 'monza', maxLaps: 3, qualifying: true, qualiFormat: 'full', collisions: true, tyreWear: true, contactPenalties: true, ghostStart: true, timeOfDay: 'day', outLaps: 1, qualiLaps: 2, help: { mode: 'choose', steer: 100, brake: 100 } }
 };
 
 let gameInstance = null;
@@ -272,7 +272,7 @@ function startQuali(io, racers) {
     setStatus(io, 'QUALIFYING');
     gameInstance = new Game(io, racers, TRACKS[state.settings.trackId], state.settings, (results) => {
         setStatus(io, 'QUALI_RESULTS');
-        io.emit('quali_results', results.map((r, i) => ({ id: r.id, bestLap: r.bestLap, position: i + 1 })));
+        io.emit('quali_results', results.map((r, i) => ({ id: r.id, bestLap: r.bestLap, position: i + 1, segment: r.segment, time: r.time })));
         io.emit('session', { phase: 'QUALI_RESULTS', endsInMs: RESULTS_MS });
         later(() => {
             // Drivers who left during the results screen aren't on the grid

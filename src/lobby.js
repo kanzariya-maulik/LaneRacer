@@ -21,7 +21,9 @@ function sanitizeSettings(current, incoming, trackIds) {
     const next = { ...current };
     if (trackIds.includes(incoming.trackId)) next.trackId = incoming.trackId;
     if (Number.isFinite(incoming.maxLaps)) next.maxLaps = clamp(Math.round(incoming.maxLaps), 1, 50);
-    if (typeof incoming.qualifying === 'boolean') next.qualifying = incoming.qualifying;
+    if (typeof incoming.qualifying === 'boolean') { next.qualifying = incoming.qualifying; if (!incoming.qualiFormat) next.qualiFormat = incoming.qualifying ? (current.qualiFormat && current.qualiFormat !== 'off' ? current.qualiFormat : 'full') : 'off'; }
+    if (['full', 'short', 'oneshot', 'off'].includes(incoming.qualiFormat)) { next.qualiFormat = incoming.qualiFormat; next.qualifying = incoming.qualiFormat !== 'off'; }
+    if (Number.isFinite(incoming.qualiScale)) next.qualiScale = clamp(incoming.qualiScale, 0.02, 1); // test setting: shorter clocks
     if (typeof incoming.collisions === 'boolean') next.collisions = incoming.collisions;
     if (typeof incoming.contactPenalties === 'boolean') next.contactPenalties = incoming.contactPenalties;
     if (typeof incoming.ghostStart === 'boolean') next.ghostStart = incoming.ghostStart;
