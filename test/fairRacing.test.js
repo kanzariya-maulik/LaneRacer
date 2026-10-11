@@ -81,14 +81,15 @@ test('lap-1 blame is lenient: 2.5x is a racing incident on the first lap, a pena
 
 const tracks = Track.loadAll();
 // Tightest bend of a circuit: the path index with the largest |bend|
-// Usable: a car 2 m past the white line on either side is still nearest to this stretch (not beside another leg of a hairpin)
-// and really off the road line there; the tightest hairpin bends of sakhir, cota and buddh fail this and are skipped
+// Usable: a car 2 m past the white line on either side is still nearest to this stretch and really beyond edgeAt there.
+// On the curved inside edge of the tightest bends of sakhir, cota and buddh the nearest point slides along the same leg
+// and the probe is not past edgeAt, so those bends are skipped
 const usable = (t, i) => [1, -1].every((s) => {
     const q = pastLine(t, i, s), n = Physics.nearestOnTrack(q.x, q.y, t);
     return Math.abs(n.i - i) <= 3 && n.dist > Track.edgeAt(t, n, q.x, q.y) + Physics.CAR_HALF_WIDTH_M * t.scale;
 });
 const tightest = (t) => t.path.reduce((b, _, i) => (usable(t, i) && (b < 0 || Math.abs(Game.bendAt(t, i)) > Math.abs(Game.bendAt(t, b))) ? i : b), -1);
-// A point beside path index i, `m` metres past the white line on the given side (+1 = left of the heading, -1 = right)
+// A point beside path index i, `m` metres past the white line on the given side (+1 = the (-sin h, cos h) side, which on screen with y down is the path's right, as in edgeAt; -1 = the other)
 function pastLine(t, i, sideSign, m = 2) {
     const P = t.path, a = P[i], b = P[(i + 1) % P.length], h = Math.atan2(b.y - a.y, b.x - a.x);
     const probe = { x: a.x - Math.sin(h) * sideSign * t.scale, y: a.y + Math.cos(h) * sideSign * t.scale };
@@ -103,7 +104,7 @@ function insideSign(t, i) {
     while (back < 25 * t.scale) { const q = (k - 1 + n) % n; back += Math.hypot(P[k].x - P[q].x, P[k].y - P[q].y); k = q; }
     while (fwd < 25 * t.scale) { const q = (j + 1) % n; fwd += Math.hypot(P[q].x - P[j].x, P[q].y - P[j].y); j = q; }
     const mx = (P[k].x + P[j].x) / 2 - a.x, my = (P[k].y + P[j].y) / 2 - a.y;
-    return -Math.sin(h) * mx + Math.cos(h) * my > 0 ? 1 : -1; // + = left (L = (-sin h, cos h))
+    return -Math.sin(h) * mx + Math.cos(h) * my > 0 ? 1 : -1; // + = the (-sin h, cos h) side: the path's right on screen (y down)
 }
 const strike = (g, p, at) => { p.x = at.x; p.y = at.y; p.offLimits = false; g.checkLimits(p, Physics.nearestOnTrack(p.x, p.y, g.track)); };
 
@@ -175,4 +176,18 @@ test('collision and hit events carry what the steward card needs', () => {
     const col = events.find(([, d]) => d.kind === 'collision')[1], hit = events.find(([, d]) => d.kind === 'hit')[1];
     assert.deepStrictEqual([col.id, col.add, col.victim, col.off], ['a', 5, 'B', false]);
     assert.deepStrictEqual([hit.id, hit.by, hit.add], ['b', 'A', 5]);
+});
+
+test('race: a wide or cut lap gives back its purple sectors at once', () => {
+    const g = new Game(io, [lp('a')], monza, RACE, () => {});
+    g.release();
+    const a = g.players.a;
+    g.time = 10; g.checkLapProgress(a);
+    const cps = g.track.checkpoints;
+    for (let k = 1; k <= g.track.sectorCps[1]; k++) { g.time = 10 + (30 * k) / g.track.sectorCps[1]; a.x = cps[k].x; a.y = cps[k].y; g.checkLapProgress(a); }
+    assert.strictEqual(g.bestSectorIds[0], 'a', 'S1 is purple live');
+    const t = monza, i = t.path.reduce((b, _, k) => (Math.abs(Game.bendAt(t, k)) < Math.abs(Game.bendAt(t, b)) ? k : b), 0);
+    strike(g, a, pastLine(t, i, 1)); // wide on a straight
+    assert.strictEqual(a.lapValid, false);
+    assert.strictEqual(g.bestSectorIds[0], null, 'the sector drops at once');
 });

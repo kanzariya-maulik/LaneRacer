@@ -689,7 +689,7 @@ class Game {
         const k = bendAt(t, near.i), P = t.path, a = P[near.i], b = P[(near.i + 1) % P.length];
         const right = -(b.y - a.y) * (p.x - near.px) + (b.x - a.x) * (p.y - near.py) > 0; // same side test as edgeAt
         const cut = Math.abs(k) >= STRAIGHT_PER_M && (k > 0) === right;
-        p.lapValid = false;
+        if (p.lapValid) { p.lapValid = false; this.refreshBests(); } // a purple sector set earlier on this lap goes back
         if (!cut) { this.io.emit('track_limits', { id: p.id, kind: 'wide' }); return; }
         p.limits++;
         if (p.limits <= LIMIT_WARNINGS) {
