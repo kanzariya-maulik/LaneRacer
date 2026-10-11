@@ -519,16 +519,23 @@ test('sectors: an invalid lap never sets a best; the out-lap is untimed', () => 
     assert.strictEqual(timing.at(-1).valid, false);
 });
 
+// A point beside the inside of Monza's tightest bend (a corner cut, not a run wide), `m` metres from the centreline
+const bendI = monza.path.reduce((b, _, i) => (Math.abs(Game.bendAt(monza, i)) > Math.abs(Game.bendAt(monza, b)) ? i : b), 0);
+const cutAt = (m) => {
+    const a = monza.path[bendI], b = monza.path[(bendI + 1) % monza.path.length], h = Math.atan2(b.y - a.y, b.x - a.x);
+    const k = Math.sign(Game.bendAt(monza, bendI)); // > 0 turns toward (-sin h, cos h): that side is the inside
+    return { x: a.x - Math.sin(h) * k * m * monza.scale, y: a.y + Math.cos(h) * k * m * monza.scale, angle: h };
+};
 // A point beside Monza's start straight, on the side away from the pit lane, `m` metres from the centreline
 const beside = (m) => {
     const s = monza.start, k = monza.pit.trackSide;
     return { x: s.x - Math.sin(s.angle) * k * m * monza.scale, y: s.y + Math.cos(s.angle) * k * m * monza.scale, angle: s.angle };
 };
 const halfM = monza.width / 2 / monza.scale;  // the drawn road edge (surfaces)
-const lineM = (() => { const b = beside(1); return Track.edgeAt(monza, Physics.nearestOnTrack(b.x, b.y, monza), b.x, b.y) / monza.scale; })(); // the real white line here (track limits)
+const lineM = (() => { const b = cutAt(1); return Track.edgeAt(monza, Physics.nearestOnTrack(b.x, b.y, monza), b.x, b.y) / monza.scale; })(); // the real white line here (track limits)
 function excursion(g, p) {
-    for (const m of [0, lineM + 2, 0]) { // on track first so a previous excursion is re-armed
-        const at = beside(m);
+    for (const m of [0, lineM + 3, 0]) { // on track first so a previous excursion is re-armed
+        const at = cutAt(m);
         p.x = at.x; p.y = at.y;
         g.checkLimits(p, Physics.nearestOnTrack(p.x, p.y, monza));
     }
@@ -538,7 +545,7 @@ test('track limits: one violation per excursion, re-armed back on track', () => 
     const g = new Game(io, [lp('a')], monza, RACE, () => {});
     g.release();
     const p = g.players.a;
-    const off = beside(lineM + 2);
+    const off = cutAt(lineM + 3);
     p.x = off.x; p.y = off.y;
     g.checkLimits(p, Physics.nearestOnTrack(p.x, p.y, monza));
     g.checkLimits(p, Physics.nearestOnTrack(p.x, p.y, monza));
@@ -548,7 +555,8 @@ test('track limits: one violation per excursion, re-armed back on track', () => 
 });
 
 test('track limits are the real white line: the asphalt run-off beyond it is out, though still road', () => {
-    const g = new Game(io, [lp('a')], monza, RACE, () => {});
+    const { events, io: sio } = spy();
+    const g = new Game(sio, [lp('a')], monza, RACE, () => {});
     g.release();
     // where the run-off is widest: the car fully past the right-hand white line, still on the drawn road
     const p = g.players.a, i = monza.edgeR.reduce((b, e, k) => (e < monza.edgeR[b] ? k : b), 0), q = monza.path[i];
@@ -556,7 +564,10 @@ test('track limits are the real white line: the asphalt run-off beyond it is out
     assert.ok(off < monza.width / 2, 'run-off wide enough here');
     p.x = q.x - Math.sin(h) * off; p.y = q.y + Math.cos(h) * off;
     g.checkLimits(p, Physics.nearestOnTrack(p.x, p.y, monza));
-    assert.strictEqual(p.limits, 1);
+    // the widest run-off is on a straight: out of the line, but only "wide" (no strike), the lap stops counting
+    assert.strictEqual(p.limits, 0);
+    assert.strictEqual(p.lapValid, false);
+    assert.ok(events.some(([ev, d]) => ev === 'track_limits' && d.kind === 'wide'));
 });
 
 test('the grid sits in the real lanes, inside the white lines', () => {
@@ -568,7 +579,7 @@ test('the grid sits in the real lanes, inside the white lines', () => {
 
 test('track limits: half a car past the line is not a violation', () => {
     const g = new Game(io, [lp('a')], monza, RACE, () => {});
-    const p = g.players.a, at = beside(lineM + 0.5);
+    const p = g.players.a, at = cutAt(lineM + 0.5);
     p.x = at.x; p.y = at.y;
     g.checkLimits(p, Physics.nearestOnTrack(p.x, p.y, monza));
     assert.strictEqual(p.limits, 0);
@@ -595,21 +606,21 @@ test('track limits: quali out-lap and pit lane are exempt', () => {
     excursion(g, a);
     a.lapStart = 5;
     a.inPit = true;
-    const off = beside(lineM + 2);
+    const off = cutAt(lineM + 3);
     a.x = off.x; a.y = off.y;
     g.checkLimits(a, Physics.nearestOnTrack(a.x, a.y, monza));
     assert.strictEqual(a.lapValid, true);
 });
 
-test('race: two warnings, then +5 s per violation', () => {
+test('race: three warnings, a flag, then +5 s per violation', () => {
     const { events, io: sio } = spy();
     const g = new Game(sio, [lp('a')], monza, RACE, () => {});
     g.release();
     const p = g.players.a;
-    for (let k = 0; k < 4; k++) excursion(g, p);
+    for (let k = 0; k < 6; k++) excursion(g, p);
     const kinds = events.filter(([ev]) => ev === 'track_limits').map(([, d]) => d);
-    assert.deepStrictEqual(kinds.map(d => d.kind), ['warning', 'warning', 'penalty', 'penalty']);
-    assert.deepStrictEqual(kinds.slice(0, 2).map(d => d.count), [1, 2]);
+    assert.deepStrictEqual(kinds.map(d => d.kind), ['warning', 'warning', 'warning', 'flag', 'penalty', 'penalty']);
+    assert.deepStrictEqual(kinds.slice(0, 3).map(d => d.count), [1, 2, 3]);
     assert.strictEqual(p.penalty, 10);
 });
 
@@ -675,7 +686,7 @@ test('a sector from a lap deleted later is never a best', () => {
     for (let k = 1; k <= monza.sectorCps[1]; k++) { g.time = 10 + k; a.x = cps[k].x; a.y = cps[k].y; g.checkLapProgress(a); }
     assert.ok(sectorsOf(events, 'a')[0].sessionBest, 'S1 looked purple live');
     assert.strictEqual(g.bestSectorIds[0], 'a');
-    const wide = beside(lineM + 2); a.x = wide.x; a.y = wide.y; // runs wide in S2: lap deleted
+    const wide = cutAt(lineM + 3); a.x = wide.x; a.y = wide.y; // runs wide in S2: lap deleted
     g.checkLimits(a, Physics.nearestOnTrack(a.x, a.y, monza));
     assert.deepStrictEqual(g.bestSectors, [null, null, null], 'deleted lap stops counting at once');
     lap(g, a, 10 + monza.sectorCps[1], 80);  // finishes the deleted lap (and drives on into the next)
@@ -714,20 +725,20 @@ test('live session best: a lap deleted for track limits hands purple back to the
     const aS1 = a.bestSectors[0];
     sector1(g, b, 200, 25);
     assert.strictEqual(g.bestSectorIds[0], 'b');
-    const wide = beside(lineM + 2); b.x = wide.x; b.y = wide.y; // B runs wide: lap deleted
+    const wide = cutAt(lineM + 3); b.x = wide.x; b.y = wide.y; // B runs wide: lap deleted
     g.checkLimits(b, Physics.nearestOnTrack(b.x, b.y, monza));
     assert.strictEqual(b.lapValid, false);
     assert.deepStrictEqual([g.bestSectorIds[0], g.bestSectors[0]], ['a', aS1]);
     assert.strictEqual(bestEvents(events).at(-1).bestSectorIds[0], 'a');
 });
 
-test('race: track limits warn or penalise but never delete the lap', () => {
+test('race: a cut lap stays on the board but no longer counts for the fastest lap', () => {
     const g = new Game(io, [lp('a')], monza, RACE, () => {});
     g.release();
     const p = g.players.a;
     excursion(g, p);
     assert.strictEqual(p.limits, 1);
-    assert.strictEqual(p.lapValid, true);
+    assert.strictEqual(p.lapValid, false);
 });
 
 test('jump start: moving before lights out costs 10 s, once', () => {

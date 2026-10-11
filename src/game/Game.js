@@ -9,7 +9,9 @@ const TICK_RATE = 60;
 const QUALI_LAPS = 2;       // timed laps after the out-lap, unless the host sets qualiLaps
 const QUALI_S_PER_LAP = 120; // quali ends this long per lap of the run (out-laps + timed) even if someone never finishes
 const CP_GATE_M = 30;        // a checkpoint also counts this far past it along the lap: wide of its circle (open grass), not a cut
-const LIMIT_WARNINGS = 2;    // race: violations before penalties start
+const LIMIT_WARNINGS = 3;    // race: corner cuts warned before the black-and-white flag, then penalties
+const BEND_SPAN_M = 25;       // a bend's direction is read over this far either side
+const STRAIGHT_PER_M = 1 / 400; // turning less than this (radius > 400 m): a straight, off there is "wide"
 // Car-to-car incidents (race, collisions on): who drove into whom, judged once the consequences are known
 const CONTACT_LIGHT_MS = 3;      // closing slower than this (~11 km/h): rubbing wheels, not an incident
 const CONTACT_BLAME_LAP1 = 3;    // first lap: only a clear hit is anyone's fault (everyone arrives at turn 1 together)
@@ -41,6 +43,17 @@ const FLAGS = { inPit: 1, limiter: 2, drs: 4, drsAvailable: 8, finished: 16, lap
 const META_FIELDS = ['lap', 'checkpoint', 'rank', 'gap', 'lapsDown', 'lastLap', 'bestLap', 'lapStart', 'bestLapSectors', 'lastValid', 'penalty', 'compound', 'nextCompound', 'stops', 'compoundsUsed', 'wearPerM', 'lastStop'];
 const META_EVERY = 6; // ticks: info updates at 10 Hz
 const r1 = (v) => Math.round(v * 10) / 10;
+
+// Signed heading change per metre of the path over ±BEND_SPAN_M around index i: > 0 turns clockwise on screen (y down),
+// i.e. toward the path's right; the inside of the bend is the side it turns toward
+function bendAt(t, i) {
+    const P = t.path, n = P.length, span = BEND_SPAN_M * t.scale;
+    let k = i, j = i, back = 0, fwd = 0;
+    while (back < span) { const q = (k - 1 + n) % n; back += Math.hypot(P[k].x - P[q].x, P[k].y - P[q].y); k = q; }
+    while (fwd < span) { const q = (j + 1) % n; fwd += Math.hypot(P[q].x - P[j].x, P[q].y - P[j].y); j = q; }
+    const h1 = Math.atan2(P[i].y - P[k].y, P[i].x - P[k].x), h2 = Math.atan2(P[j].y - P[i].y, P[j].x - P[i].x);
+    return Math.atan2(Math.sin(h2 - h1), Math.cos(h2 - h1)) / ((back + fwd) / t.scale);
+}
 
 class Game {
     // net: optional transport (src/webrtcManager.js) that sends game_state over the UDP DataChannel
@@ -439,7 +452,7 @@ class Game {
         if (p.jumpStart || !p.throttledEarly || Math.hypot(p.x - p.gridX, p.y - p.gridY) <= JUMP_MOVE_M * this.track.scale) return;
         p.jumpStart = true;
         p.penalty += JUMP_PENALTY_S;
-        this.io.emit('track_limits', { id: p.id, kind: 'jump', penalty: p.penalty });
+        this.io.emit('track_limits', { id: p.id, kind: 'jump', add: JUMP_PENALTY_S, penalty: p.penalty });
         this.io.emit('chat_msg', { username: 'SYSTEM', color: '#ff0000', msg: `${p.username}: jump start, +${JUMP_PENALTY_S}s penalty` });
     }
 
@@ -584,8 +597,6 @@ class Game {
         });
     }
 
-    // First contact between two cars: each one's own speed into the other (m/s, n points from b to a) says who drove
-    // into whom. Rear-end: the car behind. Side swipe: the car that moved across. Both alike: a racing incident
     // Ghost start: cars pass through each other from the grid until past sector 1 of the first lap (or GHOST_MAX_S after
     // lights out), and only turn solid clear of every other car, so nobody is ever popped apart
     updateGhosts(ids) {
@@ -600,6 +611,8 @@ class Game {
         }
     }
 
+    // First contact between two cars: each one's own speed into the other (m/s, n points from b to a) says who drove
+    // into whom. Rear-end: the car behind. Side swipe: the car that moved across. Both alike: a racing incident
     noteContact(a, b, { nx, ny }) {
         const key = a.id < b.id ? `${a.id}|${b.id}` : `${b.id}|${a.id}`, last = this.contacts.get(key);
         this.contacts.set(key, this.time);
@@ -610,7 +623,11 @@ class Game {
         const blame = (x, y) => x > 0 && x >= k * Math.max(y, 0);
         const [striker, victim] = blame(aIn, bIn) ? [a, b] : blame(bIn, aIn) ? [b, a] : [];
         if (!striker) {
-            if (this.settings.contactPenalties !== false) this.io.emit('chat_msg', { username: 'SYSTEM', color: '#f59e0b', msg: `${a.username} / ${b.username}: racing incident, no action` });
+            if (this.settings.contactPenalties !== false) {
+                this.io.emit('chat_msg', { username: 'SYSTEM', color: '#f59e0b', msg: `${a.username} / ${b.username}: racing incident, no action` });
+                this.io.emit('track_limits', { id: a.id, kind: 'incident', with: b.username });
+                this.io.emit('track_limits', { id: b.id, kind: 'incident', with: a.username });
+            }
             return;
         }
         // Already off or spun before the hit: the hit didn't do that, so no +10 s for it
@@ -641,8 +658,8 @@ class Game {
             if (!s || !v) continue; // one of them left
             const add = inc.off ? COLLISION_OFF_PENALTY_S : COLLISION_PENALTY_S;
             s.penalty += add;
-            this.io.emit('track_limits', { id: s.id, kind: 'collision', add, penalty: s.penalty, victim: v.username });
-            this.io.emit('track_limits', { id: v.id, kind: 'hit', by: s.username });
+            this.io.emit('track_limits', { id: s.id, kind: 'collision', add, penalty: s.penalty, victim: v.username, off: inc.off });
+            this.io.emit('track_limits', { id: v.id, kind: 'hit', by: s.username, add });
             const what = inc.off ? `pushed ${v.username} off track` : `hit ${v.username}`;
             this.io.emit('chat_msg', { username: 'SYSTEM', color: '#ff0000', msg: `${s.username} ${what}, +${add}s (total +${s.penalty}s)` });
             netlog.log(`[INCIDENT] ${s.username} (${s.id}) ${what} (${v.id}), +${add}s`);
@@ -667,14 +684,26 @@ class Game {
             return;
         }
         if (this.incidents.some((i) => i.victim === p.id)) return; // pushed off: the driver who hit them answers for it
+        // Inside of a bend = a cut (gains time): a strike. Outside, or on a straight = wide (loses time): the lap just
+        // doesn't count for the fastest lap
+        const k = bendAt(t, near.i), P = t.path, a = P[near.i], b = P[(near.i + 1) % P.length];
+        const right = -(b.y - a.y) * (p.x - near.px) + (b.x - a.x) * (p.y - near.py) > 0; // same side test as edgeAt
+        const cut = Math.abs(k) >= STRAIGHT_PER_M && (k > 0) === right;
+        p.lapValid = false;
+        if (!cut) { this.io.emit('track_limits', { id: p.id, kind: 'wide' }); return; }
         p.limits++;
         if (p.limits <= LIMIT_WARNINGS) {
-            this.io.emit('track_limits', { id: p.id, kind: 'warning', count: p.limits });
+            this.io.emit('track_limits', { id: p.id, kind: 'warning', count: p.limits, of: LIMIT_WARNINGS });
+            return;
+        }
+        if (p.limits === LIMIT_WARNINGS + 1) {
+            this.io.emit('track_limits', { id: p.id, kind: 'flag' });
+            this.io.emit('chat_msg', { username: 'SYSTEM', color: '#f59e0b', msg: `${p.username}: black and white flag, next corner cut is a penalty` });
             return;
         }
         p.penalty += LIMIT_PENALTY_S;
-        this.io.emit('track_limits', { id: p.id, kind: 'penalty', penalty: p.penalty });
-        this.io.emit('chat_msg', { username: 'SYSTEM', color: '#ff0000', msg: `${p.username}: +${LIMIT_PENALTY_S}s track limits penalty (total +${p.penalty}s)` });
+        this.io.emit('track_limits', { id: p.id, kind: 'penalty', add: LIMIT_PENALTY_S, penalty: p.penalty });
+        this.io.emit('chat_msg', { username: 'SYSTEM', color: '#ff0000', msg: `${p.username}: +${LIMIT_PENALTY_S}s corner cutting penalty (total +${p.penalty}s)` });
     }
 
     // Final result: finish time plus penalties, once every car has finished; everyone gets the results screen
@@ -798,4 +827,5 @@ class Game {
 
 Game.FLAGS = FLAGS;
 Game.META_FIELDS = META_FIELDS;
+Game.bendAt = bendAt;
 module.exports = Game;
