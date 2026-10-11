@@ -223,7 +223,7 @@ function isSpectator() {
 
 // A tyre pick (keys 1/2/3 or a click on the picker): fitted at once on the grid / in the quali box, else the next stop's set
 // "Box, box" (race): call or cancel the stop; the tyre card opens to choose the set
-let boxConfirmAt = 0;
+let boxConfirmAt = 0, boxPick = null; // boxPick: the set chosen for the called stop (the server's nextCompound follows a moment later)
 function callBox() {
     const me = clientState.gameState?.[clientState.me];
     if (clientState.status !== 'RACE' || !me || me.finished || isSpectator()) return;
@@ -233,7 +233,7 @@ let lastPick = null; // fitted at once on the grid / quali box, so the server cl
 function pickTyre(c) {
     if (isSpectator() || clientState.status === 'LOBBY') return;
     lastPick = c;
-    if (clientState.gameState?.[clientState.me]?.boxCall) boxConfirmAt = performance.now(); // confirm the call with the new set
+    if (clientState.gameState?.[clientState.me]?.boxCall) { boxPick = c; boxConfirmAt = performance.now(); } // confirm the call with the new set
     socket.emit('tyre_next', c);
     window.showBanner?.(`TYRES: ${{ S: 'SOFT', M: 'MEDIUM', H: 'HARD' }[c]}`, true);
 }
@@ -2098,7 +2098,7 @@ function updateHUD(withTower = true) {
     // Session bar
     const sess = clientState.session;
     let bar = '';
-    if (clientState.status === 'QUALIFYING' && sess) {
+    if (clientState.status === 'QUALIFYING' && sess && !clientState.qualiClock) { // old servers; the quali clock (#quali-clock) replaces it
         bar = `QUALIFYING ${fmtClock(sess.endsAt - (clientState.pausedAt ?? Date.now()))}`; // frozen while paused
         if (racing) bar += me.finished ? ` · QUALIFYING COMPLETE — P${me.rank}` : me.curLap === null ? (me.inPit ? ' · PIT LANE' : ' · OUT LAP') : ` · LAP ${me.lap + 1}/${clientState.settings.qualiLaps ?? 2}`;
     } else if (clientState.status === 'RACE' || clientState.status === 'FINISHED') {
@@ -2142,9 +2142,9 @@ function updateHUD(withTower = true) {
     }
     // "Box, box": banners on call / pick / cancel; the entry stripe and distance while the entry is near
     const bc = racing ? me?.boxCall || null : null, nowB = performance.now();
-    if (bc && !hudBox) { window.showBanner?.('BOX, BOX — CHOOSE TYRES', true); Sound.event('drs'); boxConfirmAt = nowB + 3000; }
+    if (bc && !hudBox) { window.showBanner?.('BOX, BOX — CHOOSE TYRES', true); Sound.event('drs'); boxConfirmAt = nowB + 3000; boxPick = null; }
     else if (!bc && hudBox && !['lane', 'guide', 'service'].includes(predictor?.car?.stop?.phase)) { window.showBanner?.('BOX CANCELLED'); boxConfirmAt = 0; }
-    if (bc && boxConfirmAt && nowB >= boxConfirmAt) { boxConfirmAt = 0; window.showBanner?.(boxBanner(bc, me.nextCompound || nextHarder(me.compound)), true); }
+    if (bc && boxConfirmAt && nowB >= boxConfirmAt) { boxConfirmAt = 0; window.showBanner?.(boxBanner(bc, boxPick || me.nextCompound || nextHarder(me.compound)), true); }
     hudBox = bc;
     const entryNear = bc === 'this' && !me?.inPit && toEntryM <= 300;
     if (entryGuide) entryGuide.visible = entryNear;
@@ -2201,7 +2201,9 @@ function updateHUD(withTower = true) {
 
     // Qualifying: session clock and the knocked-out chip
     const qc = clientState.qualiClock, inQuali = clientState.status === 'QUALIFYING' && !!qc;
-    const clockStr = inQuali ? clockText({ ...qc, endsInMs: qc.endsInMs - (performance.now() - qc.at) }, { onTimedLap: me?.lapStart !== null && me?.lapStart !== undefined }) : '';
+    const onTimed = me?.lapStart !== null && me?.lapStart !== undefined;
+    const runState = !racing || me?.qualiOut || qc?.qphase === 'flag' || qc?.format === 'oneshot' ? '' : onTimed ? ' · PUSH LAP' : me?.inPit ? ' · PIT LANE' : ' · OUT LAP';
+    const clockStr = inQuali ? clockText({ ...qc, endsInMs: qc.endsInMs - (performance.now() - qc.at) }, { onTimedLap: onTimed }) + runState : '';
     if (clockStr !== hudQClock) {
         hudQClock = clockStr;
         const el = $('quali-clock');
@@ -2491,7 +2493,7 @@ window.initGameVisuals = () => {
     predictor.box = clientState.gameState?.[clientState.me]?.box || null; // the pit stop guide drives into it
     predictor.gripEvo = clientState.status === 'QUALIFYING' ? clientState.qualiClock?.evo : undefined;
     clearInterval(qbTimer); document.getElementById('quali-break')?.classList.add('hidden'); koPos = null; hudQClock = null;
-    hudBox = null; boxConfirmAt = 0;
+    hudBox = null; boxConfirmAt = 0; boxPick = null;
     lastPick = null; hudLastStop = undefined; hudPrevPhase = null; hudGhost = false; $('ghost-tag')?.classList.add('hidden'); clearTimeout(stewardTimer); $('steward-card')?.classList.add('hidden'); bannerUntil = 0; // the first meta seen is the baseline, not a new stop
     clearTimeout(coachTimer); $('coach-line')?.classList.add('hidden'); stewardAtS = contactAtS = -Infinity;
     window.syncTyres();

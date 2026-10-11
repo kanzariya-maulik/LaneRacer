@@ -446,7 +446,7 @@ window.updateSettingsUI = () => {
         return d;
     }));
     document.getElementById('session-summary').replaceChildren(...[track, time, `${s.maxLaps} ${s.maxLaps === 1 ? 'lap' : 'laps'}`,
-        s.qualifying ? `Quali ${out}+${timed}` : 'Quali off', `Collisions ${s.collisions === false ? 'off' : 'on'}`]
+        quali === 'Off' ? 'Quali off' : `Quali: ${quali}`, `Collisions ${s.collisions === false ? 'off' : 'on'}`]
         .map((text) => Object.assign(document.createElement('span'), { textContent: text })));
 };
 window.updateSettingsUI();
