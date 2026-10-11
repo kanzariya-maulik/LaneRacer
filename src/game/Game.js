@@ -570,7 +570,7 @@ class Game {
             if (Object.keys(diff).length) this.io.emit('game_meta', diff);
         }
 
-        if (this.mode === 'quali') { this.updateQuali(); return; }
+        if (this.mode === 'quali') { this.updateQuali(); for (const id of ids) if (this.players[id]) this.players[id].gripEvo = this.quali.evo; return; }
         if (ids.every((id) => this.players[id].finished)) {
             this.stop();
             this.onFinish();

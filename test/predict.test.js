@@ -133,3 +133,17 @@ test('prediction holds after 1 s without a server update (results screen, dead l
     assert.strictEqual(pr.car.x, x);
     assert.strictEqual(pr.car.y, y);
 });
+
+test('track evolution: the predictor scales grip like the server (gripEvo from quali_clock)', async () => {
+    const { gripOf } = await import('../public/js/sim/tyres.js');
+    const t = Track.load('monza'), pr = new P.Predictor(t);
+    const e = [0, t.path[10].x, t.path[10].y, 0, 0, 0, 0, 0, 0, 0, 3, 0.2];
+    pr.reset(e);
+    pr.car.compound = 'S';
+    pr.gripEvo = 1.015;
+    pr.load(e);
+    assert.ok(Math.abs(pr.car.tyreGrip - gripOf('S', 0.2) * 1.015) < 1e-12);
+    pr.gripEvo = undefined;
+    pr.load(e);
+    assert.ok(Math.abs(pr.car.tyreGrip - gripOf('S', 0.2)) < 1e-12);
+});

@@ -33,7 +33,8 @@ export class Predictor {
         c.inPit = !!(e[6] & 1); c.limiter = !!(e[6] & 2); c.drs = !!(e[6] & 4);
         c.vx = e[7] ?? Math.cos(e[3]) * e[4]; c.vy = e[8] ?? Math.sin(e[3]) * e[4]; c.tow = e[9] || 0;
         c.wear = e[11] ?? c.wear ?? 0;
-        if (c.compound) c.tyreGrip = gripOf(c.compound, c.wear); // predicted grip always from the server's wear
+        c.gripEvo = this.gripEvo; // qualifying track evolution (quali_clock), undefined in races
+        if (c.compound) c.tyreGrip = gripOf(c.compound, c.wear) * (c.gripEvo ?? 1); // predicted grip always from the server's wear
         const code = e[12] || 0; // pit stop (Game.updateStop): 1 guided in, 2 service, 3 held, 4 along the lane, 5 out, 6 quali wait
         c.stop = code ? { phase: ['', 'guide', 'service', 'hold', 'lane', 'out', 'wait'][code], t: e[13] || 0 } : null;
         c.lastSafeX = c.x; c.lastSafeY = c.y;

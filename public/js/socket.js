@@ -331,6 +331,11 @@ socket.on('lights', ({ count }) => {
     if (window.handleLights) window.handleLights(count);
 });
 
+socket.on('quali_clock', (d) => {
+    clientState.qualiClock = { ...d, at: performance.now() };
+    window.onQualiClock?.(d); // game3d: the predictor's track evolution
+});
+
 socket.on('session', ({ phase, endsInMs }) => {
     clientState.session = { phase, endsAt: endsInMs === null ? null : Date.now() + endsInMs };
 });

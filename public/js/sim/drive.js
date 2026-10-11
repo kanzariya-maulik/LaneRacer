@@ -233,7 +233,7 @@ export function driveCar(p, input, t, dt) {
     if (p.compound) {
         const metres = Math.hypot(p.x - x0, p.y - y0) / scale;
         p.wear = Math.min(1, (p.wear || 0) + metres * (p.wearPerM || 0) * wearLoad(p.latUse || 0, used.brake || 0, grass ? 0 : (p.slip || 0)));
-        p.tyreGrip = gripOf(p.compound, p.wear);
+        p.tyreGrip = gripOf(p.compound, p.wear) * (p.gripEvo ?? 1); // qualifying: the track rubbers in (Game.quali.evo)
     }
 
     // Pit wall: a move across it is undone

@@ -145,3 +145,20 @@ test('quali clock is in the init payload and reports survivors', () => {
     assert.deepStrictEqual([c.phase, c.format, c.segment, c.qphase, c.survive], ['QUALIFYING', 'full', 1, 'running', 6]);
     assert.ok(c.endsInMs > 0);
 });
+
+test('track evolution: grip builds to +2 % over the planned clock, holds in breaks, and drives tyreGrip', async () => {
+    const D = await import('../public/js/sim/drive.js'), Tyres = require('../public/js/sim/tyres.js');
+    const g = new Game(spy().io, ['a', 'b', 'c', 'd'].map(lp), monza, QS('full'), () => {}, 'quali');
+    assert.strictEqual(g.quali.evo, 1);
+    const planned = g.quali.plan.reduce((x, y) => x + y, 0);
+    g.quali.driven = planned / 2; g.updateQuali();
+    assert.ok(Math.abs(g.quali.evo - 1.01) < 1e-3, `${g.quali.evo}`);
+    const p = g.players.a;
+    g.update(); // sets gripEvo on every car and drives
+    assert.strictEqual(p.gripEvo, g.quali.evo);
+    Object.assign(p, { stop: null, inPit: false, x: monza.start.x, y: monza.start.y, angle: monza.start.angle }); // on track: parked cars skip the tyre update
+    D.driveCar(p, { throttle: 0, brake: 0, steer: 0 }, monza, 1 / 60);
+    assert.ok(Math.abs(p.tyreGrip - Tyres.gripOf(p.compound, p.wear) * p.gripEvo) < 1e-12);
+    g.quali.driven = planned * 3; g.updateQuali();
+    assert.strictEqual(g.quali.evo, 1.02);
+});

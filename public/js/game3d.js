@@ -2406,11 +2406,14 @@ window.syncTyres = () => {
     if (me) predictor?.setTyres({ compound: me.compound, wearPerM: me.wearPerM });
 };
 
+window.onQualiClock = (d) => { if (predictor) predictor.gripEvo = d.evo; }; // track evolution, same as the server's
+
 window.initGameVisuals = () => {
     netBuf = new SnapshotBuffer();
     // New session: predict from the new grid (reset on our first entry); spectators never get one, so never predict
     predictor = new Predictor(clientState.trackData, clientState.gameState?.[clientState.me]?.assist || 'off');
     predictor.box = clientState.gameState?.[clientState.me]?.box || null; // the pit stop guide drives into it
+    predictor.gripEvo = clientState.status === 'QUALIFYING' ? clientState.qualiClock?.evo : undefined;
     lastPick = null; hudLastStop = undefined; hudPrevPhase = null; hudGhost = false; $('ghost-tag')?.classList.add('hidden'); clearTimeout(stewardTimer); $('steward-card')?.classList.add('hidden'); bannerUntil = 0; // the first meta seen is the baseline, not a new stop
     clearTimeout(coachTimer); $('coach-line')?.classList.add('hidden'); stewardAtS = contactAtS = -Infinity;
     window.syncTyres();
