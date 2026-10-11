@@ -18,10 +18,10 @@ function strip(rot = 0) {
 const base = { tow: 0, inPit: false, ghostOverlap: false, near: [], angle: 0, drsAvailable: false, inDrsZone: false, drsOpen: false, helpLevel: 0, mode: 'race', lap: 1 };
 // One pass from s=200 to 560; returns the messages shown
 function run(coach, o = {}) {
-    const { tap = false, brakeFrom = 400, vMinK = 1, lat = 0, wide = false, help = false, t0 = 0, entry, ...rest } = o, out = [];
+    const { tap = false, brakeFrom = 400, vMinK = 1, lat = 0, wide = false, help = false, t0 = 0, entry, nearF, ...rest } = o, out = [];
     for (let s = 200; s <= 560; s += 2) {
         const v = entry ?? (s < brakeFrom ? 80 : s < 500 ? 30 * vMinK : 80), braking = s >= brakeFrom && s < 450;
-        const m = coach.update({ ...base, ...rest, t: t0 + (s - 200) / 100, i: s % 1000, x: s, y: s >= 440 && s <= 460 ? lat : 0, speed: v,
+        const m = coach.update({ ...base, ...rest, t: t0 + (s - 200) / 100, i: s % 1000, x: s, y: s >= 440 && s <= 460 ? lat : 0, speed: v, near: nearF ? nearF(s) : rest.near || [],
             brake: (!help && braking) || (tap && s >= 260 && s < 264) ? 1 : 0, assistBrake: help && braking, wide: wide && s > 470 && s < 480 });
         if (m) out.push(m);
     }
@@ -69,7 +69,7 @@ test('rate: a second verdict within 4 s is dropped; a corner goes quiet after 3 
 
 test('no report: pit lane, recent steward event, first-lap corner 0, slow entry, reverse pass', () => {
     assert.strictEqual(run(fresh(), { inPit: true }).length, 0);
-    assert.strictEqual(run(fresh(), { stewardAt: -1.2 }).length, 0); // 4.5 s before the verdict: past the 4 s hold, inside the 5 s corner quiet
+    assert.strictEqual(run(fresh(), { contactAt: -1.2 }).length, 0); // 4.5 s before the verdict: past the 4 s hold, inside the 5 s corner quiet
     assert.strictEqual(run(fresh(), { ghostOverlap: true }).length, 0);
     assert.strictEqual(run(fresh(), { lap: 0 }).length, 0);
     assert.strictEqual(run(fresh(), { lap: 0, mode: 'quali' }).length, 1);
@@ -206,4 +206,45 @@ test('a tip just before a corner does not cost it its verdict', () => {
         if (m) out.push(m.text);
     }
     assert.deepStrictEqual(out, ['DRS — press E', 'Perfect corner']);
+});
+
+test('a track-limits steward card does not silence the wide verdict; contact still does', () => {
+    assert.deepStrictEqual(texts(run(fresh(), { wide: true, stewardAt: 2.9 })), ['Too fast in — missed the apex']);
+    assert.strictEqual(run(fresh(), { wide: true, contactAt: 2.9 }).length, 0);
+});
+
+test('a near miss without a steward card skips the corner', () => {
+    assert.strictEqual(run(fresh(), { nearF: (s) => [{ x: s + 5, y: 3 }] }).length, 0, '5.8 m away');
+    assert.strictEqual(run(fresh(), { nearF: (s) => [{ x: s + 5, y: 4.9 }] }).length, 1, '7 m away is not contact');
+});
+
+test('off-line side by side is not scolded; too fast in still is', () => {
+    const side = (s) => [{ x: s + 5, y: -4.9 }]; // alongside on the straight, 9 m from the off-line car
+    assert.deepStrictEqual(texts(run(fresh(), { lat: 3, nearF: side })), ['Perfect corner']);
+    assert.deepStrictEqual(texts(run(fresh(), { vMinK: 0.7, nearF: side })), ['Perfect corner']);
+    assert.deepStrictEqual(texts(run(fresh(), { wide: true, nearF: side })), ['Too fast in — missed the apex']);
+});
+
+test('the help set the corner speed: no slow-mid-corner', () => {
+    assert.deepStrictEqual(texts(run(fresh(), { vMinK: 0.7, help: true })), ['Perfect corner']);
+});
+
+test('the first-lap shield covers the first corner after the start line', () => {
+    const { t, rl } = strip();
+    for (let i = 560; i < 600; i++) rl.phase[i] = 2;
+    for (let i = 600; i < 640; i++) { rl.phase[i] = 1; rl.speed[i] = 40; }
+    t.startS = 520;
+    const coach = C.createCoach(C.cornersOf(rl, t), t, rl), out = [];
+    for (let s = 200; s <= 720; s += 2) {
+        const v = s < 400 ? 80 : s < 500 ? 20 : s < 600 ? 60 : s < 640 ? 40 : 80;
+        const m = coach.update({ ...base, lap: 0, t: (s - 200) / 20, i: s, x: s, y: 0, speed: v, brake: (s >= 400 && s < 450) || (s >= 560 && s < 600) ? 1 : 0, assistBrake: false, wide: false });
+        if (m) out.push(m);
+    }
+    assert.deepStrictEqual(texts(out), ['Slow mid-corner — carry more speed']); // corner 0 is rated; corner 1 (first after the line) is shielded
+});
+
+test('the same amber verdict 3 times at a corner, then quiet', () => {
+    const q = fresh();
+    assert.deepStrictEqual([0, 10, 20, 30].map((t0) => run(q, { t0, vMinK: 0.7 }).length), [1, 1, 1, 0]);
+    assert.strictEqual(run(q, { t0: 40 }).length, 1, 'a different verdict speaks again');
 });

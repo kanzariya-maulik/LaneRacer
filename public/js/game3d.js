@@ -167,12 +167,13 @@ document.getElementById('tt-head').addEventListener('click', toggleTower);
 let line = null, lineIdx = null, padX = false, drsIdx = null;
 const lineChoice = () => { const v = store.get('lanrace.line'); return MODES.includes(v) ? v : 'corners'; };
 let lineMode = lineChoice();
-let coach = null, coachIdx = null, coachTimer = null, coachIntro = true, stewardAtS = -Infinity;
+let coach = null, coachIdx = null, coachTimer = null, coachIntro = true, stewardAtS = -Infinity, contactAtS = -Infinity;
 let coachOn = store.get('lanrace.coach') !== 'off';
 window.onCoachChange = (v) => { coachOn = v !== 'off'; };
 function toggleCoach() {
     coachOn = !coachOn;
     store.set('lanrace.coach', coachOn ? 'on' : 'off');
+    window.renderCoach?.();
     window.showBanner?.(`COACH: ${coachOn ? 'ON' : 'OFF'}`, true);
     if (!coachOn) document.getElementById('coach-line').classList.add('hidden');
 }
@@ -2021,6 +2022,7 @@ window.showBanner = (text, good = false) => {
 let stewardTimer = null;
 window.showSteward = (e) => {
     stewardAtS = performance.now() / 1000;
+    if (e.kind === 'hit' || e.kind === 'collision' || e.kind === 'incident') contactAtS = stewardAtS; // track-limits cards must not silence a corner
     const t = stewardText(e);
     if (!t) return;
     $('sc-head').textContent = t.head;
@@ -2156,7 +2158,7 @@ function updateHUD(withTower = true) {
         const total = t.cum[t.path.length], lapS = (((t.cum[coachIdx] - (t.startS || 0)) % total) + total) % total;
         const msg = coach.update({ t: now, i: coachIdx, x: cCar.x, y: cCar.y, angle: cCar.angle, speed: (cCar.speed || 0) / sc, brake: input.brake || 0,
             assistBrake: !!cCar.assistBrake, tow: cCar.tow || 0, inPit: !!me.inPit, ghostOverlap: !!me.ghost && near.some((o) => Math.hypot(o.x - cCar.x, o.y - cCar.y) < 5.5 * sc),
-            wide: pastLine(t, coachIdx, cCar.x, cCar.y), lap: me.lap, mode: st2 === 'QUALIFYING' ? 'quali' : 'race', stewardAt: stewardAtS, near,
+            wide: pastLine(t, coachIdx, cCar.x, cCar.y), lap: me.lap, mode: st2 === 'QUALIFYING' ? 'quali' : 'race', stewardAt: stewardAtS, contactAt: contactAtS, near,
             drsAvailable: !!me.drsAvailable, inDrsZone: inDrsZone(t.drsZones || [], lapS), drsOpen: !!me.drs, helpLevel: parseAssist(predictor.assist).brake });
         if (msg) {
             const el = $('coach-line');
@@ -2410,7 +2412,7 @@ window.initGameVisuals = () => {
     predictor = new Predictor(clientState.trackData, clientState.gameState?.[clientState.me]?.assist || 'off');
     predictor.box = clientState.gameState?.[clientState.me]?.box || null; // the pit stop guide drives into it
     lastPick = null; hudLastStop = undefined; hudPrevPhase = null; hudGhost = false; $('ghost-tag')?.classList.add('hidden'); clearTimeout(stewardTimer); $('steward-card')?.classList.add('hidden'); bannerUntil = 0; // the first meta seen is the baseline, not a new stop
-    clearTimeout(coachTimer); $('coach-line')?.classList.add('hidden'); stewardAtS = -Infinity;
+    clearTimeout(coachTimer); $('coach-line')?.classList.add('hidden'); stewardAtS = contactAtS = -Infinity;
     window.syncTyres();
     sentInputs = []; carPose.clear(); carState.clear(); renderClock.t = presentClock.t = null;
     othersMode = store.get('lanrace.others') === 'smooth' ? 'smooth' : 'present';

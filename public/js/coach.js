@@ -1,9 +1,10 @@
+import Physics from './sim/physics.js';
 // Live coach (pure; node-tested): rates each corner against the racing line and gives one short tip at a time.
 // Corners: a braking run (phase 2) plus its corner run (phase 1), merged when closer than MERGE_M (a chicane is one)
 export const GAP_S = 4, SHOW_S = 2.5;
 const TIP_MAX = 3, QUIET_AFTER = 3, STEWARD_HOLD_S = 4, CONTACT_QUIET_S = 5;
 const MERGE_M = 60, WINDOW_M = 150, WIDE_AFTER_M = 30, EARLY_M = 20, SLOW_K = 0.85, APEX_M = 2, ENTRY_K = 0.4, BRAKE_ON = 0.2, HOLD_S = 0.15, BACK_M = 5, APEX_ZONE_M = 5;
-const TOW_ON = 0.3, TOW_S = 1, SIDE_M = 100, CAR_M = 5.5;
+const TOW_ON = 0.3, TOW_S = 1, SIDE_M = 100, CAR_M = 5.5, CONTACT_M = 1.2 * CAR_M;
 
 const lapM = (t) => t.cum[t.path.length] / t.scale;
 const heading = (P, i) => { const n = P.length, a = P[i], b = P[(i + 1) % n]; return Math.atan2(b.y - a.y, b.x - a.x); };
@@ -43,15 +44,16 @@ export function pastLine(t, i, x, y) {
     const P = t.path, n = P.length, a = P[i], b = P[(i + 1) % n], dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy || 1;
     const u = Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / l2)), px = a.x + dx * u, py = a.y + dy * u;
     const right = -dy * (x - px) + dx * (y - py) > 0, e = right ? t.edgeR : (t.edgeL || t.edgeR);
-    return Math.hypot(x - px, y - py) > e[i] + (e[(i + 1) % n] - e[i]) * u + 1 * t.scale;
+    return Math.hypot(x - px, y - py) > e[i] + (e[(i + 1) % n] - e[i]) * u + Physics.CAR_HALF_WIDTH_M * t.scale;
 }
 
 export function createCoach(corners, t, rl, opts = {}) {
     const L = lapM(t), at = (i) => t.cum[i] / t.scale, rel = (s, from) => (((s - from) % L) + L) % L;
-    const st = { last: -Infinity, lastV: -Infinity, lapGood: false, tips: {}, streak: corners.map(() => 0), cur: null, intro: !!opts.intro, lap: null, lapClean: true, cleanLaps: 0, nudged: false, towSince: null };
+    const startM = (t.startS || 0) / t.scale, firstK = corners.reduce((m, c, k) => (rel(c.brakeS, startM) < rel(corners[m].brakeS, startM) ? k : m), 0); // the first corner after the start line
+    const st = { last: -Infinity, lastV: -Infinity, lapGood: false, tips: {}, rep: corners.map(() => ({ text: '', n: 0 })), cur: null, intro: !!opts.intro, lap: null, lapClean: true, cleanLaps: 0, nudged: false, towSince: null };
     const inWindow = (c, s) => rel(s, c.brakeS - WINDOW_M) <= rel(c.endS + WIDE_AFTER_M, c.brakeS - WINDOW_M);
     const say = (f, text, tone, verdict) => { // a verdict waits only for the last verdict, so a tip never costs a corner its report
-        if (f.t - (verdict ? st.lastV : st.last) < GAP_S || f.t - (f.stewardAt ?? -Infinity) < STEWARD_HOLD_S) return null;
+        if (f.t - (verdict ? st.lastV : st.last) < GAP_S || (!verdict && f.t - (f.stewardAt ?? -Infinity) < STEWARD_HOLD_S)) return null;
         st.last = f.t;
         if (verdict) st.lastV = f.t;
         return { text, tone };
@@ -67,7 +69,10 @@ export function createCoach(corners, t, rl, opts = {}) {
         const r = st.cur, c = corners[r.k];
         const before = rel(s, c.brakeS - WINDOW_M) < WINDOW_M, inCorner = rel(s, c.brakeS) <= rel(c.endS, c.brakeS);
         if (r.entry === undefined) { r.entry = f.speed; if (f.speed < ENTRY_K * c.vApex) r.skip = true; }
-        if (f.ghostOverlap || f.t - (f.stewardAt ?? -Infinity) < CONTACT_QUIET_S) r.skip = true;
+        if (f.ghostOverlap || f.t - (f.contactAt ?? -Infinity) < CONTACT_QUIET_S) r.skip = true;
+        if (f.assistBrake) r.helped = true;
+        for (const o of f.near) if (Math.hypot(o.x - f.x, o.y - f.y) / t.scale < CONTACT_M) r.skip = true; // contact without a steward card
+        if (sideLat(f) !== null) r.side = true;
         const p = rel(s, c.brakeS - WINDOW_M); // progress through this corner's window
         if (r.maxP !== undefined && r.maxP - p > BACK_M) r.skip = true; // moved backwards along the lap: spun or reversing
         r.maxP = Math.max(r.maxP ?? p, p);
@@ -95,27 +100,33 @@ export function createCoach(corners, t, rl, opts = {}) {
         let v;
         if (r.wide) v = ['Too fast in — missed the apex', 'bad'];
         else if (!r.help && r.early > EARLY_M) v = [`Braked ${Math.round(r.early / 5) * 5} m early — brake later`, 'warn'];
-        else if (r.vMin < SLOW_K * c.vApex) v = ['Slow mid-corner — carry more speed', 'warn'];
-        else if (r.apexMiss > APEX_M) v = ['Missed the apex — aim for the inside kerb', 'warn'];
+        else if (!r.helped && !r.side && r.vMin < SLOW_K * c.vApex) v = ['Slow mid-corner — carry more speed', 'warn'];
+        else if (!r.side && r.apexMiss > APEX_M) v = ['Missed the apex — aim for the inside kerb', 'warn'];
         else v = ['Perfect corner', 'good'];
-        if (v[1] !== 'good') { st.lapClean = false; st.streak[r.k] = 0; return v; }
-        st.lapGood = true;
-        st.streak[r.k]++;
-        return st.streak[r.k] > QUIET_AFTER ? null : v;
+        if (v[1] === 'good') st.lapGood = true; else st.lapClean = false;
+        const q = st.rep[r.k];
+        q.n = q.text === v[0] ? q.n + 1 : 1; q.text = v[0]; // the same verdict 3 times in a row at a corner goes quiet until it changes
+        return q.n > QUIET_AFTER ? null : v;
     }
+
+    const sideLat = (f) => { // lateral offset of a car alongside (side by side), else null
+        const cos = Math.cos(f.angle), sin = Math.sin(f.angle);
+        for (const o of f.near) {
+            const dx = o.x - f.x, dy = o.y - f.y, ahead = (dx * cos + dy * sin) / t.scale, lat = (-dx * sin + dy * cos) / t.scale;
+            if (Math.abs(ahead) < 1.5 * CAR_M && Math.abs(lat) >= 1.5 && Math.abs(lat) <= 5) return lat;
+        }
+        return null;
+    };
 
     function tips(f, s) {
         if (!st.nudged && st.cleanLaps >= 2 && f.helpLevel >= 1) { const m = say(f, 'Clean laps! Try Low braking help (Q) — it\'s faster', 'tip'); if (m) st.nudged = true; return m; }
         if (f.tow > TOW_ON) { st.towSince ??= f.t; if (f.t - st.towSince >= TOW_S) { const m = tip(f, 'tow', 'In the tow — pull out and brake later to pass'); if (m) return m; } } else st.towSince = null;
         const next = corners.filter((c) => rel(c.brakeS, s) <= SIDE_M && c.turn !== 0).sort((a, b) => rel(a.brakeS, s) - rel(b.brakeS, s))[0];
         if (next && f.near.length) {
-            const cos = Math.cos(f.angle), sin = Math.sin(f.angle);
-            for (const o of f.near) {
-                const dx = o.x - f.x, dy = o.y - f.y, ahead = (dx * cos + dy * sin) / t.scale, lat = (-dx * sin + dy * cos) / t.scale;
-                if (Math.abs(ahead) >= 1.5 * CAR_M || Math.abs(lat) < 1.5 || Math.abs(lat) > 5) continue;
+            const lat = sideLat(f);
+            if (lat !== null) {
                 const m = next.turn * lat < 0 ? tip(f, 'inside', 'Inside line — brake late, the corner is yours') : tip(f, 'outside', 'Outside — leave room or tuck in behind');
-                if (m) return m;
-                break; // capped: fall through to the DRS check
+                if (m) return m; // capped: fall through to the DRS check
             }
         }
         if (f.drsAvailable && f.inDrsZone && !f.drsOpen) return tip(f, 'drs', 'DRS — press E');
@@ -134,7 +145,7 @@ export function createCoach(corners, t, rl, opts = {}) {
             if (st.cur && !inWindow(corners[st.cur.k], s)) { v = verdict(); st.cur = null; }
             if (!st.cur) {
                 const k = corners.findIndex((c) => inWindow(c, s));
-                if (k >= 0) st.cur = { k, brakeAt: null, early: 0, help: false, vMin: Infinity, hold: null, apexMiss: null, wide: false, skip: f.mode === 'race' && f.lap === 0 && k === 0 };
+                if (k >= 0) st.cur = { k, brakeAt: null, early: 0, help: false, vMin: Infinity, hold: null, helped: false, side: false, apexMiss: null, wide: false, skip: f.mode === 'race' && f.lap === 0 && k === firstK };
             }
             if (st.cur) record(f, s);
             if (v) return say(f, v[0], v[1], true);
