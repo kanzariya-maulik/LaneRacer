@@ -83,3 +83,18 @@ test('the assist finds the car on the lane itself: a stale or missing pitS (the 
         assert.deepStrictEqual(D.pitAssist(q, t), want, `pitS ${pitS}`);
     }
 });
+
+// ponytail: Spa and Buddh bend hard right inside the mouth (Spa ~17 m radius by 30 m in, Buddh ~40 m): from 60 m/s at 5 m the
+// car is on full brake from the first tick and the friction circle leaves no grip to turn, whatever A_LAT is. Tested at the
+// fastest entry that stays in; a driver who arrives faster rides the barrier. Upgrade path: trail-brake (brake less while turning)
+const HOT_MS = { spa: 40, buddh: 45 };
+for (const id of Track.TRACK_IDS) {
+    test(`${id}: a hot entry (${HOT_MS[id] || 60} m/s) is braked for the lane's bends and stays inside the lane`, () => {
+        const t = tracks[id], sc = t.scale, { p } = car(t, 5 * sc, HOT_MS[id] || 60, 'lane');
+        for (let k = 0; k < 60 * 90 && p.box.s - (p.pitS ?? 0) > D.ASSIST_HANDOVER_M * sc; k++) {
+            tick(p, t);
+            const o = outside(p, t);
+            assert.ok(o <= LANE_MARGIN_M, `${o.toFixed(2)} m outside the lane at ${(p.pitS / sc).toFixed(0)} m`);
+        }
+    });
+}

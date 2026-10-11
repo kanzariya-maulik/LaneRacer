@@ -75,6 +75,7 @@ export function canStopOnMark(p, t, metres) {
 export const ASSIST_HANDOVER_M = 12, ASSIST_ARRIVE_MS = 15 / 3.6;
 const ASSIST_DEC = 7;          // m/s² planned braking (the car manages ~15)
 const ASSIST_LOOK_S = 0.35, ASSIST_LOOK_MIN_M = 8, ASSIST_GAIN = 2; // pedal per m/s of speed error
+const ASSIST_LAT = 12, CURVE_SPAN_M = 20, CURVE_STEP_M = 5; // m/s² sideways in the lane's bends, radius from the turn over 20 m
 
 // The lane centre this far along it (world units), carried straight on past the exit tip
 export function pointOnPath(pit, s) {
@@ -103,6 +104,13 @@ export function pitAssist(p, t) {
     let want = limit;
     // before the board a hot car only brakes onto the curve that meets the limiter there; it never speeds up past the limiter
     if (s < pit.limStart) want = Math.max(limit, Math.min(v, Math.sqrt(limit * limit + 2 * ASSIST_DEC * (pit.limStart - s) / sc)));
+    // ...and for the lane's bends: every bend within braking distance, met at sqrt(A_LAT R) (a hot entry would understeer
+    // into the barrier otherwise)
+    for (let d = 0; d <= (v * v) / (2 * ASSIST_DEC); d += CURVE_STEP_M) {
+        const a = pointOnPath(pit, s + d * sc).angle, b = pointOnPath(pit, s + (d + CURVE_SPAN_M) * sc).angle;
+        const turn = Math.abs(Math.atan2(Math.sin(b - a), Math.cos(b - a)));
+        if (turn > 1e-3) want = Math.min(want, Math.sqrt((ASSIST_LAT * CURVE_SPAN_M) / turn + 2 * ASSIST_DEC * d));
+    }
     if (p.stop?.phase === 'lane') {
         const toGo = Math.max(0, (p.box.s - s) / sc - ASSIST_HANDOVER_M);
         want = Math.min(want, Math.sqrt(ASSIST_ARRIVE_MS * ASSIST_ARRIVE_MS + 2 * ASSIST_DEC * toGo));
