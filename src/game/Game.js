@@ -33,13 +33,14 @@ const SLIP_MIN_M = 5, SLIP_RANGE_M = 40, SLIP_LAT_M = 3; // …fading out by 40 
 const STOP_S = 2.5, STOP_SPREAD_S = 0.4, RELEASE_HOLD_S = 0.5, RELEASE_GAP_M = 10, PARK_M = 0.5, PARK_MS = 0.3;
 const RELEASE_AUTO_S = 0.5, PERFECT_S = 0.2, JUMP_WINDOW_S = 1, RELEASE_JUMP_S = 0.5, RELEASE_THROTTLE = 0.5;
 const COMPOUND_PENALTY_S = 22;
+const BOX_NEXT_M = 200, BOX_MISS_M = 50; // box call: closer than this to the entry → next lap; this far past it → missed
 const GUIDE_MAX_S = 6; // not parked by then: the car is driven out without a service (never stranded)
 const LANE_MAX_S = 60, OFF_LANE_S = 1; // driven this long (wedged), or shoved out of the lane this long: the driver gets it back
 const STALL_S = 5, STALL_M = 1;        // lane/out: not this much further along the lane in this long (wedged): the driver gets it back
 const STOP_CODE = { guide: 1, service: 2, hold: 3, lane: 4, out: 5, wait: 6 };
 
 const FLAGS = { inPit: 1, limiter: 2, drs: 4, drsAvailable: 8, finished: 16, lapValid: 32, ghost: 64 };
-const META_FIELDS = ['lap', 'checkpoint', 'rank', 'gap', 'lapsDown', 'lastLap', 'bestLap', 'lapStart', 'bestLapSectors', 'lastValid', 'penalty', 'compound', 'nextCompound', 'stops', 'compoundsUsed', 'wearPerM', 'lastStop', 'segBest', 'qualiOut'];
+const META_FIELDS = ['lap', 'checkpoint', 'rank', 'gap', 'lapsDown', 'lastLap', 'bestLap', 'lapStart', 'bestLapSectors', 'lastValid', 'penalty', 'compound', 'nextCompound', 'stops', 'compoundsUsed', 'wearPerM', 'lastStop', 'segBest', 'qualiOut', 'boxCall'];
 const META_EVERY = 6; // ticks: info updates at 10 Hz
 const r1 = (v) => Math.round(v * 10) / 10;
 
@@ -122,6 +123,7 @@ class Game {
                 lapValid: true,
                 ghost: mode === 'race' && settings.ghostStart !== false,
                 segBest: null, segAt: null, qualiOut: false, qualiDone: false, // qualifying segment (meta for everyone)
+                boxCall: null, // race: 'this' | 'next' after the driver calls "box, box"
                 lastValid: null,
                 sectorStart: mode === 'race' ? 0 : null, // quali: untimed out-lap
                 finished: false,
@@ -197,7 +199,7 @@ class Game {
         // Release presses are edge-triggered: throttle held while the game drives is neither perfect nor a jump
         const press = thr && !p.thrWas;
         p.thrWas = thr;
-        const go = (phase, extra = {}) => { p.stop = { phase, t: 0, age: 0, ...extra }; };
+        const go = (phase, extra = {}) => { p.stop = { phase, t: 0, age: 0, ...extra }; if (phase === 'service') p.boxCall = null; }; // the crew is on it: the call is done
         if (!p.stop) {
             if (!entered) return;
             const due = this.mode === 'quali' ? p.servicedVisit !== p.pitVisits : p.servicedLap !== p.lap;
@@ -271,6 +273,7 @@ class Game {
 
     // A race finisher who never ran a second compound (races of 2+ laps, tyre wear on)
     finishCar(p) {
+        p.boxCall = null;
         if (this.mode !== 'race' || this.settings.tyreWear === false || (this.settings.maxLaps || 1) < 2 || p.compoundsUsed.length >= 2) return;
         p.penalty += COMPOUND_PENALTY_S;
         this.io.emit('chat_msg', { username: 'SYSTEM', color: '#ff0000', msg: `${p.username}: +${COMPOUND_PENALTY_S}s, raced on one tyre compound (total +${p.penalty}s)` });
@@ -526,6 +529,7 @@ class Game {
                 if (p.finished) continue; // finished race cars and parked quali cars stay put
                 this.drive(p);
                 this.updateStop(p);
+                if (this.mode === 'race' && !this.frozen) this.checkBoxMissed(p);
                 if (this.frozen) this.checkJumpStart(p);
                 else {
                     if (this.mode === 'race' && !p.reacted && p.input.throttle > 0) this.reaction(p);
@@ -575,6 +579,29 @@ class Game {
             this.stop();
             this.onFinish();
         }
+    }
+
+    // ---------- "box, box" (race) ----------
+    // Metres along the track to the pit entry (lapS is from the start line, pit.entryS from path index 0)
+    toEntryM(p) {
+        const t = this.track, total = t.cum[t.path.length];
+        return ((((t.pit.entryS - ((p.lapS ?? 0) + (t.startS || 0))) % total) + total) % total) / t.scale;
+    }
+    setBoxCall(id, on) {
+        const p = this.players[id];
+        if (!p || this.mode !== 'race' || !this.track.pit || p.finished || p.inPit) return;
+        p.boxCall = on ? (this.toEntryM(p) < BOX_NEXT_M ? 'next' : 'this') : null;
+        p.boxMissedLap = null;
+    }
+    // Drove past the entry with the call on: stays called for the next lap, told once
+    checkBoxMissed(p) {
+        if (p.boxCall !== 'this' || p.inPit || !this.track.pit) { p.prevToEntry = null; return; }
+        const d = this.toEntryM(p), lapM = this.track.cum[this.track.path.length] / this.track.scale, past = lapM - d;
+        if (p.prevToEntry != null && p.prevToEntry < BOX_NEXT_M && past >= BOX_MISS_M && past < lapM / 2 && p.boxMissedLap !== p.lap) {
+            p.boxMissedLap = p.lap;
+            this.io.emit('track_limits', { id: p.id, kind: 'box_missed' });
+        }
+        if (d < lapM / 2) p.prevToEntry = d; // remembered while approaching, frozen once past
     }
 
     // ---------- qualifying session ----------
@@ -889,6 +916,7 @@ class Game {
         // Crossed the start/finish line
         if (this.mode === 'race') {
             p.lap++;
+            if (p.boxCall === 'next') p.boxCall = 'this';
             this.recordLap(p);
             if (p.lap >= this.settings.maxLaps) {
                 p.finished = true;

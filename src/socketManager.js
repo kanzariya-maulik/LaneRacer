@@ -220,6 +220,11 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
             else startRace(io, racers);
         });
 
+        // "Box, box": the driver calls (or cancels) their pit stop
+        socket.on('box_call', (d) => {
+            if (gameInstance && d && typeof d.on === 'boolean') gameInstance.setBoxCall(socket.id, d.on);
+        });
+
         socket.on('set_compound', (c) => {
             const player = state.players[socket.id];
             if (!player) return;
