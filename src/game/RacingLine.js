@@ -98,7 +98,7 @@ function compute(t) {
     // Corner limit along the line at real grip (crests included): the braking help's targets, shared with the client
     const limit = safeSpeeds(L, t.scale, t.vcurv).map((v) => Math.floor(v * 10) / 10);
     const prof = profile(L, t.scale, limit);
-    return { offset, speed: prof.speed.map((v) => Math.floor(v * 10) / 10), phase: prof.phase, limit };
+    return { offset, speed: prof.speed.map((v) => Math.floor(v * 10) / 10), phase: prof.phase, limit, lapS: Math.round(prof.lap * 10) / 10 };
 }
 
 module.exports = { compute, profile, linePoints, curvatures, latMax };
