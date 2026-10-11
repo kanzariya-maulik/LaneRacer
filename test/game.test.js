@@ -89,7 +89,7 @@ test('initPayload carries players, track and mode', () => {
 
 test('quali cars are ghosts; race cars collide; finished race cars are not pushed', () => {
     for (const [mode, expectMoved] of [['quali', false], ['race', true]]) {
-        const g = new Game(io, [lp('a'), lp('b')], monza, { maxLaps: 1, qualifying: true }, () => {}, mode);
+        const g = new Game(io, [lp('a'), lp('b')], monza, { maxLaps: 1, qualifying: true, ghostStart: false }, () => {}, mode);
         g.release();
         const { a, b } = g.players;
         b.x = a.x + 1; b.y = a.y; b.angle = a.angle;
@@ -97,7 +97,7 @@ test('quali cars are ghosts; race cars collide; finished race cars are not pushe
         g.update();
         assert.strictEqual(Math.abs(b.x - bx) > 1e-6, expectMoved, mode);
     }
-    const g = new Game(io, [lp('a'), lp('b')], monza, RACE, () => {});
+    const g = new Game(io, [lp('a'), lp('b')], monza, { ...RACE, ghostStart: false }, () => {});
     g.release();
     const { a, b } = g.players;
     b.x = a.x + 1; b.y = a.y; b.angle = a.angle; b.finished = true;
@@ -1135,7 +1135,7 @@ test('collisions off: race cars pass through each other and are sent as ghosts',
     let pkt = null;
     const io2 = { emit() {}, volatile: { emit(ev, d) { if (ev === 'game_state') pkt = d; } } };
     for (const collisions of [true, false]) {
-        const g = new Game(io2, [lp('a'), lp('b', 'haas')], monza, { maxLaps: 3, qualifying: false, collisions }, () => {});
+        const g = new Game(io2, [lp('a'), lp('b', 'haas')], monza, { maxLaps: 3, qualifying: false, collisions, ghostStart: false }, () => {});
         g.release();
         const { a, b } = g.players;
         Object.assign(b, { x: a.x + 1, y: a.y, angle: a.angle, vx: 0, vy: 0 }); // overlapping
@@ -1175,7 +1175,7 @@ test('quali: host-set out-laps and timed laps; the session clock grows with them
 function incidentGame(settings = RACE, mode = 'race') {
     const sent = [];
     const g = new Game({ emit: (ev, d) => sent.push([ev, d]), volatile: { emit() {} } }, [lp('a'), lp('b', 'haas')], monza, settings, () => {}, mode);
-    if (mode === 'race') g.release();
+    if (mode === 'race') { g.release(); for (const p of [g.players.a, g.players.b]) { p.ghost = false; p.lap = 1; } } // solid, past lap 1: the full 2x blame rule
     return { g, a: g.players.a, b: g.players.b, sent };
 }
 // On the track at distance s (m) from the line, lat m to the driver's left, moving vFwd forward and vLat leftward (m/s)

@@ -12,6 +12,8 @@ const CP_GATE_M = 30;        // a checkpoint also counts this far past it along 
 const LIMIT_WARNINGS = 2;    // race: violations before penalties start
 // Car-to-car incidents (race, collisions on): who drove into whom, judged once the consequences are known
 const CONTACT_LIGHT_MS = 3;      // closing slower than this (~11 km/h): rubbing wheels, not an incident
+const CONTACT_BLAME_LAP1 = 3;    // first lap: only a clear hit is anyone's fault (everyone arrives at turn 1 together)
+const GHOST_MAX_S = 25;          // ghost start ends by this long after lights out even if sector 1 is longer
 const CONTACT_BLAME = 2;         // at fault: into the other car at least this many times as fast as it came into you
 const CONTACT_GAP_S = 1;         // contact again within this: still the same coming-together
 const INCIDENT_JUDGE_S = 2;      // the victim is watched this long: pushed off or spun makes it worse
@@ -106,6 +108,7 @@ class Game {
                 bestSectors: [null, null, null],
                 bestLapSectors: null,
                 lapValid: true,
+                ghost: mode === 'race' && settings.ghostStart !== false,
                 lastValid: null,
                 sectorStart: mode === 'race' ? 0 : null, // quali: untimed out-lap
                 finished: false,
@@ -267,7 +270,7 @@ class Game {
             const p = this.players[id];
             const flags = (p.inPit && FLAGS.inPit) | (p.limiter && FLAGS.limiter) | (p.drs && FLAGS.drs)
                 | (p.drsAvailable && FLAGS.drsAvailable) | (p.finished && FLAGS.finished)
-                | (p.lapValid && FLAGS.lapValid) | ((this.mode === 'quali' || this.settings.collisions === false) && FLAGS.ghost);
+                | (p.lapValid && FLAGS.lapValid) | ((this.mode === 'quali' || this.settings.collisions === false || p.ghost) && FLAGS.ghost);
             c.push([this.index[id], r1(p.x), r1(p.y), +p.angle.toFixed(4), r1(p.speed), +p.steer.toFixed(3), flags,
                     r1(p.vx), r1(p.vy), +(p.tow || 0).toFixed(2), p.lastSeq, +(p.wear || 0).toFixed(4),
                     p.stop ? STOP_CODE[p.stop.phase] : 0, p.stop ? +p.stop.t.toFixed(1) : 0]);
@@ -507,11 +510,12 @@ class Game {
                     this.checkLapProgress(p);
                 }
             }
+            if (this.mode === 'race') this.updateGhosts(ids);
             if (this.mode === 'race' && this.settings.collisions !== false) { // host can turn contact off
                 for (let i = 0; i < ids.length; i++) {
                     for (let j = i + 1; j < ids.length; j++) {
                         const a = this.players[ids[i]], b = this.players[ids[j]];
-                        if (a.finished || b.finished) continue;
+                        if (a.finished || b.finished || a.ghost || b.ghost) continue;
                         const hit = Physics.carOverlap(a, b, this.track.scale);
                         if (!hit) continue;
                         this.noteContact(a, b, hit); // before the bump changes their speeds
@@ -582,13 +586,28 @@ class Game {
 
     // First contact between two cars: each one's own speed into the other (m/s, n points from b to a) says who drove
     // into whom. Rear-end: the car behind. Side swipe: the car that moved across. Both alike: a racing incident
+    // Ghost start: cars pass through each other from the grid until past sector 1 of the first lap (or GHOST_MAX_S after
+    // lights out), and only turn solid clear of every other car, so nobody is ever popped apart
+    updateGhosts(ids) {
+        for (const id of ids) {
+            const p = this.players[id];
+            if (!p.ghost) continue;
+            const done = p.lap > 0 || p.checkpoint >= this.track.sectorCps[1] || (!this.frozen && this.time >= GHOST_MAX_S);
+            if (!done) continue;
+            const sc = this.track.scale;
+            if (ids.some((o) => o !== id && !this.players[o].finished && Physics.carOverlap(p, this.players[o], sc))) continue;
+            p.ghost = false;
+        }
+    }
+
     noteContact(a, b, { nx, ny }) {
         const key = a.id < b.id ? `${a.id}|${b.id}` : `${b.id}|${a.id}`, last = this.contacts.get(key);
         this.contacts.set(key, this.time);
         if (last !== undefined && this.time - last <= CONTACT_GAP_S) return;
         const sc = this.track.scale, aIn = -(a.vx * nx + a.vy * ny) / sc, bIn = (b.vx * nx + b.vy * ny) / sc;
         if (aIn + bIn < CONTACT_LIGHT_MS) return;
-        const blame = (x, y) => x > 0 && x >= CONTACT_BLAME * Math.max(y, 0);
+        const k = a.lap === 0 || b.lap === 0 ? CONTACT_BLAME_LAP1 : CONTACT_BLAME;
+        const blame = (x, y) => x > 0 && x >= k * Math.max(y, 0);
         const [striker, victim] = blame(aIn, bIn) ? [a, b] : blame(bIn, aIn) ? [b, a] : [];
         if (!striker) {
             if (this.settings.contactPenalties !== false) this.io.emit('chat_msg', { username: 'SYSTEM', color: '#f59e0b', msg: `${a.username} / ${b.username}: racing incident, no action` });
