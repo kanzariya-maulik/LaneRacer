@@ -857,42 +857,77 @@ function gravelTexture() {
         let s = 77;
         const rand = () => ((s = (s * 16807) % 2147483647) / 2147483647);
 
-        // Warm FIA gravel trap sandy base (r=202, g=169, b=126)
-        u32.fill(0xff7ea9ca);
+        // Rich warm FIA golden sand & gravel base
+        const sandCrest   = new THREE.Color('#ecdcb8'); // Sunlit ridge crest
+        const sandMid     = new THREE.Color('#d4b482'); // Warm golden sand body
+        const sandShade   = new THREE.Color('#9c784c'); // Deep furrow shadow
+        const sandCrevice = new THREE.Color('#644c30'); // Deep pebble crevice
 
-        // Gravel rake ridges parallel to run-off
-        for (let y = 0; y < size; y += 32) {
-            for (let dy = 0; dy < 16; dy++) {
-                const row = (y + dy) * size;
-                const factor = dy < 8 ? 0.90 : 1.10;
-                for (let x = 0; x < size; x++) {
-                    const cur = u32[row + x];
-                    const r = Math.min(255, Math.floor((cur & 0xff) * factor));
-                    const gVal = Math.min(255, Math.floor(((cur >> 8) & 0xff) * factor));
-                    const b = Math.min(255, Math.floor(((cur >> 16) & 0xff) * factor));
-                    u32[row + x] = 0xff000000 | (b << 16) | (gVal << 8) | r;
+        // 1. Parallel raked corduroy furrows with organic waviness (along Y, parallel to track)
+        // Furrow pitch = 48px (~25cm per ridge in world space)
+        const furrowPitch = 48;
+        for (let y = 0; y < size; y++) {
+            const row = y * size;
+            const wave = Math.sin(y * 0.024) * 5 + Math.sin(y * 0.007) * 8;
+            for (let x = 0; x < size; x++) {
+                const effX = (x + wave + size * 10) % furrowPitch;
+                const phase = effX / furrowPitch; // 0..1 across furrow
+                const ridge = Math.sin(phase * Math.PI * 2); // -1..1
+                let r, gVal, b;
+                if (ridge > 0) {
+                    // Sunlit crest
+                    r = Math.round(sandMid.r * (1 - ridge) * 255 + sandCrest.r * ridge * 255);
+                    gVal = Math.round(sandMid.g * (1 - ridge) * 255 + sandCrest.g * ridge * 255);
+                    b = Math.round(sandMid.b * (1 - ridge) * 255 + sandCrest.b * ridge * 255);
+                } else {
+                    // Shaded trough
+                    const d = -ridge;
+                    r = Math.round(sandMid.r * (1 - d) * 255 + sandShade.r * d * 255);
+                    gVal = Math.round(sandMid.g * (1 - d) * 255 + sandShade.g * d * 255);
+                    b = Math.round(sandMid.b * (1 - d) * 255 + sandShade.b * d * 255);
                 }
+                u32[row + x] = 0xff000000 | (b << 16) | (gVal << 8) | r;
             }
         }
 
-        // Varied mineral pebble granules (limestone, basalt, quartz, sandstone)
-        const stones = [0xffd1dfe8, 0xff9cbcd4, 0xff7294b0, 0xff647b8c, 0xff48545c, 0xff5468a3, 0xff435c8a, 0xffc5d3de, 0xff97b0c2, 0xff5e6c75];
-        for (let k = 0; k < 80000; k++) {
-            const col = stones[Math.floor(rand() * stones.length)];
-            const x = Math.floor(rand() * (size - 2));
-            const y = Math.floor(rand() * (size - 2));
-            const idx = y * size + x;
-            u32[idx] = col;
-            u32[idx + 1] = col;
-            u32[idx + size] = col;
-            u32[idx + size + 1] = col;
-        }
-
-        // Pebble shadow crevices
-        for (let k = 0; k < 35000; k++) {
+        // 2. Fine sand mineral granules (200,000 fine sand specks)
+        for (let k = 0; k < 200000; k++) {
             const x = Math.floor(rand() * size);
             const y = Math.floor(rand() * size);
-            u32[y * size + x] = 0xff10151a;
+            const cur = u32[y * size + x];
+            const noise = (rand() - 0.5) * 36;
+            const r = Math.max(0, Math.min(255, (cur & 0xff) + noise));
+            const gVal = Math.max(0, Math.min(255, ((cur >> 8) & 0xff) + noise * 0.9));
+            const b = Math.max(0, Math.min(255, ((cur >> 16) & 0xff) + noise * 0.75));
+            u32[y * size + x] = 0xff000000 | (Math.round(b) << 16) | (Math.round(gVal) << 8) | Math.round(r);
+        }
+
+        // 3. Coarse FIA gravel stones & mineral pebbles (90,000 stones of varied minerals)
+        const stones = [
+            0xffe8f0f8, // Quartz / limestone (bright cream)
+            0xffd0dfec, // Pale beige river pebble
+            0xff9eb4c8, // Warm sandstone
+            0xff768a9c, // Grey granite
+            0xff5c6874, // Dark slate
+            0xff50608c, // Ochre mineral
+            0xff425268, // Basalt pebble
+            0xffc4d0de  // Weathered feldspar
+        ];
+        for (let k = 0; k < 90000; k++) {
+            const col = stones[Math.floor(rand() * stones.length)];
+            const x = Math.floor(rand() * (size - 3));
+            const y = Math.floor(rand() * (size - 3));
+            const w = rand() > 0.6 ? 2 : 1;
+            const h = rand() > 0.6 ? 2 : 1;
+            for (let dy = 0; dy < h; dy++) {
+                for (let dx = 0; dx < w; dx++) {
+                    u32[(y + dy) * size + x + dx] = col;
+                }
+            }
+            // Pebble cast shadow crevice
+            if (y + h < size && x + w < size) {
+                u32[(y + h) * size + x + w] = 0xff141c24;
+            }
         }
 
         g.putImageData(imgData, 0, 0);
@@ -1012,32 +1047,55 @@ function vergeTexture(land) {
     const rand = () => ((s = (s * 16807) % 2147483647) / 2147483647);
 
     const baseCol = new THREE.Color(land.verge);
-    const darkCol = baseCol.clone().multiplyScalar(0.74);
-    const lightCol = baseCol.clone().multiplyScalar(1.20);
-    const midCol = baseCol.clone().multiplyScalar(1.0);
-    const stripeA = baseCol.clone().multiplyScalar(0.92);
-    const stripeB = baseCol.clone().multiplyScalar(1.08);
+    // Distinct alternating mown lawn swaths (rich deep emerald & fresh-cut sunlit green)
+    const colDark   = baseCol.clone().multiplyScalar(0.78);
+    const colLight  = baseCol.clone().multiplyScalar(1.24);
+    const colMid    = baseCol.clone().multiplyScalar(1.00);
+    const colTip    = baseCol.clone().multiplyScalar(1.38);
+    const colShadow = baseCol.clone().multiplyScalar(0.60);
 
     const toU32 = (col) => 0xff000000 | (Math.round(col.b * 255) << 16) | (Math.round(col.g * 255) << 8) | Math.round(col.r * 255);
-    const cDark = toU32(darkCol), cLight = toU32(lightCol), cMid = toU32(midCol);
-    const cStripeA = toU32(stripeA), cStripeB = toU32(stripeB);
+    const uDark = toU32(colDark), uLight = toU32(colLight), uMid = toU32(colMid);
+    const uTip = toU32(colTip), uShadow = toU32(colShadow);
 
-    // Subtle mown lawn bands (128px wide)
-    const stripeW = 128;
+    // 1. Mown lawn stripes alternating along the track (Y axis = along circuit, V coordinate)
+    // 2 alternating swaths per repeat: each band is ~3 meters wide with soft roller transition
     for (let y = 0; y < size; y++) {
         const row = y * size;
         for (let x = 0; x < size; x++) {
-            u32[row + x] = Math.floor(x / stripeW) % 2 === 0 ? cStripeA : cStripeB;
+            // Gentle diagonal angle (12 degrees) as real groundskeeper mowers cut across the verge
+            const effY = (y + Math.floor(x * 0.18)) % size;
+            const phase = effY / (size / 2); // 2 stripes per repeat
+            const cycle = phase - Math.floor(phase); // 0..1 in stripe
+            // Smooth cosine transition at the mower boundary (no digital jagged steps)
+            const t = 0.5 + 0.5 * Math.sin(cycle * Math.PI * 2);
+            const r = Math.round(colDark.r * (1 - t) * 255 + colLight.r * t * 255);
+            const gVal = Math.round(colDark.g * (1 - t) * 255 + colLight.g * t * 255);
+            const b = Math.round(colDark.b * (1 - t) * 255 + colLight.b * t * 255);
+            u32[row + x] = 0xff000000 | (b << 16) | (gVal << 8) | r;
         }
     }
 
-    // Fine turf fibers (80,000 blades)
-    for (let k = 0; k < 80000; k++) {
+    // 2. Neat manicured turf edge where verge meets asphalt curb (X < 48)
+    for (let y = 0; y < size; y++) {
+        const row = y * size;
+        for (let x = 0; x < 48; x++) {
+            const edgeFactor = 0.84 + (x / 48) * 0.16;
+            const cur = u32[row + x];
+            const r = Math.round((cur & 0xff) * edgeFactor);
+            const gVal = Math.round(((cur >> 8) & 0xff) * edgeFactor);
+            const b = Math.round(((cur >> 16) & 0xff) * edgeFactor);
+            u32[row + x] = 0xff000000 | (b << 16) | (gVal << 8) | r;
+        }
+    }
+
+    // 3. High-definition organic grass blades and turf texture (140,000 blades)
+    for (let k = 0; k < 140000; k++) {
         const x = Math.floor(rand() * (size - 2));
-        const y0 = Math.floor(rand() * (size - 6));
-        const h = 2 + Math.floor(rand() * 5);
+        const y0 = Math.floor(rand() * (size - 8));
+        const h = 2 + Math.floor(rand() * 6);
         const shade = rand();
-        const col = shade < 0.35 ? cDark : (shade < 0.75 ? cMid : cLight);
+        const col = shade < 0.28 ? uShadow : (shade < 0.65 ? uMid : (shade < 0.88 ? uLight : uTip));
         for (let dy = 0; dy < h; dy++) {
             u32[(y0 + dy) * size + x] = col;
         }
@@ -1083,9 +1141,12 @@ function grassTexture(w, h, land) {
 
     for (let y = 0; y < size; y++) {
         const row = y * size;
-        const half = size / 2;
         for (let x = 0; x < size; x++) {
-            u32[row + x] = x < half ? u1 : u0;
+            const t = 0.5 + 0.5 * Math.sin((x / size) * Math.PI * 2);
+            const r = Math.round(c0.r * (1 - t) * 255 + c1.r * t * 255);
+            const gVal = Math.round(c0.g * (1 - t) * 255 + c1.g * t * 255);
+            const b = Math.round(c0.b * (1 - t) * 255 + c1.b * t * 255);
+            u32[row + x] = 0xff000000 | (b << 16) | (gVal << 8) | r;
         }
     }
 
@@ -2489,8 +2550,10 @@ function buildWorld(t) {
             old.dispose();
             buildGroundWalls(H, fine);
         });
-        for (const dir of [1, -1]) world.add(strip(rp, signed(dir, roadTo[dir]), rreach[dir], 0.3, (k) => !clipped(dir, k) && !clipped(dir, (k + 1) % m), solid(night ? '#2b382c' : land.verge), {
-            roughness: 0.98,
+        for (const dir of [1, -1]) world.add(strip(rp, signed(dir, roadTo[dir]), rreach[dir], 0.3, (k) => !clipped(dir, k) && !clipped(dir, (k + 1) % m), solid(night ? '#344634' : '#ffffff'), {
+            map: vergeTexture(land),
+            repeatM: 6.0,
+            roughness: 0.96,
             metalness: 0.0
         }));
     }
@@ -2528,9 +2591,9 @@ function buildWorld(t) {
     for (const dir of [1, -1]) {
         const edge = rreach[dir].map((r) => r - dir * scale); // a metre inside the verge's reach
         // from the end of the asphalt run-off
-        world.add(strip(rp, signed(dir, roadTo[dir]), edge, 0.4, (i) => rslow[dir][i] && !clipped(dir, i) && !clipped(dir, (i + 1) % m), solid('#ffffff'), {
+        world.add(strip(rp, signed(dir, roadTo[dir]), edge, 0.4, (i) => rslow[dir][i] && !clipped(dir, i) && !clipped(dir, (i + 1) % m), solid(night ? '#483c30' : '#ffffff'), {
             map: gravelTexture(),
-            repeatM: 5.5,
+            repeatM: 4.8,
             roughness: 0.98,
             metalness: 0.0
         }));
