@@ -175,6 +175,12 @@
                                     <label class="help-fixed-only hidden">Steering help
                                         <select id="setting-help-steer"><option value="0">Off</option><option value="100" selected>On</option></select>
                                     </label>
+                                    <label class="collisions-only">Start
+                                        <select id="setting-ghost" title="Cars pass through each other until the end of sector 1 on lap 1: no turn-1 pile-ups">
+                                            <option value="1" selected>Ghost first corners</option>
+                                            <option value="0">Contact from lights out</option>
+                                        </select>
+                                    </label>
                                     <label class="collisions-only">Contact penalties
                                         <select id="setting-penalties" title="+5 s for hitting another car, +10 s if it goes off or spins">
                                             <option value="1" selected>On</option>
@@ -261,6 +267,8 @@
             </div>
             <div id="sector-flash" class="hidden"></div>
             <div id="race-msg" class="hidden"></div>
+            <div id="steward-card" class="hidden"><b id="sc-head"></b><small id="sc-tip"></small></div>
+            <div id="ghost-tag" class="hidden">GHOST — FIRST CORNERS</div>
             <div id="fl-card" class="hidden">
                 <div class="fl-head"><svg class="stopwatch" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13.5" r="8" fill="none" stroke="currentColor" stroke-width="2.4"/><rect x="9.5" y="1.5" width="5" height="2.6" rx="1" fill="currentColor"/><path d="M12 13.5V8.6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="M18.4 5.6l1.6-1.6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg><span>FASTEST LAP</span></div>
                 <div class="fl-body"><span class="fl-team"></span><span class="fl-name"></span><span class="fl-time"></span></div>

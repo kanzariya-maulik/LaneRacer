@@ -21,6 +21,7 @@ const setQuali = document.getElementById('setting-quali');
 const setOutLaps = document.getElementById('setting-outlaps');
 const setQualiLaps = document.getElementById('setting-qualilaps');
 const setCollisions = document.getElementById('setting-collisions');
+const setGhost = document.getElementById('setting-ghost');
 const setTyres = document.getElementById('setting-tyres');
 const setPenalties = document.getElementById('setting-penalties');
 const setTime = document.getElementById('setting-time');
@@ -285,6 +286,7 @@ function emitSettings() {
         outLaps: parseInt(setOutLaps.value, 10),
         qualiLaps: parseInt(setQualiLaps.value, 10),
         collisions: setCollisions.value === '1',
+        ghostStart: setGhost.value === '1',
         tyreWear: setTyres.value === '1',
         contactPenalties: setPenalties.value === '1',
         help: { mode: setHelp.value, brake: +setHelpBrake.value, steer: +setHelpSteer.value }
@@ -296,6 +298,7 @@ setQuali.addEventListener('change', emitSettings);
 setOutLaps.addEventListener('change', emitSettings);
 setQualiLaps.addEventListener('change', emitSettings);
 setCollisions.addEventListener('change', emitSettings);
+setGhost.addEventListener('change', emitSettings);
 setTyres.addEventListener('change', emitSettings);
 setPenalties.addEventListener('change', emitSettings);
 setTime.addEventListener('change', emitSettings);
@@ -408,6 +411,7 @@ window.updateSettingsUI = () => {
     setQualiLaps.value = clientState.settings.qualiLaps ?? 2;
     document.querySelectorAll('.quali-only').forEach((el) => el.classList.toggle('hidden', !clientState.settings.qualifying));
     setCollisions.value = clientState.settings.collisions === false ? '0' : '1';
+    setGhost.value = clientState.settings.ghostStart === false ? '0' : '1';
     setTyres.value = clientState.settings.tyreWear === false ? '0' : '1';
     setPenalties.value = clientState.settings.contactPenalties === false ? '0' : '1';
     const help = clientState.settings.help || { mode: 'choose', steer: 100, brake: 100 };

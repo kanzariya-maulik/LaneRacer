@@ -391,11 +391,6 @@ socket.on('reaction', (r) => {
 });
 
 socket.on('track_limits', (e) => {
-    if (e.id !== clientState.me || !window.showBanner) return;
-    window.showBanner(e.kind === 'deleted' ? 'TRACK LIMITS — LAP DELETED'
-        : e.kind === 'warning' ? `TRACK LIMITS — WARNING ${e.count}/2`
-        : e.kind === 'jump' ? `JUMP START — +${e.penalty}s PENALTY`
-        : e.kind === 'collision' ? `+${e.add}s CAUSING A COLLISION (total +${e.penalty}s)`
-        : e.kind === 'hit' ? `HIT BY ${String(e.by).toUpperCase()} — PENALTY GIVEN`
-        : `+5s PENALTY (total +${e.penalty}s)`);
+    if (e.id !== clientState.me) return;
+    window.showSteward?.(e);
 });

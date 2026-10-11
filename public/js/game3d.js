@@ -10,6 +10,7 @@ import { heightAt, pathHeights } from './sim/elevation.js';
 import { themeOf, LANDS, SKIES, nightOf } from './themes.js';
 import { SnapshotBuffer, RenderClock, sample, samplePresent, decodeFlags } from './netsync.js';
 import { Predictor, STEP_S } from './predict.js';
+import { stewardText } from './steward.js';
 import { Gearbox, shiftLights } from './audio/gearbox.js';
 import { estimateLoad } from './audio/mix.js';
 import * as Sound from './audio/audio.js';
@@ -2003,6 +2004,18 @@ window.showBanner = (text, good = false) => {
     bannerTimer = setTimeout(() => el.classList.add('hidden'), 3000);
 };
 
+let stewardTimer = null;
+window.showSteward = (e) => {
+    const t = stewardText(e);
+    if (!t) return;
+    $('sc-head').textContent = t.head;
+    $('sc-tip').textContent = t.tip;
+    $('sc-tip').classList.toggle('hidden', !t.tip);
+    $('steward-card').className = t.tone;
+    clearTimeout(stewardTimer);
+    stewardTimer = setTimeout(() => $('steward-card').classList.add('hidden'), 4000);
+};
+
 function updateHUD(withTower = true) {
     const gs = clientState.gameState;
     const me = gs[clientState.me];
@@ -2010,6 +2023,8 @@ function updateHUD(withTower = true) {
     const fastest = clientState.fastestLap?.time ?? Infinity; // the server's session fastest lap (kept if its holder leaves)
     const sec = (s) => sectorClass(s, clientState.sessionBest, clientState.sessionBestIds); // live: purple → green when beaten
 
+    const ghostOn = !!(racing && clientState.status === 'RACE' && me.ghost && clientState.settings?.collisions !== false);
+    if (ghostOn !== hudGhost) { hudGhost = ghostOn; $('ghost-tag').classList.toggle('hidden', !ghostOn); }
     $('hud-total').innerText = Object.keys(gs).length;
     // Finished and watching: say whose car is on screen and how to switch
     const w = watchingAfterFinish(), wo = $('watch-overlay');
@@ -2026,7 +2041,7 @@ function updateHUD(withTower = true) {
     curEl.classList.toggle('t-red', !!racing && me.lapValid === false);
     const lastEl = $('lt-last');
     const deleted = !!racing && me.lastValid === false;
-    lastEl.innerText = racing ? fmtTime(me.lastLap) + (deleted ? ' DELETED' : '') : '--';
+    lastEl.innerText = racing ? fmtTime(me.lastLap) + (deleted ? (clientState.status === 'RACE' || clientState.status === 'FINISHED' ? ' NOT COUNTED' : ' DELETED') : '') : '--';
     const lastCls = racing ? lastLapClass(me.lastLap, me.bestLap, clientState.fastestLap?.time, deleted) : '';
     for (const c of ['t-red', 't-purple', 't-green']) lastEl.classList.toggle(c, c === lastCls);
     $('lt-best').innerText = racing ? fmtTime(me.bestLap) : '--';
@@ -2247,7 +2262,7 @@ const ownFrame = { rpm: 0, load: 0, limiter: false, pit: false, speedMs: 0 };
 const listenerFrame = { x: 0, y: 0, fx: 1, fy: 0, vx: 0, vy: 0 }, sndFrame = { own: null, others: soundOthers, listener: listenerFrame };
 const silentFrame = { own: null, others: [], listener: listenerFrame };
 const camDir = new THREE.Vector3();
-let lastDrs = false, hudLit = -1, hudFlash = null, hudGear = '', hudPick = '', pickIdx = null, hudHadStop = false, hudGoUntil = 0, hudLastStop, hudPrevPhase = null, bannerText = '', bannerUntil = 0;
+let lastDrs = false, hudLit = -1, hudFlash = null, hudGear = '', hudPick = '', pickIdx = null, hudHadStop = false, hudGoUntil = 0, hudLastStop, hudPrevPhase = null, hudGhost = false, bannerText = '', bannerUntil = 0;
 function updateSound(dt) {
     const gs = clientState.gameState, me = gs[clientState.me], racing = !!me && !isSpectator();
     const followId = racing && !watchingAfterFinish() ? clientState.me : spectateId; // dash and engine: the car on screen
@@ -2360,7 +2375,7 @@ window.initGameVisuals = () => {
     // New session: predict from the new grid (reset on our first entry); spectators never get one, so never predict
     predictor = new Predictor(clientState.trackData, clientState.gameState?.[clientState.me]?.assist || 'off');
     predictor.box = clientState.gameState?.[clientState.me]?.box || null; // the pit stop guide drives into it
-    lastPick = null; hudLastStop = undefined; hudPrevPhase = null; bannerUntil = 0; // the first meta seen is the baseline, not a new stop
+    lastPick = null; hudLastStop = undefined; hudPrevPhase = null; hudGhost = false; $('ghost-tag')?.classList.add('hidden'); bannerUntil = 0; // the first meta seen is the baseline, not a new stop
     window.syncTyres();
     sentInputs = []; carPose.clear(); carState.clear(); renderClock.t = presentClock.t = null;
     othersMode = store.get('lanrace.others') === 'smooth' ? 'smooth' : 'present';
