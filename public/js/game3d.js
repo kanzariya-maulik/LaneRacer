@@ -2093,11 +2093,11 @@ function updateHUD(withTower = true) {
     hudHadStop = atBox;
     const go = performance.now() < hudGoUntil;
     $('box-msg').classList.toggle('hidden', !(racing && (atBox || go)));
-    // hold: the lollipop is green, press throttle now for a perfect release
-    if (atBox) $('box-msg').textContent = st.phase === 'service' ? `BOX — ${Math.max(0, st.t).toFixed(1)} s` : st.phase === 'hold' ? 'GO' : 'BOX';
+    // hold: GO = press throttle now for a perfect release; HOLD while still held (jumped release, car passing behind: st.t left)
+    if (atBox) $('box-msg').textContent = st.phase === 'service' ? `BOX — ${Math.max(0, st.t).toFixed(1)} s` : st.phase === 'hold' ? (st.t > 0 ? 'HOLD' : 'GO') : 'BOX';
     else if (go) $('box-msg').textContent = 'GO';
     // Pit banner: PIT ASSIST on entering lane/out, the stop time on a new lastStop, YOUR CAR when the exit drive ends
-    const ls = me?.lastStop, lsKey = ls ? `${ls.s}|${ls.release}` : null, now = performance.now(), bannerFor = (txt, ms) => { bannerText = txt; bannerUntil = now + ms; };
+    const ls = me?.lastStop, lsKey = ls ? `${ls.n}|${ls.s}|${ls.release}` : null, now = performance.now(), bannerFor = (txt, ms) => { bannerText = txt; bannerUntil = now + ms; };
     if (hudLastStop !== undefined && lsKey && lsKey !== hudLastStop) bannerFor(`PIT STOP ${ls.s.toFixed(2)} s${ls.release === 'perfect' ? '\nPERFECT RELEASE' : ls.release === 'jumped' ? '\nJUMPED +0.5 s' : ''}`, 3000);
     hudLastStop = lsKey;
     if ((!hudPrevPhase || hudPrevPhase === 'wait') && (phase === 'lane' || phase === 'out')) bannerFor('PIT ASSIST', 1500); // wait: a quali car leaving its garage

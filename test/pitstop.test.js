@@ -94,7 +94,7 @@ test('release: a fresh press within 0.2 s of green is perfect, none (or held all
     assert.strictEqual(held.release, 'auto', 'throttle held the whole stop'); assert.ok(Math.abs(held.wait - 0.5) <= 2 / 60, `held left after ${held.wait}`);
     // The stop time reaches the HUD (meta) and the chat
     const { p, msgs, metas } = perfect;
-    assert.deepStrictEqual(metas, [{ s: p.lastStop.s, release: 'perfect' }]);
+    assert.deepStrictEqual(metas, [{ s: p.lastStop.s, release: 'perfect', n: 1 }]); // n: the banner's key, even if two stops tie
     assert.ok(p.lastStop.s > 2.5 && p.lastStop.s < 3.2, `${p.lastStop.s}`);
     assert.deepStrictEqual(msgs.filter((m) => m.startsWith('PIT:')), [`PIT: a ${p.lastStop.s.toFixed(2)} s (perfect release)`]);
     assert.strictEqual(perfect.release, 'perfect'); assert.ok(perfect.wait <= 0.15, `perfect left after ${perfect.wait}`);
@@ -138,17 +138,39 @@ test('safety net: a lane car shoved out of the lane is handed back after 1 s; a 
         assert.strictEqual(p.stop, null, `still ${p.stop?.phase}, inPit ${p.inPit}`);
         assert.ok(k / 60 <= 1.2, `handed back after ${(k / 60).toFixed(2)} s`);
     }
-    { // pinned in place in the lane: never reaches its box
+    { // pinned in place in the lane: never reaches its box. No progress for 5 s: the driver gets it back
         const g = start(t, [lp('a')]), p = g.players.a;
-        enterPit(t, g, p, 30, 40);
+        enterPit(t, g, p, 30, 20);
         const pin = { x: p.x, y: p.y, angle: p.angle };
         let k = 0;
-        for (; k < 60 * 62 && p.stop?.phase !== 'out'; k++) { Object.assign(p, pin, { vx: 0, vy: 0, speed: 0 }); g.update(); }
-        assert.strictEqual(p.stop?.phase, 'out');
-        assert.ok(k / 60 >= 59 && k / 60 <= 60.2, `driven out after ${(k / 60).toFixed(2)} s`);
-        for (k = 0; k < 60 * 62 && p.stop; k++) { Object.assign(p, pin, { vx: 0, vy: 0, speed: 0 }); g.update(); }
-        assert.strictEqual(p.stop, null, 'still wedged: the driver gets the car back');
+        for (; k < 60 * 62 && p.stop?.phase !== 'out'; k++) { Object.assign(p, pin, { vx: 0, vy: 0, speed: 0 }); if (k && !p.stop) break; g.update(); }
+        assert.strictEqual(p.stop, null, `still ${p.stop?.phase}`);
+        assert.ok(k / 60 >= 5 && k / 60 <= 5.2, `handed back after ${(k / 60).toFixed(2)} s`);
         assert.strictEqual(p.stops, 0);
+    }
+    { // guided toward the box, then shoved 15 m off the lane: handed back after 1 s, not driven back 6 s
+        const g = start(t, [lp('a')]), p = g.players.a;
+        enterPit(t, g, p, 30);
+        for (let k = 0; k < 60 * 30 && p.stop?.phase !== 'guide'; k++) g.update();
+        assert.strictEqual(p.stop?.phase, 'guide');
+        const n = -Math.sin(p.box.angle), m = Math.cos(p.box.angle), q = pitPoint(t, p.box.s);
+        const side = Physics.nearestOnTrack(q.x + n * 15 * sc, q.y + m * 15 * sc, t).dist < Physics.nearestOnTrack(q.x - n * 15 * sc, q.y - m * 15 * sc, t).dist ? 1 : -1;
+        Object.assign(p, { x: q.x + side * n * 15 * sc, y: q.y + side * m * 15 * sc, vx: 0, vy: 0, speed: 0 });
+        let k = 0;
+        for (; k < 120 && p.stop; k++) { Object.assign(p, { vx: 0, vy: 0, speed: 0 }); g.update(); }
+        assert.strictEqual(p.stop, null, `still ${p.stop?.phase}`);
+        assert.ok(k / 60 <= 1.2, `handed back after ${(k / 60).toFixed(2)} s`);
+    }
+});
+
+test('watchdog: parked cars (service, hold, wait) are never released for standing still', () => {
+    const t = Track.load('monza');
+    for (const [phase, mode] of [['service', 'race'], ['hold', 'race'], ['wait', 'quali']]) {
+        const g = mode === 'quali' ? new Game(io, [lp('a')], t, QUALI, () => {}, 'quali') : start(t, [lp('a')]), p = g.players.a;
+        Object.assign(p, { x: p.box.x, y: p.box.y, angle: p.box.angle, vx: 0, vy: 0, speed: 0, input: { throttle: 0, brake: 0, steer: 0 } });
+        if (phase !== 'wait') p.stop = { phase, t: 99, age: 0, parkedAt: g.clock, greenAt: g.clock + 99, jumped: false, unsafe: 0 };
+        for (let k = 0; k < 60 * 7; k++) g.update();
+        assert.strictEqual(p.stop?.phase, phase);
     }
 });
 
@@ -281,7 +303,7 @@ test('quali: a fresh set every pit visit; race: one service per lap', () => {
         const t = Track.load('monza'), g = new Game(io, [lp('a')], t, mode === 'quali' ? { qualiLaps: 2 } : RACE, () => {}, mode), p = g.players.a, sc = t.scale;
         // In the lane: a due car is taken to its box ('lane'), otherwise driven through ('out') or left alone (same visit)
         const visit = () => {
-            Object.assign(p, { inPit: true, pitS: p.box.s - 8 * sc, vx: 0, vy: 0, input: { throttle: 0, brake: 0, steer: 0 } });
+            Object.assign(p, { inPit: true, pitS: 5 * sc, vx: 0, vy: 0, input: { throttle: 0, brake: 0, steer: 0 } });
             g.updateStop(p);
             if (p.stop?.phase !== 'lane') { p.stop = null; return false; }
             p.stop = { phase: 'service', t: 1e-6, age: 0, parkedAt: g.clock }; g.updateStop(p);
@@ -358,4 +380,75 @@ test('grid change to softs, then no stop: still a one-compound finisher (+22 s)'
     g.setNextCompound('a', 'S');
     g.finishCar(g.players.a);
     assert.strictEqual(g.players.a.penalty, 22);
+});
+
+// Enters the lane at `atM` m along it, flat out on the lane line (the driver's own car: no assist yet)
+function driveAlong(t, g, p, atM, ticks) {
+    const D = require('../public/js/sim/drive.js'), q = pitPoint(t, atM * t.scale), v = 40 * t.scale, grabs = [];
+    Object.assign(p, { x: q.x, y: q.y, angle: q.angle, vx: Math.cos(q.angle) * v, vy: Math.sin(q.angle) * v, speed: v });
+    for (let k = 0; k < ticks; k++) {
+        if (!p.stop) p.input = { ...D.pitAssist({ ...p, stop: null }, t), throttle: 1 };
+        const had = p.stop;
+        g.update();
+        if (p.stop && !had) grabs.push(`${p.stop.phase} at ${(p.pitS / t.scale).toFixed(0)} m`);
+    }
+    return grabs;
+}
+
+for (const id of Track.TRACK_IDS) {
+    test(`${id}: a car entering the lane at the exit end is never taken over; nor is a car just handed back`, () => {
+        const t = Track.load(id), pit = t.pit, sc = t.scale;
+        for (const g of [start(t, [lp('a', 'ferrari')]), new Game(io, [lp('a', 'ferrari')], t, QUALI, () => {}, 'quali')]) {
+            const p = g.players.a;
+            p.stop = null; g.frozen = false;
+            const visits = p.pitVisits;
+            for (const atM of [(pit.limEnd + pit.len) / 2 / sc, (p.box.s + pit.limEnd) / 2 / sc]) {
+                Object.assign(p, { inPit: false, wasInPit: false });
+                assert.deepStrictEqual(driveAlong(t, g, p, atM, 60 * 3), [], `${g.mode}: entered at ${atM.toFixed(0)} m`);
+            }
+            assert.strictEqual(p.pitVisits, visits, `${g.mode}: a stray entry counted as a pit visit`);
+        }
+        // Handed back at the limiter end (inPit may flicker at the exit tip), then flat out along the lane line
+        const g = start(t, [lp('a', 'ferrari')]), p = g.players.a;
+        Object.assign(p, { x: p.box.x, y: p.box.y, angle: p.box.angle, vx: 0, vy: 0, speed: 0, stop: { phase: 'out', t: 0, age: 0 }, inPit: true, wasInPit: true });
+        p.input = { throttle: 0, brake: 0, steer: 0, drs: false };
+        for (let k = 0; k < 60 * 60 && p.stop; k++) g.update();
+        assert.strictEqual(p.stop, null);
+        assert.deepStrictEqual(driveAlong(t, g, p, p.pitS / sc, 60 * 5), [], 'grabbed again after the hand-back');
+    });
+}
+
+test('one stop per lap: boxes before and past the start line both get a service on consecutive laps', () => {
+    const t = Track.load('monza');
+    for (const team of ['redbull', 'alfaromeo']) { // Monza: redbull's box is before the line, alfaromeo's past it
+        const g = start(t, [lp('a', team)], { ...RACE, maxLaps: 5 }), p = g.players.a;
+        p.lap = 1;
+        for (let n = 1; n <= 2; n++) {
+            const lap = p.lap;
+            Object.assign(p, { checkpoint: t.checkpoints.length - 1, inPit: false, wasInPit: false, stop: null });
+            enterPit(t, g, p, 30);
+            runStop(t, g, p);
+            assert.strictEqual(p.stops, n, `${team}: stop ${n} (entered on lap ${lap}, now lap ${p.lap})`);
+        }
+    }
+});
+
+test('hold: the remaining hold is in stop.t (HUD: HOLD), 0 once the driver may go', () => {
+    const t = Track.load('monza'), g = start(t, [lp('a', 'ferrari'), lp('b', 'haas')]), a = g.players.a, b = g.players.b, sc = t.scale;
+    b.box = null; b.input = { throttle: 0, brake: 0, steer: 0 };
+    Object.assign(a, { x: a.box.x, y: a.box.y, angle: a.box.angle, vx: 0, vy: 0, speed: 0, input: { throttle: 0, brake: 0, steer: 0 } });
+    // jumped the release: held 0.5 s
+    a.stop = { phase: 'hold', t: 0, age: 0, parkedAt: g.clock, greenAt: g.clock, jumped: true, unsafe: 0 };
+    g.updateStop(a);
+    assert.ok(a.stop.t > 0.4 && a.stop.t <= 0.5, `${a.stop.t}`);
+    assert.ok(g.fastPacket().c.find((c) => c[0] === g.index.a)[13] > 0);
+    for (let k = 0; k < 31; k++) g.update();
+    assert.strictEqual(a.stop.phase, 'hold'); assert.strictEqual(a.stop.t, 0);
+    // unsafe release: a moving car just behind the box
+    const q = pitPoint(t, a.box.s - 7 * sc);
+    Object.assign(b, { x: q.x, y: q.y, angle: q.angle, vx: Math.cos(q.angle) * 2 * sc, vy: Math.sin(q.angle) * 2 * sc, speed: 2 * sc });
+    g.updatePit(b);
+    a.stop = { phase: 'hold', t: 0, age: 0, parkedAt: g.clock, greenAt: g.clock, jumped: false, unsafe: 0 };
+    g.updateStop(a);
+    assert.ok(a.stop.t > 0.4, `${a.stop.t}`);
 });

@@ -32,6 +32,7 @@ const RELEASE_AUTO_S = 0.5, PERFECT_S = 0.2, JUMP_WINDOW_S = 1, RELEASE_JUMP_S =
 const COMPOUND_PENALTY_S = 22;
 const GUIDE_MAX_S = 6; // not parked by then: the car is driven out without a service (never stranded)
 const LANE_MAX_S = 60, OFF_LANE_S = 1; // driven this long (wedged), or shoved out of the lane this long: the driver gets it back
+const STALL_S = 5, STALL_M = 1;        // lane/out: not this much further along the lane in this long (wedged): the driver gets it back
 const STOP_CODE = { guide: 1, service: 2, hold: 3, lane: 4, out: 5, wait: 6 };
 
 const FLAGS = { inPit: 1, limiter: 2, drs: 4, drsAvailable: 8, finished: 16, lapValid: 32, ghost: 64 };
@@ -165,8 +166,9 @@ class Game {
     updateStop(p) {
         const t = this.track, sc = t.scale;
         if (!t.pit || !p.box || p.finished) return;
-        const entered = p.inPit && !p.wasInPit;
-        if (entered) p.pitVisits++; // quali: a fresh set every visit
+        // Only from the entry end: not onto the exit lane, nor an inPit flicker at the exit tip after the hand-back
+        const entered = p.inPit && !p.wasInPit && p.pitS < t.pit.limStart;
+        if (entered) { p.pitVisits++; p.entryLap = p.lap; } // quali: a fresh set every visit. Race: the lap may tick in the lane
         p.wasInPit = p.inPit;
         const thr = (p.input.throttle || 0) >= RELEASE_THROTTLE;
         // Release presses are edge-triggered: throttle held while the game drives is neither perfect nor a jump
@@ -181,12 +183,17 @@ class Game {
         const st = p.stop;
         st.age += this.dt;
         if (st.phase === 'wait') { if (thr) go('out'); return; }
-        if (st.phase === 'lane' || st.phase === 'out') {
+        if (st.phase === 'lane' || st.phase === 'out' || st.phase === 'guide') {
             // Out of the lane = past its edge and runoff (a hot entry running wide along the barrier is still in it)
             const n = p.inPit ? null : Physics.nearestOnPath(p.x, p.y, t.pit.path, false);
             const away = n && n.dist > Drive.pitHalf(t.pit, n) + (Drive.PIT_RUNOFF_M + 1) * sc;
             st.off = away ? (st.off || 0) + this.dt : 0;
-            if (st.age > LANE_MAX_S || st.off >= OFF_LANE_S) return st.phase === 'lane' && !away ? go('out') : void (p.stop = null);
+            if (st.off >= OFF_LANE_S) return void (p.stop = null);
+        }
+        if (st.phase === 'lane' || st.phase === 'out') {
+            if (st.best === undefined || p.pitS >= st.best + STALL_M * sc) { st.best = p.pitS; st.bestAt = st.age; }
+            if (st.age - st.bestAt > STALL_S) return void (p.stop = null);
+            if (st.age > LANE_MAX_S) return st.phase === 'lane' ? go('out') : void (p.stop = null);
         }
         if (st.phase === 'lane') { if (p.box.s - p.pitS <= Drive.ASSIST_HANDOVER_M * sc) go('guide'); return; }
         if (st.phase === 'guide') {
@@ -206,8 +213,11 @@ class Game {
             // Unsafe release: a moving car in the lane just behind the box holds us (at most RELEASE_HOLD_S)
             const busy = Object.values(this.players).some((q) => q !== p && q.inPit && Math.hypot(q.vx, q.vy) > sc
                 && q.pitS < p.box.s && p.box.s - q.pitS < RELEASE_GAP_M * sc);
-            if (busy && st.unsafe < RELEASE_HOLD_S) { st.unsafe += this.dt; st.greenAt += this.dt; return; }
+            const held = busy && st.unsafe < RELEASE_HOLD_S;
+            if (held) { st.unsafe += this.dt; st.greenAt += this.dt; }
             const since = this.clock - st.greenAt - (st.jumped ? RELEASE_JUMP_S : 0);
+            st.t = Math.max(0, -since) + (held ? RELEASE_HOLD_S - st.unsafe : 0); // still held this long at least (HUD: HOLD)
+            if (held) return;
             if (since < 0) return;
             const pressed = press && !st.jumped;
             if (!pressed && since < RELEASE_AUTO_S) return;
@@ -219,7 +229,7 @@ class Game {
 
     // Stop time: parked on the mark to leaving the box; on the HUD (meta) and in chat
     recordStop(p, parkedAt, release) {
-        p.lastStop = { s: Math.round((this.clock - parkedAt) * 100) / 100, release };
+        p.lastStop = { s: Math.round((this.clock - parkedAt) * 100) / 100, release, n: p.stops }; // n: the HUD banner's key
         const how = release === 'perfect' ? ' (perfect release)' : release === 'jumped' ? ' (jumped the release)' : '';
         this.io.emit('chat_msg', { username: 'SYSTEM', color: '#22c55e', msg: `PIT: ${p.username} ${p.lastStop.s.toFixed(2)} s${how}` });
     }
@@ -232,7 +242,7 @@ class Game {
         p.tyreGrip = Tyres.gripOf(p.compound, 0);
         p.stops++;
         if (!p.compoundsUsed.includes(p.compound)) p.compoundsUsed = [...p.compoundsUsed, p.compound];
-        p.servicedLap = p.lap;
+        p.servicedLap = p.entryLap ?? p.lap; // the lap it came in on: a box past the start line is reached on the next
         p.servicedVisit = p.pitVisits;
     }
 
