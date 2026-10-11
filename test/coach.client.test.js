@@ -18,11 +18,11 @@ function strip(rot = 0) {
 const base = { tow: 0, inPit: false, ghostOverlap: false, near: [], angle: 0, drsAvailable: false, inDrsZone: false, drsOpen: false, helpLevel: 0, mode: 'race', lap: 1 };
 // One pass from s=200 to 560; returns the messages shown
 function run(coach, o = {}) {
-    const { brakeFrom = 400, vMinK = 1, lat = 0, wide = false, help = false, t0 = 0, entry, ...rest } = o, out = [];
+    const { tap = false, brakeFrom = 400, vMinK = 1, lat = 0, wide = false, help = false, t0 = 0, entry, ...rest } = o, out = [];
     for (let s = 200; s <= 560; s += 2) {
         const v = entry ?? (s < brakeFrom ? 80 : s < 500 ? 30 * vMinK : 80), braking = s >= brakeFrom && s < 450;
         const m = coach.update({ ...base, ...rest, t: t0 + (s - 200) / 100, i: s % 1000, x: s, y: s >= 440 && s <= 460 ? lat : 0, speed: v,
-            brake: !help && braking ? 1 : 0, assistBrake: help && braking, wide: wide && s > 470 && s < 480 });
+            brake: (!help && braking) || (tap && s >= 260 && s < 264) ? 1 : 0, assistBrake: help && braking, wide: wide && s > 470 && s < 480 });
         if (m) out.push(m);
     }
     return out;
@@ -69,7 +69,8 @@ test('rate: a second verdict within 4 s is dropped; a corner goes quiet after 3 
 
 test('no report: pit lane, recent steward event, first-lap corner 0, slow entry, reverse pass', () => {
     assert.strictEqual(run(fresh(), { inPit: true }).length, 0);
-    assert.strictEqual(run(fresh(), { stewardAt: 1 }).length, 0);
+    assert.strictEqual(run(fresh(), { stewardAt: -1.2 }).length, 0); // 4.5 s before the verdict: past the 4 s hold, inside the 5 s corner quiet
+    assert.strictEqual(run(fresh(), { ghostOverlap: true }).length, 0);
     assert.strictEqual(run(fresh(), { lap: 0 }).length, 0);
     assert.strictEqual(run(fresh(), { lap: 0, mode: 'quali' }).length, 1);
     assert.strictEqual(run(fresh(), { entry: 10 }).length, 0);
@@ -112,3 +113,42 @@ for (const id of Track.TRACK_IDS) {
         });
     });
 }
+
+test('a brake tap early in the window does not count as the brake point', () => {
+    assert.deepStrictEqual(texts(run(fresh(), { tap: true })), ['Perfect corner']);
+});
+
+test('intro survives the steward hold', () => {
+    const c = fresh({ intro: true });
+    assert.strictEqual(c.update({ ...base, t: 1, i: 100, x: 100, y: 0, speed: 80, brake: 0, assistBrake: false, wide: false, stewardAt: 0 }), null);
+    assert.strictEqual(c.update({ ...base, t: 5, i: 102, x: 102, y: 0, speed: 80, brake: 0, assistBrake: false, wide: false, stewardAt: 0 }).text, 'Coach on — C to turn off');
+});
+
+test('a corner across the lap end is rated', () => {
+    const { t, rl } = strip(580), c = C.createCoach(C.cornersOf(rl, t), t, rl), out = [];
+    for (let s = 800; s <= 1120; s += 2) {
+        const i = s % 1000, m = c.update({ ...base, t: (s - 800) / 100, i, x: i, y: 0, speed: rl.speed[i], brake: rl.phase[i] === 2 ? 1 : 0, assistBrake: false, wide: false });
+        if (m) out.push(m);
+    }
+    assert.deepStrictEqual(texts(out), ['Perfect corner']);
+});
+
+test('apex is judged sideways on a track with 10 m point spacing', () => {
+    const n = 100, path = [], cum = [0];
+    for (let i = 0; i < n; i++) path.push({ x: i * 10, y: 0 });
+    for (let i = 1; i <= n; i++) cum.push(i * 10);
+    const phase = path.map((_, i) => (i >= 40 && i < 45 ? 2 : i >= 45 && i < 50 ? 1 : 0));
+    const speed = path.map((_, i) => (i < 40 ? 80 : i < 45 ? 80 - (i - 40) * 10 : i < 50 ? 30 : 80));
+    const t = { path, cum, scale: 1 }, rl = { phase, speed, offset: path.map(() => 0) };
+    const go = (off) => {
+        const c = C.createCoach(C.cornersOf(rl, t), t, rl), out = [];
+        for (let s = 200; s <= 560; s += 2) {
+            const i = Math.floor(s / 10), v = s < 400 ? 80 : s < 500 ? 30 : 80;
+            const m = c.update({ ...base, t: (s - 200) / 100, i, x: s, y: s >= 440 && s <= 460 ? off : 0, speed: v, brake: s >= 400 && s < 450 ? 1 : 0, assistBrake: false, wide: false });
+            if (m) out.push(m);
+        }
+        return texts(out);
+    };
+    assert.deepStrictEqual(go(0), ['Perfect corner']);
+    assert.deepStrictEqual(go(3), ['Missed the apex — aim for the inside kerb']);
+});

@@ -2,7 +2,7 @@
 // Corners: a braking run (phase 2) plus its corner run (phase 1), merged when closer than MERGE_M (a chicane is one)
 export const GAP_S = 4, SHOW_S = 2.5;
 const TIP_MAX = 3, QUIET_AFTER = 3, STEWARD_HOLD_S = 4, CONTACT_QUIET_S = 5;
-const MERGE_M = 60, WINDOW_M = 150, WIDE_AFTER_M = 30, EARLY_M = 20, SLOW_K = 0.85, APEX_M = 2, ENTRY_K = 0.4, BRAKE_ON = 0.2;
+const MERGE_M = 60, WINDOW_M = 150, WIDE_AFTER_M = 30, EARLY_M = 20, SLOW_K = 0.85, APEX_M = 2, ENTRY_K = 0.4, BRAKE_ON = 0.2, HOLD_S = 0.15, BACK_M = 5, APEX_ZONE_M = 5;
 
 const lapM = (t) => t.cum[t.path.length] / t.scale;
 const heading = (P, i) => { const n = P.length, a = P[i], b = P[(i + 1) % n]; return Math.atan2(b.y - a.y, b.x - a.x); };
@@ -66,17 +66,24 @@ export function createCoach(corners, t, rl, opts = {}) {
         const before = rel(s, c.brakeS - WINDOW_M) < WINDOW_M, inCorner = rel(s, c.brakeS) <= rel(c.endS, c.brakeS);
         if (r.entry === undefined) { r.entry = f.speed; if (f.speed < ENTRY_K * c.vApex) r.skip = true; }
         if (f.ghostOverlap || f.t - (f.stewardAt ?? -Infinity) < CONTACT_QUIET_S) r.skip = true;
-        if (r.prevS !== undefined && rel(s, r.prevS) > rel(r.prevS, s)) r.skip = true; // moved backwards along the lap: spun or reversing
-        r.prevS = s;
+        const p = rel(s, c.brakeS - WINDOW_M); // progress through this corner's window
+        if (r.maxP !== undefined && r.maxP - p > BACK_M) r.skip = true; // moved backwards along the lap: spun or reversing
+        r.maxP = Math.max(r.maxP ?? p, p);
         const braking = f.brake > BRAKE_ON || f.assistBrake;
-        if (r.brakeAt === null && braking && (before || inCorner)) {
-            r.brakeAt = s;
-            r.early = before ? WINDOW_M - rel(s, c.brakeS - WINDOW_M) : 0;
-            r.help = !(f.brake > BRAKE_ON);
+        if (r.brakeAt === null) {
+            if (!braking || !(before || inCorner)) r.hold = null; // a tap does not count
+            else {
+                r.hold = r.hold || { s, t: f.t, early: before ? WINDOW_M - p : 0, help: !(f.brake > BRAKE_ON) };
+                if (f.t - r.hold.t >= HOLD_S) { r.brakeAt = r.hold.s; r.early = r.hold.early; r.help = r.hold.help; }
+            }
         }
         if (inCorner) r.vMin = Math.min(r.vMin, f.speed);
         const apexS = at(c.apexI), d = Math.min(rel(s, apexS), rel(apexS, s));
-        if (inCorner && d < r.apexD) { const q = linePoint(rl, t, c.apexI); r.apexD = d; r.apexMiss = Math.hypot(f.x - q.x, f.y - q.y) / t.scale; }
+        if (inCorner && d <= APEX_ZONE_M) { // sideways distance only: the nearest path point can be several metres along-track from the apex
+            const q = linePoint(rl, t, c.apexI), a = t.path[(c.apexI - 1 + t.path.length) % t.path.length], b = t.path[(c.apexI + 1) % t.path.length], len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+            const lat = Math.abs((f.x - q.x) * (-(b.y - a.y) / len) + (f.y - q.y) * ((b.x - a.x) / len)) / t.scale;
+            r.apexMiss = Math.min(r.apexMiss ?? Infinity, lat);
+        }
         if (f.wide && rel(s, c.brakeS) <= rel(c.endS + WIDE_AFTER_M, c.brakeS)) r.wide = true;
     }
 
@@ -99,14 +106,14 @@ export function createCoach(corners, t, rl, opts = {}) {
             if (st.lap !== null && f.lap > st.lap) { st.cleanLaps = st.lapClean ? st.cleanLaps + 1 : 0; st.lapClean = true; }
             st.lap = f.lap;
             if (f.t - (f.stewardAt ?? -Infinity) < CONTACT_QUIET_S) st.lapClean = false;
-            if (st.intro) { st.intro = false; return say(f, 'Coach on — C to turn off', 'tip'); }
+            if (st.intro) { const m = say(f, 'Coach on — C to turn off', 'tip'); if (m) st.intro = false; return m; }
             if (f.inPit) { st.cur = null; return null; }
             const s = at(f.i);
             let v = null;
             if (st.cur && !inWindow(corners[st.cur.k], s)) { v = verdict(); st.cur = null; }
             if (!st.cur) {
                 const k = corners.findIndex((c) => inWindow(c, s));
-                if (k >= 0) st.cur = { k, brakeAt: null, early: 0, help: false, vMin: Infinity, apexD: Infinity, apexMiss: 0, wide: false, skip: f.mode === 'race' && f.lap === 0 && k === 0 };
+                if (k >= 0) st.cur = { k, brakeAt: null, early: 0, help: false, vMin: Infinity, hold: null, apexMiss: null, wide: false, skip: f.mode === 'race' && f.lap === 0 && k === 0 };
             }
             if (st.cur) record(f, s);
             if (v) return say(f, v[0], v[1]);
