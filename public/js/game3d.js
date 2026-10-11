@@ -212,7 +212,7 @@ function watchingAfterFinish() {
     if (!me || !(me.finished || me.qualiOut) || isSpectator()) { finishedAt = null; ownView = false; return false; } // knocked out in qualifying: watch too
     finishedAt ??= performance.now();
     if (ownView || performance.now() - finishedAt < WATCH_DELAY_MS) return false;
-    spectateId = watchTarget(rankedCarIds(), clientState.me, (id) => !!gs[id]?.finished, spectateId);
+    spectateId = watchTarget(rankedCarIds(), clientState.me, (id) => !!(gs[id]?.finished || gs[id]?.qualiOut), spectateId); // skip parked cars: finished, or knocked out of qualifying
     return spectateId !== null; // nobody left running: stay on your own car
 }
 const watching = () => isSpectator() || watchingAfterFinish();

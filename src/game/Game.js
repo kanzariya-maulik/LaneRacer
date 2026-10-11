@@ -373,7 +373,7 @@ class Game {
 
     removePlayer(id) {
         const gone = this.players[id];
-        if (this.quali && gone && gone.segBest !== null && !gone.qualiOut) this.quali.left.push(this.qualiEntry(gone)); // keeps its time this segment
+        if (this.quali && gone && gone.segBest !== null && !gone.qualiOut && (this.quali.phase === 'running' || this.quali.phase === 'flag')) this.quali.left.push(this.qualiEntry(gone)); // keeps its time this segment (not across a break)
         delete this.players[id];
         this.refreshBests(); // their lap in progress no longer counts
     }
@@ -625,8 +625,9 @@ class Game {
     }
     // Crossing the pit entry line ends a timed lap; after the chequered flag it ends the run
     endRunAtPitEntry(p) {
+        const flying = p.lapStart !== null;
         p.lapStart = p.sectorStart = null;
-        if (this.quali.phase === 'flag') p.qualiDone = true;
+        if (this.quali.phase === 'flag' || (this.quali.format === 'oneshot' && flying)) p.qualiDone = true; // one-shot: an aborted flying lap is the shot
     }
     // A completed timed lap: segment best, positions, provisional pole
     qualiLap(p, time) {

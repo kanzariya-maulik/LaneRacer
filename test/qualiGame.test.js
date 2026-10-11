@@ -162,3 +162,24 @@ test('track evolution: grip builds to +2 % over the planned clock, holds in brea
     g.quali.driven = planned * 3; g.updateQuali();
     assert.strictEqual(g.quali.evo, 1.02);
 });
+
+test('a driver who leaves during the break does not carry a time into the next segment', () => {
+    const { events, io } = spy(), ids = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+    const g = new Game(io, ids.map(lp), monza, QS('full'), () => {}, 'quali');
+    ids.forEach((id, k) => timedLap(g, g.players[id], 80 + k));
+    at(g, g.quali.endsAt);                 // Q1 over: break
+    g.removePlayer('a');                   // fastest leaves during the break
+    at(g, g.quali.breakEndsAt);            // Q2 running
+    ['b', 'c', 'd', 'e', 'f'].forEach((id, k) => timedLap(g, g.players[id], 85 + k));
+    at(g, g.quali.endsAt);
+    const q2 = events.filter(([e]) => e === 'quali_segment')[1][1];
+    assert.ok(!q2.rows.some((r) => r.id === 'a'), 'gone before Q2: not in the Q2 ranking');
+});
+
+test('one-shot: aborting the flying lap into the pits ends the run (no second try)', () => {
+    const g = new Game(spy().io, ['a', 'b'].map(lp), monza, QS('oneshot'), () => {}, 'quali'), a = g.players.a;
+    Object.assign(a, { stop: null, inPit: false, lapStart: g.time, sectorStart: g.time });
+    g.endRunAtPitEntry(a);
+    assert.ok(a.qualiDone);
+    assert.ok(!g.canLeaveBox(a));
+});
