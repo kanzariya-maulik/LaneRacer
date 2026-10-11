@@ -74,33 +74,33 @@ function initShowroom() {
     renderer.setSize(width, height, false);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.18;
+    renderer.toneMappingExposure = 0.90;
 
     // PMREM studio environment reflections
     const pmrem = new THREE.PMREMGenerator(renderer);
     scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 
-    // 4. Studio Lighting
-    const ambLight = new THREE.AmbientLight(0xffffff, 1.2);
+    // 4. Studio Lighting (balanced studio rig with saturated paint & crisp specular glints)
+    const ambLight = new THREE.AmbientLight(0xffffff, 0.40);
     scene.add(ambLight);
 
     // Key Light (warm studio spotlight from front-three-quarter)
-    const keyLight = new THREE.DirectionalLight(0xfff6ec, 2.4);
+    const keyLight = new THREE.DirectionalLight(0xfff6ea, 1.25);
     keyLight.position.set(4.5, 6.0, 4.0);
     scene.add(keyLight);
 
     // Fill Light (cool sky tone from opposite side to accentuate contours)
-    const fillLight = new THREE.DirectionalLight(0x8cb6ff, 1.4);
+    const fillLight = new THREE.DirectionalLight(0x8cb6ff, 0.50);
     fillLight.position.set(-4.5, 3.5, -4.0);
     scene.add(fillLight);
 
-    // Strong Rim Light (rear high rim light to highlight rear wing and sidepods)
-    const rimLight = new THREE.DirectionalLight(0xffffff, 2.6);
+    // Rim Light (rear high rim light to highlight rear wing and sidepods)
+    const rimLight = new THREE.DirectionalLight(0xffffff, 0.85);
     rimLight.position.set(-4.0, 5.0, 3.5);
     scene.add(rimLight);
 
     // Floor bounce underglow
-    const bounceLight = new THREE.DirectionalLight(0xffffff, 0.4);
+    const bounceLight = new THREE.DirectionalLight(0xffffff, 0.15);
     bounceLight.position.set(0, -3.0, 0);
     scene.add(bounceLight);
 
@@ -261,6 +261,16 @@ window.setHero3DActive = (active) => {
         startLoop();
     } else {
         stopLoop();
+    }
+};
+
+window.setHeroResolution = (ratio) => {
+    if (renderer) {
+        renderer.setPixelRatio(ratio);
+        const container = document.getElementById('hero-viewport');
+        if (container) {
+            renderer.setSize(container.clientWidth || 400, container.clientHeight || 220, false);
+        }
     }
 };
 

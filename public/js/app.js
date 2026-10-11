@@ -87,6 +87,18 @@ remembered('car-models-select', 'lanrace.carModelMode', '4k', (val) => {
     window.rebuildHero3D?.();
 });
 
+// Render resolution mode ('4k', '1080p', 'balanced', 'performance', 'auto')
+remembered('resolution-select', 'lanrace.resolution', '1080p', (val) => {
+    window.setResolutionScale?.(val);
+    const heroRatio = val === '4k' ? 2.0 : (val === 'performance' ? 0.75 : Math.min(window.devicePixelRatio || 1, 1.5));
+    window.setHeroResolution?.(heroRatio);
+});
+
+// Tire smoke volume mode ('full', 'medium', 'low', 'off') - default 'medium'
+remembered('smoke-select', 'lanrace.smoke', 'medium', (val) => {
+    window.setSmokeLevel?.(val);
+});
+
 let lastJoin = null; // declared before the assist restore below reads it (join / reconnect state)
 
 // ── Assist sliders ──────────────────────────────────────────────────────────

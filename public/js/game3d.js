@@ -49,16 +49,67 @@ let level = resolveLevel(choice, store.get('lanrace.quality.auto'));
 let Q = LEVELS[level];
 window.lanraceQuality = { choice, level };
 
+// Resolution scale preference: '4k', '1080p', 'balanced', 'performance', 'auto'
+const resChoice = store.get('lanrace.resolution') || '1080p';
+function getResolutionScale(choice) {
+    const dpr = window.devicePixelRatio || 1;
+    switch (choice) {
+        case '4k':
+            // 4K Ultra HD: 2.0x supersampling (renders backbuffer at 3840x2160 on 1080p for razor-sharp edges)
+            return Math.max(2.0, dpr * 1.5);
+        case '1080p':
+            // Full HD 1080p: 1.0x native standard resolution
+            return 1.0;
+        case 'balanced':
+            // Balanced: 0.85x
+            return 0.85;
+        case 'performance':
+            // Performance 720p: 0.65x
+            return 0.65;
+        case 'auto':
+        default:
+            return null; // follows adaptive step
+    }
+}
+let userResScale = getResolutionScale(resChoice);
+
+window.setResolutionScale = (mode) => {
+    store.set('lanrace.resolution', mode);
+    userResScale = getResolutionScale(mode);
+    if (userResScale !== null) {
+        renderer.setPixelRatio(userResScale);
+    } else {
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, res.ratio));
+    }
+    resize();
+};
+
+// Tire smoke volume mode ('full', 'medium', 'low', 'off') - default 'medium' (+30% density & volume)
+const SMOKE_CONFIG = {
+    off:    { interval: 999.0, sizeMult: 0.0 },
+    low:    { interval: 0.090, sizeMult: 0.58 },
+    medium: { interval: 0.055, sizeMult: 0.78 },
+    full:   { interval: 0.030, sizeMult: 1.05 }
+};
+let smokeLevel = store.get('lanrace.smoke') || 'medium';
+window.setSmokeLevel = (lvl) => {
+    smokeLevel = lvl;
+    store.set('lanrace.smoke', lvl);
+};
+
 // Antialias is fixed for the page's lifetime: it follows the level chosen at load
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: Q.antialias, powerPreference: 'high-performance' });
 // Reading each shader's error log forces the GPU driver to finish compiling it there and then (a 2 s stall at a session's
 // start in profiles); errors are a developer concern, the console still shows WebGL's own
 renderer.debug.checkShaderErrors = false;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.18;
+renderer.toneMapping = THREE.NoToneMapping;
 let res = { ...ratioRange(level, window.devicePixelRatio), good: 0 };
 res.ratio = Math.max(1.0, res.start);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, res.ratio));
+if (userResScale !== null) {
+    renderer.setPixelRatio(userResScale);
+} else {
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, res.ratio));
+}
 
 const SKY = 0x9cc8ef;
 const scene = new THREE.Scene();
@@ -67,11 +118,8 @@ const camera = new THREE.PerspectiveCamera(56, 1, 1.5, Q.far);
 const hemi = new THREE.HemisphereLight(0xe8f4ff, 0x4f7a2a, 1.4);
 scene.add(hemi);
 
-// Dynamic stadium floodlight & rim illumination rig:
-// Simulates overhead stadium gantry floodlights and camera chase lights
-// guaranteeing vibrant specular glints, clearcoat lacquer gloss, and contour depth
-const stadiumFollowLight = new THREE.DirectionalLight(0xf4f8ff, 2.2);
-const stadiumFillLight = new THREE.DirectionalLight(0xa8cbff, 1.4);
+const stadiumFollowLight = new THREE.DirectionalLight(0xf4f8ff, 0);
+const stadiumFillLight = new THREE.DirectionalLight(0xa8cbff, 0);
 scene.add(stadiumFollowLight, stadiumFollowLight.target);
 scene.add(stadiumFillLight, stadiumFillLight.target);
 
@@ -108,29 +156,30 @@ function applySky(sky) {
     col.needsUpdate = true;
     scene.background = hor;
     if (scene.fog) scene.fog.color.copy(hor);
-    sun.color.set(sky.sun);
-    sun.intensity = sky.power;
-    hemi.intensity = sky.hemi;
     if (sky.stars !== undefined) {
-        hemi.color.setHex(0xe8f0ff); // bright crisp stadium floodlight ambient bounce
-        hemi.groundColor.setHex(0x687888); // bright asphalt/grass bounce
-        hemi.intensity = (sky.hemi || 1.15) * 1.35;
-        renderer.toneMappingExposure = 1.22;
-        stadiumFollowLight.color.setHex(0xf4f8ff);
-        stadiumFollowLight.intensity = 2.4;
-        stadiumFillLight.color.setHex(0xa8cbff);
-        stadiumFillLight.intensity = 1.5;
+        // Night mode: bright authentic circuit floodlighting, clearly illuminating track, cars, and surroundings
+        sun.color.set(sky.sun);
+        sun.intensity = 3.6; // powerful overhead floodlight array
+        hemi.intensity = 1.1; // balanced night ambient fill
+        hemi.color.setHex(0x283854); // nocturnal ambient sky
+        hemi.groundColor.setHex(0x18202c); // tarmac/ground bounce
+        stadiumFollowLight.intensity = 0;
+        stadiumFillLight.intensity = 0;
     } else {
+        // Daytime mode: crisp natural daylight matching original track theme palettes, zero artificial glow
+        sun.color.set(sky.sun);
+        sun.intensity = sky.power;
+        hemi.intensity = sky.hemi;
         hemi.color.copy(top).lerp(new THREE.Color(0xffffff), 0.5);
-        renderer.toneMappingExposure = 1.16;
-        stadiumFollowLight.color.setHex(0xffffff);
-        stadiumFollowLight.intensity = 1.2;
-        stadiumFillLight.color.setHex(0xd0e2ff);
-        stadiumFillLight.intensity = 0.8;
+        stadiumFollowLight.intensity = 0;
+        stadiumFillLight.intensity = 0;
     }
     stars.visible = !!sky.stars;
     stars.geometry.setDrawRange(0, Math.round(STARS * (sky.stars || 0)));
-    if (scene.fog) scene.fog.near = sky.stars !== undefined ? 1500 : 3000; // night: the land fades into the dark sooner
+    if (scene.fog) {
+        scene.fog.near = sky.stars !== undefined ? 1500 : 3000;
+        scene.fog.far = sky.stars !== undefined ? 5000 : Q.fog;
+    }
     const el = (sky.elevation * Math.PI) / 180, az = (sky.azimuth * Math.PI) / 180, r = 1900;
     Object.assign(SUN_OFF, { x: r * Math.cos(el) * Math.sin(az), y: r * Math.sin(el), z: r * Math.cos(el) * Math.cos(az) });
 }
@@ -162,7 +211,11 @@ function applyLevel(l) {
     camera.updateProjectionMatrix();
     const range = ratioRange(l, window.devicePixelRatio);
     res = { ...range, good: 0, ratio: Math.max(range.min, Math.min(res.ratio, range.max)) };
-    renderer.setPixelRatio(res.ratio);
+    if (userResScale !== null) {
+        renderer.setPixelRatio(userResScale);
+    } else {
+        renderer.setPixelRatio(res.ratio);
+    }
 }
 applyLevel(level);
 
@@ -1175,18 +1228,40 @@ let smokeTexture = null;
 function getSmokeTexture() {
     if (!smokeTexture) {
         const c = document.createElement('canvas');
-        c.width = 128; c.height = 128;
+        c.width = 256; c.height = 256;
         const g = c.getContext('2d');
-        const grad = g.createRadialGradient(64, 64, 4, 64, 64, 64);
-        grad.addColorStop(0, 'rgba(235, 238, 245, 0.48)');
-        grad.addColorStop(0.25, 'rgba(225, 230, 240, 0.36)');
-        grad.addColorStop(0.55, 'rgba(215, 222, 235, 0.18)');
-        grad.addColorStop(0.85, 'rgba(205, 215, 230, 0.05)');
-        grad.addColorStop(1, 'rgba(200, 210, 225, 0)');
-        g.fillStyle = grad;
-        g.beginPath();
-        g.arc(64, 64, 64, 0, Math.PI * 2);
-        g.fill();
+
+        // Organic multi-lobe volumetric cloud generator:
+        const drawLobe = (cx, cy, r, maxAlpha, rRatio = 0.15) => {
+            const rad = g.createRadialGradient(cx, cy, r * rRatio, cx, cy, r);
+            rad.addColorStop(0, `rgba(240, 244, 252, ${maxAlpha})`);
+            rad.addColorStop(0.35, `rgba(230, 236, 246, ${maxAlpha * 0.72})`);
+            rad.addColorStop(0.68, `rgba(215, 224, 238, ${maxAlpha * 0.30})`);
+            rad.addColorStop(0.88, `rgba(205, 215, 230, ${maxAlpha * 0.08})`);
+            rad.addColorStop(1, 'rgba(200, 210, 225, 0)');
+            g.fillStyle = rad;
+            g.beginPath();
+            g.arc(cx, cy, r, 0, Math.PI * 2);
+            g.fill();
+        };
+
+        // Central dense core
+        drawLobe(128, 128, 92, 0.52, 0.1);
+
+        // 7 asymmetric surrounding lobes creating a puffy, billowing cloud shape
+        const lobes = [
+            { x: 104, y: 108, r: 68, a: 0.44 },
+            { x: 152, y: 112, r: 64, a: 0.42 },
+            { x: 128, y: 88,  r: 58, a: 0.40 },
+            { x: 92,  y: 144, r: 66, a: 0.42 },
+            { x: 160, y: 148, r: 68, a: 0.40 },
+            { x: 124, y: 164, r: 62, a: 0.38 },
+            { x: 146, y: 136, r: 72, a: 0.45 },
+        ];
+        for (const lb of lobes) {
+            drawLobe(lb.x, lb.y, lb.r, lb.a);
+        }
+
         smokeTexture = new THREE.CanvasTexture(c);
         smokeTexture.colorSpace = THREE.SRGBColorSpace;
     }
@@ -1201,14 +1276,15 @@ const smokeDummy = new THREE.Object3D();
 function initSmokeSystem() {
     smokeParticles = Array.from({ length: SMOKE_MAX }, () => ({
         active: false, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0,
-        size: 0.5, life: 0, maxLife: 0.7
+        size: 0.5, life: 0, maxLife: 0.7,
+        rot: 0, vRot: 0
     }));
     const geo = new THREE.PlaneGeometry(1, 1);
     const mat = new THREE.MeshBasicMaterial({
         map: getSmokeTexture(),
         transparent: true,
         depthWrite: false,
-        opacity: 0.60
+        opacity: 0.45
     });
     smokeMesh = new THREE.InstancedMesh(geo, mat, SMOKE_MAX);
     smokeMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -1226,21 +1302,24 @@ function initSmokeSystem() {
 }
 
 function emitSmoke(x, y, z, baseAngle, speed, sizeMultiplier = 1) {
-    if (!smokeMesh) return;
+    if (!smokeMesh || smokeLevel === 'off') return;
+    const cfg = SMOKE_CONFIG[smokeLevel] || SMOKE_CONFIG.medium;
     for (const p of smokeParticles) {
         if (!p.active) {
             p.active = true;
-            p.x = x + (Math.random() - 0.5) * 0.25 * scale;
-            p.y = y + 0.05 * scale;
-            p.z = z + (Math.random() - 0.5) * 0.25 * scale;
-            const backSpd = Math.max(1.2, speed * 0.30);
+            p.x = x + (Math.random() - 0.5) * 0.16 * scale;
+            p.y = y + 0.03 * scale;
+            p.z = z + (Math.random() - 0.5) * 0.16 * scale;
+            const backSpd = Math.max(1.0, speed * 0.22);
             // In Three.js coords: car heading forward is (cosA, -sinA), backward is (-cosA, +sinA)
-            p.vx = -Math.cos(baseAngle) * backSpd + (Math.random() - 0.5) * 1.5;
-            p.vy = 0.25 + Math.random() * 0.45;
-            p.vz = Math.sin(baseAngle) * backSpd + (Math.random() - 0.5) * 1.5;
-            p.size = (0.70 + Math.random() * 0.40) * scale * sizeMultiplier;
+            p.vx = -Math.cos(baseAngle) * backSpd + (Math.random() - 0.5) * 0.9;
+            p.vy = 0.14 + Math.random() * 0.22;
+            p.vz = Math.sin(baseAngle) * backSpd + (Math.random() - 0.5) * 0.9;
+            p.size = (0.42 + Math.random() * 0.24) * scale * sizeMultiplier * cfg.sizeMult;
             p.life = 0;
-            p.maxLife = 0.65 + Math.random() * 0.40;
+            p.maxLife = 0.45 + Math.random() * 0.22;
+            p.rot = Math.random() * Math.PI * 2;
+            p.vRot = (Math.random() - 0.5) * 1.4;
             break;
         }
     }
@@ -1273,13 +1352,17 @@ function updateSmokeParticles(dt) {
         p.z += p.vz * dt;
         p.vx *= 0.94;
         p.vz *= 0.94;
-        const progress = p.life / p.maxLife;
-        // Billow and expand, then smoothly dissipate without popping
-        const fade = progress < 0.65 ? 1.0 : (1.0 - (progress - 0.65) / 0.35);
-        const currentSize = p.size * (1.0 + progress * 3.2) * Math.max(0, fade);
+        p.rot += p.vRot * dt;
+        p.vRot *= 0.98;
 
-        smokeDummy.position.set(p.x, p.y + currentSize * 0.46, p.z);
+        const progress = p.life / p.maxLife;
+        // Natural billow expansion and smooth dissipation without popping
+        const fade = progress < 0.65 ? 1.0 : Math.max(0, 1.0 - (progress - 0.65) / 0.35);
+        const currentSize = p.size * (1.0 + progress * 1.9) * Math.sin(fade * Math.PI * 0.5);
+
+        smokeDummy.position.set(p.x, p.y + currentSize * 0.35, p.z);
         smokeDummy.quaternion.copy(camera.quaternion);
+        smokeDummy.rotateZ(p.rot);
         smokeDummy.scale.set(currentSize, currentSize, 1);
         smokeDummy.updateMatrix();
         smokeMesh.setMatrixAt(i, smokeDummy.matrix);
@@ -1793,8 +1876,8 @@ function buildScenery(t, scen, theme) {
             });
         }
     }
-    const bark = mat(0x4a2e16, { roughness: 0.95 });
-    const leaves = mat(0xffffff, { map: foliageTexture(), roughness: 0.65, metalness: 0.02 });
+    const bark = mat(night ? 0x1c130b : 0x4a2e16, { roughness: 0.95 });
+    const leaves = mat(night ? 0x2a3e26 : 0xffffff, { roughness: 0.98, metalness: 0.0 });
 
     // Compound organic 8-cluster broadleaf canopy (merged ruffled lobes)
     const broadLobe = (r, ox, oy, oz) => {
@@ -1890,7 +1973,7 @@ function buildScenery(t, scen, theme) {
     const winTex = town ? townWindowsTexture() : commercialWindowsTexture();
     const litTex = night ? (town ? litTownTexture(nightOf(t.id).windows) : litCommercialTexture(nightOf(t.id).windows)) : null;
     const lit = litTex ? { emissive: 0xffffff, emissiveMap: litTex } : {};
-    const bldMat = mat(0xffffff, { map: winTex, roughness: town ? 0.82 : 0.48, metalness: town ? 0.05 : 0.32, ...lit });
+    const bldMat = mat(night ? 0x242830 : 0xe4e8ec, { map: winTex, roughness: town ? 0.82 : 0.48, metalness: town ? 0.05 : 0.32, ...lit });
     add(new THREE.BoxGeometry(1, 1, 1), bldMat, blocks);
 
     // Rooftop architectural structures
@@ -2040,7 +2123,7 @@ function buildScenery(t, scen, theme) {
         for (let k = 0; k < 28; k++) {
             // the whole base 600 m+ past the track's extent, so no slope reaches it; within the fog's reach so they show
             const a = (k / 28) * Math.PI * 2, hgt = (220 + ((k * 53) % 9) * 45) * scale, r = R - 5000 + 600 * scale + hgt * 1.2 + ((k * 37) % 10) * 60 * scale;
-            peaks.push({ x: cx + Math.cos(a) * r, y: low + hgt / 2, z: cz + Math.sin(a) * r, sx: hgt * 1.2, sy: hgt, sz: hgt * 1.2, angle: a, color: (night ? ['#141b26', '#18202b', '#1c2430'] : ['#6f8a6a', '#7a8f7c', '#8796a0'])[k % 3] }); // night: silhouettes
+            peaks.push({ x: cx + Math.cos(a) * r, y: low + hgt / 2, z: cz + Math.sin(a) * r, sx: hgt * 1.2, sy: hgt, sz: hgt * 1.2, angle: a, color: (night ? ['#0e141e', '#121824', '#161c28'] : ['#5c7258', '#687b6a', '#74828c'])[k % 3] }); // night: silhouettes
         }
         add(new THREE.ConeGeometry(1, 1, seg(6, 16)), mat(0xffffff), peaks);
     }
@@ -2173,7 +2256,7 @@ function buildBridge(b, t) {
     solidMesh(berm, 0x5f9e35);
 }
 
-const LINE_RGB = { green: new THREE.Color('#22c55e'), yellow: new THREE.Color('#facc15'), red: new THREE.Color('#ef4444') };
+const LINE_RGB = { green: new THREE.Color('#16a34a'), yellow: new THREE.Color('#eab308'), red: new THREE.Color('#dc2626') };
 
 function buildRacingLine(t) {
     line = null;
@@ -2202,7 +2285,7 @@ function buildRacingLine(t) {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(pos.slice(), 3));
     g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 36), 3));
-    const mesh = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.75, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true,
+    const mesh = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: night ? 0.45 : 0.60, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true,
         polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -6 }));
     mesh.renderOrder = 1;        // over the tyre marks
     mesh.frustumCulled = false;  // hidden segments collapse to the origin, so the bounds are meaningless
@@ -2251,7 +2334,7 @@ function buildWorld(t) {
     const theme = themeOf(t.id), land = LANDS[theme.land]; // the place: sky, light, land, trees, city (themes.js)
     night = clientState.settings.timeOfDay === 'night';
     applySky(night ? nightOf(t.id) : SKIES[theme.sky]);
-    hemi.groundColor.set(land.bounce);
+    if (!night) hemi.groundColor.set(land.bounce);
     elev = t; // road heights for everything built below, the cars and the camera
     scale = t.scale;
     // Quali → race on the same track: keep the world (rebuilding recompiles every shader and stalls the lights);
@@ -2351,10 +2434,9 @@ function buildWorld(t) {
     // Night: the land beyond the floodlit verges falls away into the dark
     const ground = new THREE.Mesh(groundGeo(GROUND_COARSE, coarse), new THREE.MeshStandardMaterial({
         map: grassTexture(gw, gh, land),
-        normalMap: grassNormalMap(),
-        roughness: 0.88,
-        metalness: 0.02,
-        color: night ? 0x98a8b8 : 0xffffff
+        roughness: 1.0,
+        metalness: 0.0,
+        color: night ? 0x364050 : 0xffffff
     }));
     ground.receiveShadow = true;
     world.add(ground);
@@ -2407,28 +2489,24 @@ function buildWorld(t) {
             old.dispose();
             buildGroundWalls(H, fine);
         });
-        for (const dir of [1, -1]) world.add(strip(rp, signed(dir, roadTo[dir]), rreach[dir], 0.3, (k) => !clipped(dir, k) && !clipped(dir, (k + 1) % m), solid('#ffffff'), {
-            map: vergeTexture(land),
-            normalMap: grassNormalMap(),
-            repeatM: 5.0,
-            roughness: 0.85,
-            metalness: 0.02
+        for (const dir of [1, -1]) world.add(strip(rp, signed(dir, roadTo[dir]), rreach[dir], 0.3, (k) => !clipped(dir, k) && !clipped(dir, (k + 1) % m), solid(night ? '#2b382c' : land.verge), {
+            roughness: 0.98,
+            metalness: 0.0
         }));
     }
-    world.add(strip(rp, signed(-1, roadTo[-1]), roadTo[1], 0.6, all, solid(night ? '#687280' : '#4a505a'), {
+    world.add(strip(rp, signed(-1, roadTo[-1]), roadTo[1], 0.6, all, solid(night ? '#2c333e' : '#4a505a'), {
         map: asphaltTexture(),
-        normalMap: asphaltNormalMap(),
         repeatM: 8,
-        roughness: night ? 0.62 : 0.82,
-        metalness: night ? 0.12 : 0.06
+        roughness: 0.96,
+        metalness: 0.0
     }));
     // White lines on the track limits (t.edgeR / edgeL: judged there); beyond them the road carries on as asphalt run-off
     // to the drawn edge (Track.js: the road 2x the real width, the lines 4/3)
     const R = t.edgeR || path.map(() => half - 0.5 * scale), L = t.edgeL || R, lineW = 0.3 * scale; // per point (+ = driver's right)
     const rR = up(R), rL = up(L);
     const add = (e, d) => e.map((v) => v + d), neg = (e, d = 0) => e.map((v) => -(v + d));
-    world.add(strip(rp, add(rR, -lineW), rR, 0.9, all, solid('#f8fafc'), { layer: 2, roughness: 0.45, metalness: 0.02 }));
-    world.add(strip(rp, neg(rL), neg(rL, -lineW), 0.9, all, solid('#f8fafc'), { layer: 2, roughness: 0.45, metalness: 0.02 }));
+    world.add(strip(rp, add(rR, -lineW), rR, 0.9, all, solid('#e8edf2'), { layer: 2, roughness: 0.8, metalness: 0.0 }));
+    world.add(strip(rp, neg(rL), neg(rL, -lineW), 0.9, all, solid('#e8edf2'), { layer: 2, roughness: 0.8, metalness: 0.0 }));
 
     // Kerbs on corners (visual only), widened by 2 points so they don't flicker on and off; stripes ~2.5 m (alternate per
     // smooth-curve step, as real kerbs)
@@ -2436,8 +2514,8 @@ function buildWorld(t) {
     const curvy = turny.map((_, i) => [-2, -1, 0, 1, 2].some((d) => turny[(i + d + n) % n])), rc = up(curvy);
     // 1.5 m wide, ending at the road's edge where the white line runs closer to it than that (never out on the grass)
     const kerbW = 1.5 * scale, kR = rR.map((v, k) => Math.min(v + kerbW, roadTo[1][k])), kL = rL.map((v, k) => Math.min(v + kerbW, roadTo[-1][k]));
-    world.add(strip(rp, rR, kR, 0.7, (i) => rc[i], alternate('#d62828', '#f8fafc'), { layer: 1, roughness: 0.58, metalness: 0.04 }));
-    world.add(strip(rp, neg(kL), neg(rL), 0.7, (i) => rc[i], alternate('#d62828', '#f8fafc'), { layer: 1, roughness: 0.58, metalness: 0.04 }));
+    world.add(strip(rp, rR, kR, 0.7, (i) => rc[i], alternate(night ? '#b51c1c' : '#c82424', night ? '#c8d4e2' : '#eaf0f8'), { layer: 1, roughness: 0.85, metalness: 0.0 }));
+    world.add(strip(rp, neg(kL), neg(rL), 0.7, (i) => rc[i], alternate(night ? '#b51c1c' : '#c82424', night ? '#c8d4e2' : '#eaf0f8'), { layer: 1, roughness: 0.85, metalness: 0.0 }));
 
     const scen = placeScenery(t, Q.scenery, seedOf(t.id));
     const onSlow = (side) => {
@@ -2452,10 +2530,9 @@ function buildWorld(t) {
         // from the end of the asphalt run-off
         world.add(strip(rp, signed(dir, roadTo[dir]), edge, 0.4, (i) => rslow[dir][i] && !clipped(dir, i) && !clipped(dir, (i + 1) % m), solid('#ffffff'), {
             map: gravelTexture(),
-            normalMap: gravelNormalMap(),
             repeatM: 5.5,
-            roughness: 0.94,
-            metalness: 0.02
+            roughness: 0.98,
+            metalness: 0.0
         }));
     }
     // Rubbered-in racing line through slow corners: inside at the apex, drifting out on exit (Medium/High)
@@ -2623,7 +2700,6 @@ let envTex = null;
 function envTexture() {
     if (!envTex) {
         envTex = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
-        scene.environment = envTex;
     }
     return envTex;
 }
@@ -2826,10 +2902,12 @@ function updateCars(dt) {
         }
 
         // Tire smoke particle system: Launch burnout, hard acceleration, turning slip, brake lockup
-        car.smokeTimer = (car.smokeTimer || 0) + dtSafe;
-        if (car.smokeTimer >= 0.022) {
-            car.smokeTimer = 0;
-            const isMe = id === clientState.me;
+        if (smokeLevel !== 'off') {
+            const smokeCfg = SMOKE_CONFIG[smokeLevel] || SMOKE_CONFIG.medium;
+            car.smokeTimer = (car.smokeTimer || 0) + dtSafe;
+            if (car.smokeTimer >= smokeCfg.interval) {
+                car.smokeTimer = 0;
+                const isMe = id === clientState.me;
             const myThrottle = isMe ? (input?.throttle || 0) : 0;
             const myBrake = isMe ? (input?.brake || 0) : 0;
             const mySteer = isMe ? Math.abs(input?.steer || 0) : Math.abs(s.steer || 0);
@@ -2857,27 +2935,28 @@ function updateCars(dt) {
                     // Rear tires burnout
                     const bx = r.position.x - fx * axleDist;
                     const bz = r.position.z - fz * axleDist;
-                    emitSmoke(bx - rx * halfTrack, groundY, bz - rz * halfTrack, s.angle, curSpeedMs, 1.3);
-                    emitSmoke(bx + rx * halfTrack, groundY, bz + rz * halfTrack, s.angle, curSpeedMs, 1.3);
+                    emitSmoke(bx - rx * halfTrack, groundY, bz - rz * halfTrack, s.angle, curSpeedMs, 1.0);
+                    emitSmoke(bx + rx * halfTrack, groundY, bz + rz * halfTrack, s.angle, curSpeedMs, 1.0);
                 } else if (isTurningSlip) {
                     // Turning slip: smoke from rear tires and outside front tire
                     const bx = r.position.x - fx * axleDist;
                     const bz = r.position.z - fz * axleDist;
-                    emitSmoke(bx - rx * halfTrack, groundY, bz - rz * halfTrack, s.angle, curSpeedMs, 1.05);
-                    emitSmoke(bx + rx * halfTrack, groundY, bz + rz * halfTrack, s.angle, curSpeedMs, 1.05);
+                    emitSmoke(bx - rx * halfTrack, groundY, bz - rz * halfTrack, s.angle, curSpeedMs, 0.75);
+                    emitSmoke(bx + rx * halfTrack, groundY, bz + rz * halfTrack, s.angle, curSpeedMs, 0.75);
                     const ax = r.position.x + fx * axleDist;
                     const az = r.position.z + fz * axleDist;
                     const outSide = (s.steer || 0) >= 0 ? 1 : -1;
-                    emitSmoke(ax + outSide * rx * halfTrack, groundY, az + outSide * rz * halfTrack, s.angle, curSpeedMs, 0.95);
+                    emitSmoke(ax + outSide * rx * halfTrack, groundY, az + outSide * rz * halfTrack, s.angle, curSpeedMs, 0.65);
                 } else if (isBrakeLockup) {
                     // Front tires lockup
                     const ax = r.position.x + fx * axleDist;
                     const az = r.position.z + fz * axleDist;
-                    emitSmoke(ax - rx * halfTrack, groundY, az - rz * halfTrack, s.angle, curSpeedMs, 1.15);
-                    emitSmoke(ax + rx * halfTrack, groundY, az + rz * halfTrack, s.angle, curSpeedMs, 1.15);
+                    emitSmoke(ax - rx * halfTrack, groundY, az - rz * halfTrack, s.angle, curSpeedMs, 0.80);
+                    emitSmoke(ax + rx * halfTrack, groundY, az + rz * halfTrack, s.angle, curSpeedMs, 0.80);
                 }
             }
         }
+    }
         const far = camera.position.distanceTo(r.position) > 300 * scale; // wheels unreadable that far: 4 fewer draws per car
         for (const w of car.wheels) w.userData.show = !far;
         for (const w of car.wheels) w.rotation.z -= (s.speed / (WHEEL_RADIUS_M * scale)) * dt;
@@ -3927,7 +4006,9 @@ function frame(now) {
         const fps = (fpsFrames * 1000) / (now - fpsSince);
         window.lanraceFps = fps; // network log telemetry (socket.js)
         const next = adaptStep(res, fps);
-        if (next.ratio !== res.ratio) renderer.setPixelRatio(next.ratio);
+        if (userResScale === null) {
+            if (next.ratio !== res.ratio) renderer.setPixelRatio(next.ratio);
+        }
         res = next;
         fpsHist.push(fps);
         if (fpsHist.length > 6) fpsHist.shift();
@@ -3935,7 +4016,8 @@ function frame(now) {
             capWarned = true;
             window.showBanner?.('30 FPS CAP — plug in the charger or turn off Chrome Energy Saver');
         }
-        if (stats) stats.textContent = `${fps.toFixed(0)} fps · ${renderer.info.render.calls} calls · ${res.ratio.toFixed(2)}× · ${level}${choice === 'auto' ? ' (auto)' : ''}`;
+        const curRatio = userResScale !== null ? userResScale : res.ratio;
+        if (stats) stats.textContent = `${fps.toFixed(0)} fps · ${renderer.info.render.calls} calls · ${curRatio.toFixed(2)}× · ${level}${userResScale === null ? ' (auto)' : ''}`;
         fpsFrames = 0;
         fpsSince = now;
     }
