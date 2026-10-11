@@ -30,7 +30,7 @@ test('ghost start: ghosts never collide; solid after sector 1 when clear', () =>
     a.checkpoint = sector1End(g); b.checkpoint = sector1End(g);
     g.updateGhosts(['a', 'b']);
     assert.ok(a.ghost && b.ghost, 'overlapping cars stay ghost until clear');
-    b.x += 20 * monza.scale;
+    a.vx = 0; b.x += 20 * monza.scale; // parked 20 m apart: clear
     g.updateGhosts(['a', 'b']);
     assert.ok(!a.ghost && !b.ghost, 'clear and past sector 1: solid');
 });
@@ -190,4 +190,39 @@ test('race: a wide or cut lap gives back its purple sectors at once', () => {
     strike(g, a, pastLine(t, i, 1)); // wide on a straight
     assert.strictEqual(a.lapValid, false);
     assert.strictEqual(g.bestSectorIds[0], null, 'the sector drops at once');
+});
+
+// Two ghosts at the 25 s cap: b `gap` m ahead of a (centre to centre) along a's heading, speeds in m/s
+function capPair(gap, va, vb) {
+    const g = new Game(io, [lp('a'), lp('b')], monza, RACE, () => {}), sc = monza.scale;
+    g.release();
+    const a = g.players.a, b = g.players.b;
+    b.x = a.x + Math.cos(a.angle) * gap * sc; b.y = a.y + Math.sin(a.angle) * gap * sc; b.angle = a.angle;
+    a.vx = Math.cos(a.angle) * va * sc; a.vy = Math.sin(a.angle) * va * sc;
+    b.vx = Math.cos(a.angle) * vb * sc; b.vy = Math.sin(a.angle) * vb * sc;
+    g.time = 25; g.updateGhosts(['a', 'b']);
+    return g;
+}
+
+test('ghost start: no turning solid in front of a fast car; a train at the same speed does', () => {
+    const g = capPair(10, 70, 0);
+    assert.ok(g.players.a.ghost && g.players.b.ghost, 'closing at 70 m/s: both stay ghost');
+    const t = capPair(8, 70, 70);
+    assert.ok(!t.players.a.ghost && !t.players.b.ghost, 'same speed: solid');
+});
+
+test('racing incident exempts both cars from track limits for INCIDENT_JUDGE_S', () => {
+    const t = monza, i = tightest(t), ins = insideSign(t, i), { events, io: sio } = spy();
+    const g = new Game(sio, [lp('a'), lp('b')], t, RACE, () => {});
+    g.release();
+    g.players.a.lap = g.players.b.lap = 1;
+    contact(g, 6, 5); // alike: racing incident
+    events.length = 0;
+    g.time += 1.9;
+    strike(g, g.players.a, pastLine(t, i, ins));
+    assert.strictEqual(g.players.a.limits, 0);
+    assert.strictEqual(events.length, 0);
+    g.time += 0.2;
+    strike(g, g.players.a, pastLine(t, i, ins));
+    assert.strictEqual(g.players.a.limits, 1);
 });

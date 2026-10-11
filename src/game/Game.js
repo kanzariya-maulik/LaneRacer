@@ -606,9 +606,16 @@ class Game {
             const done = p.lap > 0 || p.checkpoint >= this.track.sectorCps[1] || (!this.frozen && this.time >= GHOST_MAX_S);
             if (!done) continue;
             const sc = this.track.scale;
-            if (ids.some((o) => o !== id && !this.players[o].finished && Physics.carOverlap(p, this.players[o], sc))) continue;
+            if (ids.some((o) => o !== id && !this.players[o].finished && this.tooClose(p, this.players[o], sc))) continue;
             p.ghost = false;
         }
+    }
+
+    // Closer than two car lengths + 1 m + one second of closing speed (m/s along the line between them, 0 if separating)
+    tooClose(a, b, sc) {
+        const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy);
+        const closing = d > 0 ? Math.max(0, ((a.vx - b.vx) * dx + (a.vy - b.vy) * dy) / d / sc) : 0;
+        return d < (2 * Physics.CAR_HALF_LENGTH_M + 1 + closing) * sc || !!Physics.carOverlap(a, b, sc);
     }
 
     // First contact between two cars: each one's own speed into the other (m/s, n points from b to a) says who drove
@@ -623,6 +630,7 @@ class Game {
         const blame = (x, y) => x > 0 && x >= k * Math.max(y, 0);
         const [striker, victim] = blame(aIn, bIn) ? [a, b] : blame(bIn, aIn) ? [b, a] : [];
         if (!striker) {
+            a.contactAt = b.contactAt = this.time; // knocked about: no track-limits strike for INCIDENT_JUDGE_S
             if (this.settings.contactPenalties !== false) {
                 this.io.emit('chat_msg', { username: 'SYSTEM', color: '#f59e0b', msg: `${a.username} / ${b.username}: racing incident, no action` });
                 this.io.emit('track_limits', { id: a.id, kind: 'incident', with: b.username });
@@ -683,6 +691,7 @@ class Game {
             this.refreshBests(); // its sectors stop counting: purple goes back to the previous holder
             return;
         }
+        if (this.time - (p.contactAt ?? -Infinity) < INCIDENT_JUDGE_S) return; // racing incident just now
         if (this.incidents.some((i) => i.victim === p.id)) return; // pushed off: the driver who hit them answers for it
         // Inside of a bend = a cut (gains time): a strike. Outside, or on a straight = wide (loses time): the lap just
         // doesn't count for the fastest lap

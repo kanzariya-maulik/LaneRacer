@@ -35,7 +35,7 @@ Races stay competitive and F1-like, but the start is not a lottery, penalties fe
 - Each tick, a ghost car becomes solid when `p.lap ≥ 1`, it has passed the end of sector 1 on lap 1 (the `track.sectorCps[1]` checkpoint) **or** `time ≥ GHOST_MAX_S` (25 s after lights out), **and** `Physics.carOverlap` with every other car is false. A car that is still overlapping stays a ghost until clear.
 - Car-car contact (`Game.update` pair loop): skip the pair when either car is a ghost.
 - Packet ghost bit: `quali || collisions === false || p.ghost`.
-- Lenient window: from lights out until the car completes lap 1 (`p.lap ≥ 2` or finished), `noteContact` uses `CONTACT_BLAME_LAP1 = 3` instead of 2. Victim/off/+10 rules unchanged.
+- Lenient window: from lights out until the car completes lap 1 (`p.lap ≥ 1` or finished), `noteContact` uses `CONTACT_BLAME_LAP1 = 3` instead of 2. Victim/off/+10 rules unchanged. `p.lap` counts completed laps, so the first lap is `p.lap === 0`.
 - Jump start, DNF and finish rules unchanged. Collisions off: no change (everyone already ghost).
 
 ## 2. Track limits: cut vs wide (server)

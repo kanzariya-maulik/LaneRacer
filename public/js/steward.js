@@ -6,7 +6,7 @@ export function stewardText(e) {
             ? { head: `+${e.add} s · You pushed ${e.victim} off`, tip: 'Leave a car\'s width on corner exits', tone: 'bad' }
             : { head: `+${e.add} s · You hit ${e.victim}`, tip: 'Brake earlier when following — leave a car\'s length', tone: 'bad' };
         case 'hit': return { head: `Hit by ${e.by} · +${e.add} s to ${e.by}`, tip: 'Not your fault — no penalty for you', tone: 'good' };
-        case 'incident': return { head: 'Racing incident · no penalty', tip: `Contact with ${e.with} — both moved`, tone: 'info' };
+        case 'incident': return { head: 'Racing incident · no penalty', tip: `Contact with ${e.with} — not clear enough to blame either driver`, tone: 'info' };
         case 'warning': return { head: `Corner cut · warning ${e.count}/${e.of}`, tip: LINE_TIP, tone: 'warn' };
         case 'flag': return { head: 'Black & white flag', tip: 'Next corner cut = +5 s', tone: 'warn' };
         case 'penalty': return { head: `+${e.add} s · Corner cut`, tip: LINE_TIP, tone: 'bad' };
