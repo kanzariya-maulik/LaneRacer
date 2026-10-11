@@ -102,6 +102,21 @@ function applyAssistString(str) {
 helpBrake.addEventListener('click', (e) => { const v = e.target.dataset?.v; if (v !== undefined) applyAssistString(`${helpLevels.steer},${v}`); });
 helpSteer.addEventListener('click', (e) => { const v = e.target.dataset?.v; if (v !== undefined) applyAssistString(`${v},${helpLevels.brake}`); });
 
+const coachSeg = document.getElementById('coach-seg');
+function renderCoach() {
+    let v = 'on';
+    try { v = localStorage.getItem('lanrace.coach') === 'off' ? 'off' : 'on'; } catch (e) { /* blocked */ }
+    coachSeg.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.v === v));
+    return v;
+}
+coachSeg.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    try { localStorage.setItem('lanrace.coach', b.dataset.v); } catch (err) { /* blocked */ }
+    window.onCoachChange?.(renderCoach());
+});
+renderCoach();
+
 // Global entry point used by game3d.js (Q key / gamepad) and the auto-restore below
 window.setAssist = (v) => applyAssistString(v);
 

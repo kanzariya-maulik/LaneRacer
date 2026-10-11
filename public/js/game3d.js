@@ -15,6 +15,7 @@ import { Gearbox, shiftLights } from './audio/gearbox.js';
 import { estimateLoad } from './audio/mix.js';
 import * as Sound from './audio/audio.js';
 import { gapText, driverCode, lapDelta, stepFollow, watchTarget, inDrsZone, drsHint, liveSectors, resultCells, sectorClass, lastLapClass } from './timing.js';
+import { cornersOf, createCoach, pastLine, SHOW_S } from './coach.js';
 import { MODES, segmentColor, cornerMask, aheadM, trackIndex, nextMode } from './racingline.js';
 import { distToPath, pitLayout, tMarks, wallStands, pickerOpen, cardText, crew17, BOX_M, COMPOUND_COLORS } from './pitLayout.js';
 
@@ -166,6 +167,15 @@ document.getElementById('tt-head').addEventListener('click', toggleTower);
 let line = null, lineIdx = null, padX = false, drsIdx = null;
 const lineChoice = () => { const v = store.get('lanrace.line'); return MODES.includes(v) ? v : 'corners'; };
 let lineMode = lineChoice();
+let coach = null, coachIdx = null, coachTimer = null, coachIntro = true, stewardAtS = -Infinity;
+let coachOn = store.get('lanrace.coach') !== 'off';
+window.onCoachChange = (v) => { coachOn = v !== 'off'; };
+function toggleCoach() {
+    coachOn = !coachOn;
+    store.set('lanrace.coach', coachOn ? 'on' : 'off');
+    window.showBanner?.(`COACH: ${coachOn ? 'ON' : 'OFF'}`, true);
+    if (!coachOn) document.getElementById('coach-line').classList.add('hidden');
+}
 function toggleLine() {
     if (!line) return; // no line on this track
     lineMode = nextMode(lineMode);
@@ -224,6 +234,7 @@ function onKey(e, down) {
     const key = e.key.toLowerCase();
     if (down && key === 't' && !e.repeat && clientState.status !== 'LOBBY') toggleTower();
     if (down && key === 'r' && !e.repeat && clientState.status !== 'LOBBY') toggleLine();
+    if (down && key === 'c' && !e.repeat && clientState.status !== 'LOBBY') toggleCoach();
     if (down && key === 'q' && !e.repeat && clientState.status !== 'LOBBY') toggleAssist();
     if (down && key === 'escape' && !e.repeat) toggleHostPanel();
     if (down && key === 'm' && !e.repeat) window.showBanner?.(Sound.toggleMute() ? 'SOUND: MUTED' : 'SOUND: ON', true);
@@ -1155,6 +1166,9 @@ function buildRacingLine(t) {
     drsIdx = null;
     lineMode = lineChoice(); // each session starts from the lobby choice
     const rl = t.racingLine;
+    coach = createCoach(rl ? cornersOf(rl, t) : [], t, rl || { offset: [], speed: [], phase: [] }, { intro: coachOn && coachIntro });
+    if (coachOn) coachIntro = false;
+    coachIdx = null;
     if (!rl) return;
     const P = t.path, n = P.length, w = 0.5 * scale, y = 0.75;
     const L = P.map((p, i) => {
@@ -2006,6 +2020,7 @@ window.showBanner = (text, good = false) => {
 
 let stewardTimer = null;
 window.showSteward = (e) => {
+    stewardAtS = performance.now() / 1000;
     const t = stewardText(e);
     if (!t) return;
     $('sc-head').textContent = t.head;
@@ -2132,6 +2147,25 @@ function updateHUD(withTower = true) {
         hint = drsHint({ mode: clientState.status === 'QUALIFYING' ? 'quali' : 'race', inPit: me.inPit, drs: me.drs, drsAvailable: me.drsAvailable, lap: me.lap, inZone: inDrsZone(t.drsZones || [], lapS) });
     }
     $('drs-hint').textContent = hint;
+    const cCar = predictor?.car, st2 = clientState.status;
+    if (coach && coachOn && racing && cCar && !me.finished && (st2 === 'RACE' || st2 === 'QUALIFYING')) {
+        const t = clientState.trackData, sc = t.scale, now = performance.now() / 1000;
+        coachIdx = trackIndex(t.path, cCar.x, cCar.y, coachIdx, 30 * sc);
+        const near = [];
+        for (const id in gs) { const o = gs[id]; if (id !== clientState.me && o && !o.finished && o.x !== undefined) near.push({ x: o.x, y: o.y }); }
+        const total = t.cum[t.path.length], lapS = (((t.cum[coachIdx] - (t.startS || 0)) % total) + total) % total;
+        const msg = coach.update({ t: now, i: coachIdx, x: cCar.x, y: cCar.y, angle: cCar.angle, speed: (cCar.speed || 0) / sc, brake: input.brake || 0,
+            assistBrake: !!cCar.assistBrake, tow: cCar.tow || 0, inPit: !!me.inPit, ghostOverlap: !!me.ghost && near.some((o) => Math.hypot(o.x - cCar.x, o.y - cCar.y) < 5.5 * sc),
+            wide: pastLine(t, coachIdx, cCar.x, cCar.y), lap: me.lap, mode: st2 === 'QUALIFYING' ? 'quali' : 'race', stewardAt: stewardAtS, near,
+            drsAvailable: !!me.drsAvailable, inDrsZone: inDrsZone(t.drsZones || [], lapS), drsOpen: !!me.drs, helpLevel: parseAssist(predictor.assist).brake });
+        if (msg) {
+            const el = $('coach-line');
+            el.textContent = msg.text;
+            el.className = msg.tone;
+            clearTimeout(coachTimer);
+            coachTimer = setTimeout(() => el.classList.add('hidden'), SHOW_S * 1000);
+        }
+    }
 
     if (withTower) {
         // Timing tower
@@ -2376,6 +2410,7 @@ window.initGameVisuals = () => {
     predictor = new Predictor(clientState.trackData, clientState.gameState?.[clientState.me]?.assist || 'off');
     predictor.box = clientState.gameState?.[clientState.me]?.box || null; // the pit stop guide drives into it
     lastPick = null; hudLastStop = undefined; hudPrevPhase = null; hudGhost = false; $('ghost-tag')?.classList.add('hidden'); clearTimeout(stewardTimer); $('steward-card')?.classList.add('hidden'); bannerUntil = 0; // the first meta seen is the baseline, not a new stop
+    clearTimeout(coachTimer); $('coach-line')?.classList.add('hidden'); stewardAtS = -Infinity;
     window.syncTyres();
     sentInputs = []; carPose.clear(); carState.clear(); renderClock.t = presentClock.t = null;
     othersMode = store.get('lanrace.others') === 'smooth' ? 'smooth' : 'present';
