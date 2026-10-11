@@ -103,3 +103,15 @@ test('tyre wear is identical on the server and the client copy of the track', ()
     assert.ok(a.wear > 0);
     for (const f of ['x', 'y', 'wear', 'tyreGrip']) assert.strictEqual(b[f], a[f], f);
 });
+
+test('assistBrake: set only when the braking help brakes harder than the driver', () => {
+    const t = Track.load('monza'), io = { emit() {}, volatile: { emit() {} } };
+    for (const [assist, expect] of [['100,100', true], ['0,0', false]]) {
+        const g = new Game(io, [{ id: 'a', username: 'a', teamId: 'ferrari', assist }], t, { maxLaps: 3, qualifying: false }, () => {});
+        const p = g.players.a, s0 = t.start, v = 85 * t.scale;
+        Object.assign(p, { vx: Math.cos(s0.angle) * v, vy: Math.sin(s0.angle) * v, speed: v });
+        let seen = false;
+        for (let k = 0; k < 60 * 20 && !seen; k++) { D.driveCar(p, { throttle: 1, brake: 0, steer: 0, drs: false }, t, 1 / 60); seen = !!p.assistBrake; }
+        assert.strictEqual(seen, expect, assist);
+    }
+});

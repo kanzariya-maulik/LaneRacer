@@ -152,3 +152,47 @@ test('apex is judged sideways on a track with 10 m point spacing', () => {
     assert.deepStrictEqual(go(0), ['Perfect corner']);
     assert.deepStrictEqual(go(3), ['Missed the apex — aim for the inside kerb']);
 });
+
+const corner1 = (turn) => { const { t, rl } = strip(); const c = C.cornersOf(rl, t)[0]; return { t, rl, cs: [{ ...c, turn }] }; };
+const frameAt = (s, o = {}) => ({ ...base, t: 0, i: s, x: s, y: 0, speed: 80, brake: 0, assistBrake: false, wide: false, ...o });
+
+test('tow tip after 1 s in the slipstream, at most 3 times', () => {
+    const { t, rl, cs } = corner1(1), c = C.createCoach(cs, t, rl), seen = [];
+    for (let k = 0; k < 400; k++) { const m = c.update(frameAt(100, { t: k * 0.1, tow: 0.5 })); if (m) seen.push(m.text); }
+    assert.deepStrictEqual(seen, Array(3).fill('In the tow — pull out and brake later to pass'));
+    const c2 = C.createCoach(cs, t, rl);
+    assert.strictEqual(c2.update(frameAt(100, { t: 0, tow: 0.5 })), null);
+    assert.strictEqual(c2.update(frameAt(100, { t: 0.5, tow: 0.5 })), null);
+    assert.strictEqual(c2.update(frameAt(100, { t: 1.1, tow: 0.5 })).text, 'In the tow — pull out and brake later to pass');
+});
+
+test('side by side into a braking zone: inside or outside', () => {
+    const { t, rl, cs } = corner1(1);
+    const inside = C.createCoach(cs, t, rl).update(frameAt(330, { near: [{ x: 331, y: -3 }] })); // other car on the outside
+    assert.strictEqual(inside.text, 'Inside line — brake late, the corner is yours');
+    const outside = C.createCoach(cs, t, rl).update(frameAt(330, { near: [{ x: 331, y: 3 }] }));
+    assert.strictEqual(outside.text, 'Outside — leave room or tuck in behind');
+    assert.strictEqual(C.createCoach(cs, t, rl).update(frameAt(200, { near: [{ x: 201, y: 3 }] })), null, 'too far before the braking zone');
+});
+
+test('DRS tip in the zone when available and closed', () => {
+    const { t, rl, cs } = corner1(1);
+    assert.strictEqual(C.createCoach(cs, t, rl).update(frameAt(100, { drsAvailable: true, inDrsZone: true })).text, 'DRS — press E');
+    assert.strictEqual(C.createCoach(cs, t, rl).update(frameAt(100, { drsAvailable: true, inDrsZone: true, drsOpen: true })), null);
+});
+
+test('steward card holds tips back 4 s', () => {
+    const { t, rl, cs } = corner1(1), c = C.createCoach(cs, t, rl);
+    assert.strictEqual(c.update(frameAt(100, { t: 10, drsAvailable: true, inDrsZone: true, stewardAt: 8 })), null);
+    assert.strictEqual(c.update(frameAt(100, { t: 12.5, drsAvailable: true, inDrsZone: true, stewardAt: 8 })).text, 'DRS — press E');
+});
+
+test('two clean laps on High help: nudge once', () => {
+    const c = fresh();
+    run(c, { lap: 1, t0: 0, helpLevel: 1 });
+    run(c, { lap: 2, t0: 10, helpLevel: 1 });
+    const ms = texts(run(c, { lap: 3, t0: 20, helpLevel: 1 })); // lap 3 starts: laps 1 and 2 were clean, so the nudge comes in this pass
+    assert.strictEqual(ms.filter((x) => x.startsWith('Clean laps!')).length, 1);
+    assert.ok(ms.includes('Clean laps! Try Low braking help (Q) — it\'s faster'));
+    assert.strictEqual(c.update(frameAt(100, { t: 50, lap: 3, helpLevel: 1 })), null);
+});

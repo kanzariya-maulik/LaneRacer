@@ -3,6 +3,7 @@
 export const GAP_S = 4, SHOW_S = 2.5;
 const TIP_MAX = 3, QUIET_AFTER = 3, STEWARD_HOLD_S = 4, CONTACT_QUIET_S = 5;
 const MERGE_M = 60, WINDOW_M = 150, WIDE_AFTER_M = 30, EARLY_M = 20, SLOW_K = 0.85, APEX_M = 2, ENTRY_K = 0.4, BRAKE_ON = 0.2, HOLD_S = 0.15, BACK_M = 5, APEX_ZONE_M = 5;
+const TOW_ON = 0.3, TOW_S = 1, SIDE_M = 100, CAR_M = 5.5;
 
 const lapM = (t) => t.cum[t.path.length] / t.scale;
 const heading = (P, i) => { const n = P.length, a = P[i], b = P[(i + 1) % n]; return Math.atan2(b.y - a.y, b.x - a.x); };
@@ -102,6 +103,21 @@ export function createCoach(corners, t, rl, opts = {}) {
     }
 
     return {
+        tips(f, s) {
+            if (!st.nudged && st.cleanLaps >= 2 && f.helpLevel >= 1) { const m = say(f, 'Clean laps! Try Low braking help (Q) — it\'s faster', 'tip'); if (m) st.nudged = true; return m; }
+            if (f.tow > TOW_ON) { st.towSince ??= f.t; if (f.t - st.towSince >= TOW_S) { const m = tip(f, 'tow', 'In the tow — pull out and brake later to pass'); if (m) return m; } } else st.towSince = null;
+            const next = corners.find((c) => rel(c.brakeS, s) <= SIDE_M && c.turn !== 0);
+            if (next && f.near.length) {
+                const cos = Math.cos(f.angle), sin = Math.sin(f.angle);
+                for (const o of f.near) {
+                    const dx = o.x - f.x, dy = o.y - f.y, ahead = (dx * cos + dy * sin) / t.scale, lat = (-dx * sin + dy * cos) / t.scale;
+                    if (Math.abs(ahead) >= 1.5 * CAR_M || Math.abs(lat) < 1.5 || Math.abs(lat) > 5) continue;
+                    return next.turn * lat < 0 ? tip(f, 'inside', 'Inside line — brake late, the corner is yours') : tip(f, 'outside', 'Outside — leave room or tuck in behind');
+                }
+            }
+            if (f.drsAvailable && f.inDrsZone && !f.drsOpen) return tip(f, 'drs', 'DRS — press E');
+            return null;
+        },
         update(f) {
             if (st.lap !== null && f.lap > st.lap) { st.cleanLaps = st.lapClean ? st.cleanLaps + 1 : 0; st.lapClean = true; }
             st.lap = f.lap;
@@ -117,7 +133,7 @@ export function createCoach(corners, t, rl, opts = {}) {
             }
             if (st.cur) record(f, s);
             if (v) return say(f, v[0], v[1]);
-            return this.tips ? this.tips(f, s) : null;
+            return this.tips(f, s);
         },
     };
 }

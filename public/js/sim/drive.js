@@ -219,6 +219,7 @@ export function driveCar(p, input, t, dt) {
     if (road.i !== undefined) p.roadI = road.i;
     const level = parseAssist(p.assist).brake; // braking help: 0 off, 0.5 Low, 1 High (off in the pit lane)
     const used = level > 0 && !p.inPit && !p.stop ? brakeAssist(p, input, t, before, level) : input;
+    p.assistBrake = used.brake > (input.brake || 0) + 0.05; // the help braked for the driver (the coach doesn't tell them to brake later)
     p.usedThrottle = used.throttle; // what the car got after the help (engine sound follows the help's lift)
     p.dragMul = (p.drs ? DRS_DRAG : 1) * (1 - (p.tow || 0));
     const speed0 = p.speed || 0;
