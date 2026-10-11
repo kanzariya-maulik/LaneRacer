@@ -123,7 +123,7 @@ test('guide timeout: an unreachable mark falls back to the drive out, no service
     assert.strictEqual(p.stops, 0);
 });
 
-test('safety net: a lane car shoved out of the lane is handed back after 1 s; a wedged one is driven out after 60 s', () => {
+test('safety net: a lane car shoved out of the lane is handed back after 1 s; a wedged one after 5 s; a guided one shoved off after 1 s', () => {
     const t = Track.load('monza'), sc = t.scale;
     { // shoved 15 m sideways off the lane, at rest
         const g = start(t, [lp('a')]), p = g.players.a;
