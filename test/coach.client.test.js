@@ -196,3 +196,14 @@ test('two clean laps on High help: nudge once', () => {
     assert.ok(ms.includes('Clean laps! Try Low braking help (Q) — it\'s faster'));
     assert.strictEqual(c.update(frameAt(100, { t: 50, lap: 3, helpLevel: 1 })), null);
 });
+
+test('a tip just before a corner does not cost it its verdict', () => {
+    const c = fresh(), out = [];
+    for (let s = 200; s <= 560; s += 2) {
+        const t = (s - 200) / 100; // verdict at s=529 (t=3.29): a DRS tip 1.5 s earlier
+        const m = c.update({ ...base, t, i: s, x: s, y: 0, speed: s < 400 ? 80 : s < 500 ? 30 : 80, brake: s >= 400 && s < 450 ? 1 : 0, assistBrake: false, wide: false,
+            drsAvailable: true, inDrsZone: s >= 480 && s < 500 });
+        if (m) out.push(m.text);
+    }
+    assert.deepStrictEqual(out, ['DRS — press E', 'Perfect corner']);
+});

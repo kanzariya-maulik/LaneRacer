@@ -48,11 +48,12 @@ export function pastLine(t, i, x, y) {
 
 export function createCoach(corners, t, rl, opts = {}) {
     const L = lapM(t), at = (i) => t.cum[i] / t.scale, rel = (s, from) => (((s - from) % L) + L) % L;
-    const st = { last: -Infinity, tips: {}, streak: corners.map(() => 0), cur: null, intro: !!opts.intro, lap: null, lapClean: true, cleanLaps: 0, nudged: false, towSince: null };
+    const st = { last: -Infinity, lastV: -Infinity, lapGood: false, tips: {}, streak: corners.map(() => 0), cur: null, intro: !!opts.intro, lap: null, lapClean: true, cleanLaps: 0, nudged: false, towSince: null };
     const inWindow = (c, s) => rel(s, c.brakeS - WINDOW_M) <= rel(c.endS + WIDE_AFTER_M, c.brakeS - WINDOW_M);
-    const say = (f, text, tone) => {
-        if (f.t - st.last < GAP_S || f.t - (f.stewardAt ?? -Infinity) < STEWARD_HOLD_S) return null;
+    const say = (f, text, tone, verdict) => { // a verdict waits only for the last verdict, so a tip never costs a corner its report
+        if (f.t - (verdict ? st.lastV : st.last) < GAP_S || f.t - (f.stewardAt ?? -Infinity) < STEWARD_HOLD_S) return null;
         st.last = f.t;
+        if (verdict) st.lastV = f.t;
         return { text, tone };
     };
     const tip = (f, key, text) => {
@@ -98,32 +99,36 @@ export function createCoach(corners, t, rl, opts = {}) {
         else if (r.apexMiss > APEX_M) v = ['Missed the apex — aim for the inside kerb', 'warn'];
         else v = ['Perfect corner', 'good'];
         if (v[1] !== 'good') { st.lapClean = false; st.streak[r.k] = 0; return v; }
+        st.lapGood = true;
         st.streak[r.k]++;
         return st.streak[r.k] > QUIET_AFTER ? null : v;
     }
 
-    return {
-        tips(f, s) {
-            if (!st.nudged && st.cleanLaps >= 2 && f.helpLevel >= 1) { const m = say(f, 'Clean laps! Try Low braking help (Q) — it\'s faster', 'tip'); if (m) st.nudged = true; return m; }
-            if (f.tow > TOW_ON) { st.towSince ??= f.t; if (f.t - st.towSince >= TOW_S) { const m = tip(f, 'tow', 'In the tow — pull out and brake later to pass'); if (m) return m; } } else st.towSince = null;
-            const next = corners.find((c) => rel(c.brakeS, s) <= SIDE_M && c.turn !== 0);
-            if (next && f.near.length) {
-                const cos = Math.cos(f.angle), sin = Math.sin(f.angle);
-                for (const o of f.near) {
-                    const dx = o.x - f.x, dy = o.y - f.y, ahead = (dx * cos + dy * sin) / t.scale, lat = (-dx * sin + dy * cos) / t.scale;
-                    if (Math.abs(ahead) >= 1.5 * CAR_M || Math.abs(lat) < 1.5 || Math.abs(lat) > 5) continue;
-                    return next.turn * lat < 0 ? tip(f, 'inside', 'Inside line — brake late, the corner is yours') : tip(f, 'outside', 'Outside — leave room or tuck in behind');
-                }
+    function tips(f, s) {
+        if (!st.nudged && st.cleanLaps >= 2 && f.helpLevel >= 1) { const m = say(f, 'Clean laps! Try Low braking help (Q) — it\'s faster', 'tip'); if (m) st.nudged = true; return m; }
+        if (f.tow > TOW_ON) { st.towSince ??= f.t; if (f.t - st.towSince >= TOW_S) { const m = tip(f, 'tow', 'In the tow — pull out and brake later to pass'); if (m) return m; } } else st.towSince = null;
+        const next = corners.filter((c) => rel(c.brakeS, s) <= SIDE_M && c.turn !== 0).sort((a, b) => rel(a.brakeS, s) - rel(b.brakeS, s))[0];
+        if (next && f.near.length) {
+            const cos = Math.cos(f.angle), sin = Math.sin(f.angle);
+            for (const o of f.near) {
+                const dx = o.x - f.x, dy = o.y - f.y, ahead = (dx * cos + dy * sin) / t.scale, lat = (-dx * sin + dy * cos) / t.scale;
+                if (Math.abs(ahead) >= 1.5 * CAR_M || Math.abs(lat) < 1.5 || Math.abs(lat) > 5) continue;
+                const m = next.turn * lat < 0 ? tip(f, 'inside', 'Inside line — brake late, the corner is yours') : tip(f, 'outside', 'Outside — leave room or tuck in behind');
+                if (m) return m;
+                break; // capped: fall through to the DRS check
             }
-            if (f.drsAvailable && f.inDrsZone && !f.drsOpen) return tip(f, 'drs', 'DRS — press E');
-            return null;
-        },
+        }
+        if (f.drsAvailable && f.inDrsZone && !f.drsOpen) return tip(f, 'drs', 'DRS — press E');
+        return null;
+    }
+
+    return {
         update(f) {
-            if (st.lap !== null && f.lap > st.lap) { st.cleanLaps = st.lapClean ? st.cleanLaps + 1 : 0; st.lapClean = true; }
+            if (st.lap !== null && f.lap > st.lap) { st.cleanLaps = st.lapClean && st.lapGood ? st.cleanLaps + 1 : 0; st.lapClean = true; st.lapGood = false; }
             st.lap = f.lap;
             if (f.t - (f.stewardAt ?? -Infinity) < CONTACT_QUIET_S) st.lapClean = false;
-            if (st.intro) { const m = say(f, 'Coach on — C to turn off', 'tip'); if (m) st.intro = false; return m; }
-            if (f.inPit) { st.cur = null; return null; }
+            if (st.intro) { const m = say(f, 'Coach on — C to turn off', 'tip'); if (m) st.intro = false; st.towSince = null; return m; }
+            if (f.inPit) { st.cur = null; st.towSince = null; return null; }
             const s = at(f.i);
             let v = null;
             if (st.cur && !inWindow(corners[st.cur.k], s)) { v = verdict(); st.cur = null; }
@@ -132,8 +137,8 @@ export function createCoach(corners, t, rl, opts = {}) {
                 if (k >= 0) st.cur = { k, brakeAt: null, early: 0, help: false, vMin: Infinity, hold: null, apexMiss: null, wide: false, skip: f.mode === 'race' && f.lap === 0 && k === 0 };
             }
             if (st.cur) record(f, s);
-            if (v) return say(f, v[0], v[1]);
-            return this.tips(f, s);
+            if (v) return say(f, v[0], v[1], true);
+            return tips(f, s);
         },
     };
 }

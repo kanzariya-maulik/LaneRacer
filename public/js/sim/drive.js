@@ -202,7 +202,7 @@ export function driveCar(p, input, t, dt) {
     // while the tyres change or a quali car waits; the driver's input is ignored throughout
     const phase = p.stop?.phase;
     if (phase === 'service' || phase === 'hold' || phase === 'wait') {
-        p.vx = p.vy = p.speed = 0; p.steer = 0;
+        p.vx = p.vy = p.speed = 0; p.steer = 0; p.assistBrake = false;
         const near = Physics.nearestOnTrack(p.x, p.y, t, p.roadI);
         if (pit) updatePitState(p, t, near, Physics.nearestOnPath(p.x, p.y, pit.path, false)); // a quali car starts parked: in the lane
         return near;
