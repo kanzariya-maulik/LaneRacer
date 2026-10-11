@@ -18,3 +18,8 @@ test('lap banners', () => {
     assert.strictEqual(T.lapBanner({ valid: false }, 4), null);
     assert.strictEqual(T.fmtLap(81.403), '1:21.403');
 });
+
+test('box banner names the tyres', () => {
+    assert.strictEqual(T.boxBanner('this', 'S'), 'BOX THIS LAP — SOFTS');
+    assert.strictEqual(T.boxBanner('next', 'H'), 'BOX NEXT LAP — HARDS');
+});

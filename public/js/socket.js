@@ -400,5 +400,6 @@ socket.on('reaction', (r) => {
 
 socket.on('track_limits', (e) => {
     if (e.id !== clientState.me) return;
+    if (e.kind === 'box_missed') { window.showBanner?.('MISSED THE BOX — STAYING OUT'); return; }
     window.showSteward?.(e);
 });

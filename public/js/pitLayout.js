@@ -49,12 +49,13 @@ export function pitLayout(t) {
 
 // When the tyre picker pops out (spec §1)
 // phase: your stop's phase (null when none); in a race the picker is open while you drive in and during the change
-export function pickerOpen({ spectator, status, inPit, parked, toEntryM, phase = null }) {
+export function pickerOpen({ spectator, status, inPit, parked, toEntryM, phase = null, boxCall = null }) {
     if (spectator) return false;
     if (status === 'COUNTDOWN') return true;
     if (status === 'QUALIFYING') return !!(inPit && parked);
     if (status !== 'RACE') return false;
     if (inPit) return phase === 'lane' || phase === 'guide' || phase === 'service';
+    if (boxCall) return true; // "box, box" called: choose the set for that stop
     return toEntryM >= 0 && toEntryM <= ENTRY_PICK_M;
 }
 

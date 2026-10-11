@@ -844,3 +844,11 @@ body.touch #tyre-card { bottom: 180px; }
 #leaderboard-list li.drop { background: rgba(220,38,38,0.28); }
 #leaderboard-list li.out { opacity: 0.5; }
 .tt-tag.out { background: #555; }
+
+/* "Box, box": the call button on the tyre card, the entry distance, the BOX tag in the tower */
+#tc-box { width: 100%; margin: 6px 0 2px; min-height: 36px; border: 0; border-radius: 6px; background: #1e3a8a; color: #fff; font-weight: 900; letter-spacing: 0.15em; cursor: pointer; }
+#tc-box.on { background: #3b82f6; }
+#tc-box.hidden, #entry-cue.hidden { display: none; }
+#entry-cue { position: absolute; left: 50%; bottom: calc(var(--pad) + 4em); transform: translateX(-50%); padding: 6px 14px; border-radius: 6px; background: #1d4ed8; color: #fff; font-weight: 900; letter-spacing: 0.05em; pointer-events: none; }
+@media (max-width: 600px) { #entry-cue { bottom: 380px; } }
+.tt-tag.box { background: #2563eb; }

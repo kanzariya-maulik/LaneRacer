@@ -11,7 +11,8 @@ import { themeOf, LANDS, SKIES, nightOf } from './themes.js';
 import { SnapshotBuffer, RenderClock, sample, samplePresent, decodeFlags } from './netsync.js';
 import { Predictor, STEP_S } from './predict.js';
 import { stewardText } from './steward.js';
-import { clockText, lapBanner, fmtLap } from './qualiText.js';
+import { clockText, lapBanner, fmtLap, boxBanner } from './qualiText.js';
+import { nextHarder } from './sim/tyres.js';
 import { Gearbox, shiftLights } from './audio/gearbox.js';
 import { estimateLoad } from './audio/mix.js';
 import * as Sound from './audio/audio.js';
@@ -221,14 +222,23 @@ function isSpectator() {
 }
 
 // A tyre pick (keys 1/2/3 or a click on the picker): fitted at once on the grid / in the quali box, else the next stop's set
+// "Box, box" (race): call or cancel the stop; the tyre card opens to choose the set
+let boxConfirmAt = 0;
+function callBox() {
+    const me = clientState.gameState?.[clientState.me];
+    if (clientState.status !== 'RACE' || !me || me.finished || isSpectator()) return;
+    socket.emit('box_call', { on: !me.boxCall });
+}
 let lastPick = null; // fitted at once on the grid / quali box, so the server clears nextCompound: remember the pick to confirm it
 function pickTyre(c) {
     if (isSpectator() || clientState.status === 'LOBBY') return;
     lastPick = c;
+    if (clientState.gameState?.[clientState.me]?.boxCall) boxConfirmAt = performance.now(); // confirm the call with the new set
     socket.emit('tyre_next', c);
     window.showBanner?.(`TYRES: ${{ S: 'SOFT', M: 'MEDIUM', H: 'HARD' }[c]}`, true);
 }
 const tcBtns = [...document.querySelectorAll('#tc-pick .tc-btn')];
+document.getElementById('tc-box').addEventListener('click', (e) => { e.currentTarget.blur(); callBox(); });
 document.getElementById('tc-pick').addEventListener('click', (e) => { const b = e.target.closest('.tc-btn'); if (b) { b.blur(); pickTyre(b.dataset.c); } }); // blur: Space/Enter must not re-fire the pick
 
 function onKey(e, down) {
@@ -237,6 +247,7 @@ function onKey(e, down) {
     if (down && key === 't' && !e.repeat && clientState.status !== 'LOBBY') toggleTower();
     if (down && key === 'r' && !e.repeat && clientState.status !== 'LOBBY') toggleLine();
     if (down && key === 'c' && !e.repeat && clientState.status !== 'LOBBY') toggleCoach();
+    if (down && key === 'b' && !e.repeat) callBox();
     if (down && key === 'q' && !e.repeat && clientState.status !== 'LOBBY') toggleAssist();
     if (down && key === 'escape' && !e.repeat) toggleHostPanel();
     if (down && key === 'm' && !e.repeat) window.showBanner?.(Sound.toggleMute() ? 'SOUND: MUTED' : 'SOUND: ON', true);
@@ -803,6 +814,7 @@ function updateCrews(dt) {
 // A flat w x d bar at (x, z), lying on the ground
 const bar = (w, d, x, z) => { const q = new THREE.PlaneGeometry(w, d); q.rotateX(-Math.PI / 2); q.translate(x, 0, z); return q; };
 
+let entryGuide = null;
 function buildPit(pit, t) {
     const n = pit.path.length, ph = pit.width / 2, s = pit.trackSide, line = 0.3 * scale;
     const W = pit.widthAt, half = W.map((w) => w / 2), neg = (A) => A.map((v) => -v);
@@ -814,6 +826,11 @@ function buildPit(pit, t) {
     const inL = half.map((h) => h - line), inR = half.map((h) => -h + line);
     world.add(strip(pit.path, inL, half, 0.85, (i) => inner(i) && W[i] > line, solid('#f2f2f2')));
     world.add(strip(pit.path, neg(half), inR, 0.85, (i) => inner(i) && W[i] > line, solid('#f2f2f2')));
+    // "Box, box": a blue stripe down the entry road to the limiter line, lit while your stop is called and the entry is near
+    const limI = Math.max(2, pit.cum.findIndex((c) => c >= pit.limStart));
+    entryGuide = strip(pit.path, half.map(() => -0.5 * scale), half.map(() => 0.5 * scale), 0.9, (i) => inner(i) && i < limI, solid('#3b82f6'));
+    entryGuide.visible = false;
+    world.add(entryGuide);
     const lay = pitLayout(t);
     // Fast lane | working lane (white) and the garage-row edge (yellow), along the garages
     const onSpan = (i) => inner(i) && i >= lay.split.i0 && i < lay.split.i1;
@@ -2103,9 +2120,9 @@ function updateHUD(withTower = true) {
     const speedMs = car && td ? Math.hypot(car.vx, car.vy) / td.scale : 0, phase = car?.stop?.phase || null;
     const parked = !!car && !!box && !!td && !!me?.inPit && Math.abs((box.s - (car.pitS || 0)) / td.scale) < 0.5 && speedMs < 0.5; // server PARK_M 0.5 m
     const spectator = isSpectator();
-    const open = pickerOpen({ spectator, status: clientState.status, inPit: !!me?.inPit, parked, toEntryM, phase });
+    const open = pickerOpen({ spectator, status: clientState.status, inPit: !!me?.inPit, parked, toEntryM, phase, boxCall: me?.boxCall || null });
     const fitted = !!lastPick && lastPick === comp && (clientState.status === 'COUNTDOWN' || phase === 'wait'), wearPct = Math.round((1 - wear) * 100);
-    const pickKey = `${comp}${next}${open}${fitted}${lastPick}${spectator}${wearPct}`;
+    const pickKey = `${comp}${next}${open}${fitted}${lastPick}${spectator}${wearPct}${me?.boxCall}${clientState.status}`;
     if (pickKey !== hudPick) {
         hudPick = pickKey;
         const t = cardText({ compound: comp, next, fitted });
@@ -2114,13 +2131,25 @@ function updateHUD(withTower = true) {
         $('tc-tyre').style.setProperty('--wear', wearPct);
         $('tc-tyre').firstElementChild.textContent = comp;
         $('tc-wear').textContent = `${wearPct} %`;
-        $('tc-next').textContent = t.next;
+        $('tc-next').textContent = me?.boxCall ? `${me.boxCall === 'next' ? 'BOX NEXT LAP' : 'BOX THIS LAP'} · ${t.next}` : t.next;
+        $('tc-box').classList.toggle('hidden', clientState.status !== 'RACE' || spectator);
+        $('tc-box').classList.toggle('on', !!me?.boxCall);
         $('tc-pick').classList.toggle('hidden', !open);
         $('tc-confirm').textContent = t.confirm || '';
         $('tc-confirm').classList.toggle('hidden', !t.confirm);
         const on = fitted ? comp : next;
         tcBtns.forEach((b) => b.classList.toggle('on', b.dataset.c === on));
     }
+    // "Box, box": banners on call / pick / cancel; the entry stripe and distance while the entry is near
+    const bc = racing ? me?.boxCall || null : null, nowB = performance.now();
+    if (bc && !hudBox) { window.showBanner?.('BOX, BOX — CHOOSE TYRES', true); Sound.event('drs'); boxConfirmAt = nowB + 3000; }
+    else if (!bc && hudBox && !['lane', 'guide', 'service'].includes(predictor?.car?.stop?.phase)) { window.showBanner?.('BOX CANCELLED'); boxConfirmAt = 0; }
+    if (bc && boxConfirmAt && nowB >= boxConfirmAt) { boxConfirmAt = 0; window.showBanner?.(boxBanner(bc, me.nextCompound || nextHarder(me.compound)), true); }
+    hudBox = bc;
+    const entryNear = bc === 'this' && !me?.inPit && toEntryM <= 300;
+    if (entryGuide) entryGuide.visible = entryNear;
+    const cue = entryNear ? `PIT ENTRY ${Math.round(toEntryM / 10) * 10} m` : '';
+    if ($('entry-cue').textContent !== cue) { $('entry-cue').textContent = cue; $('entry-cue').classList.toggle('hidden', !cue); }
     const st = predictor?.car?.stop, atBox = !!st && (st.phase === 'guide' || st.phase === 'service' || st.phase === 'hold');
     if (hudHadStop && !atBox && racing && st?.phase === 'out') { hudGoUntil = performance.now() + 800; } // released: GO stays up a moment as the car pulls away
     hudHadStop = atBox;
@@ -2207,6 +2236,7 @@ function updateHUD(withTower = true) {
             if (p.compound) li.append(el('span', `tt-tyre tyre-${p.compound}`, `${p.compound}${p.stops ? ' ' + p.stops : ''}`));
             const tags = helpTags(lp.assist); if (tags) li.append(el('span', 'tt-tag help', tags));
             if (p.penalty) li.append(el('span', 'tt-tag pen', `+${p.penalty}s`));
+            if (!quali && p.boxCall) li.append(el('span', 'tt-tag box', 'BOX'));
             if (quali && p.qualiOut) { li.classList.add('out'); li.append(el('span', 'tt-tag out', 'OUT')); }
             else if (quali && p.rank > (clientState.qualiClock?.survive ?? Infinity)) li.classList.add('drop'); // knock-out zone
             if (clientState.fastestLap?.id === id) { // purple stopwatch: fastest lap of the session
@@ -2313,7 +2343,7 @@ const ownFrame = { rpm: 0, load: 0, limiter: false, pit: false, speedMs: 0 };
 const listenerFrame = { x: 0, y: 0, fx: 1, fy: 0, vx: 0, vy: 0 }, sndFrame = { own: null, others: soundOthers, listener: listenerFrame };
 const silentFrame = { own: null, others: [], listener: listenerFrame };
 const camDir = new THREE.Vector3();
-let hudQClock = '', lastDrs = false, hudLit = -1, hudFlash = null, hudGear = '', hudPick = '', pickIdx = null, hudHadStop = false, hudGoUntil = 0, hudLastStop, hudPrevPhase = null, hudGhost = false, bannerText = '', bannerUntil = 0;
+let hudQClock = '', hudBox = null, lastDrs = false, hudLit = -1, hudFlash = null, hudGear = '', hudPick = '', pickIdx = null, hudHadStop = false, hudGoUntil = 0, hudLastStop, hudPrevPhase = null, hudGhost = false, bannerText = '', bannerUntil = 0;
 function updateSound(dt) {
     const gs = clientState.gameState, me = gs[clientState.me], racing = !!me && !isSpectator();
     const followId = racing && !watchingAfterFinish() ? clientState.me : spectateId; // dash and engine: the car on screen
@@ -2461,6 +2491,7 @@ window.initGameVisuals = () => {
     predictor.box = clientState.gameState?.[clientState.me]?.box || null; // the pit stop guide drives into it
     predictor.gripEvo = clientState.status === 'QUALIFYING' ? clientState.qualiClock?.evo : undefined;
     clearInterval(qbTimer); document.getElementById('quali-break')?.classList.add('hidden'); koPos = null; hudQClock = null;
+    hudBox = null; boxConfirmAt = 0;
     lastPick = null; hudLastStop = undefined; hudPrevPhase = null; hudGhost = false; $('ghost-tag')?.classList.add('hidden'); clearTimeout(stewardTimer); $('steward-card')?.classList.add('hidden'); bannerUntil = 0; // the first meta seen is the baseline, not a new stop
     clearTimeout(coachTimer); $('coach-line')?.classList.add('hidden'); stewardAtS = contactAtS = -Infinity;
     window.syncTyres();

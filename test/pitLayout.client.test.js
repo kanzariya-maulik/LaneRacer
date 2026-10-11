@@ -94,3 +94,10 @@ test('pickerOpen: grid, quali garage, pit approach and lane; never spectators or
     for (const phase of ['lane', 'guide', 'service']) assert.strictEqual(open({ inPit: true, phase }), true, phase);
     for (const phase of ['hold', 'out', null]) assert.strictEqual(open({ inPit: true, phase }), false, String(phase));
 });
+
+test('pickerOpen: a box call opens the tyre choice anywhere on the lap', () => {
+    const base = { spectator: false, status: 'RACE', inPit: false, parked: false, toEntryM: 2000 };
+    assert.strictEqual(L.pickerOpen({ ...base }), false);
+    assert.strictEqual(L.pickerOpen({ ...base, boxCall: 'this' }), true);
+    assert.strictEqual(L.pickerOpen({ ...base, boxCall: 'next', spectator: true }), false);
+});

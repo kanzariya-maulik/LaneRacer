@@ -13,3 +13,6 @@ export function lapBanner(e, survive) {
     if (e.prevPos && e.pos < e.prevPos) return `IMPROVED P${e.prevPos} → P${e.pos}`;
     return null;
 }
+
+const TYRE_NAMES = { S: 'SOFTS', M: 'MEDIUMS', H: 'HARDS' };
+export const boxBanner = (call, c) => `BOX ${call === 'next' ? 'NEXT' : 'THIS'} LAP — ${TYRE_NAMES[c] || ''}`.trim();
