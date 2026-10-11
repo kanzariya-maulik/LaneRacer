@@ -819,4 +819,4 @@ body.touch #tyre-card { bottom: 180px; }
 #steward-card.info { border-left-color: #3b82f6; } #steward-card.warn { border-left-color: #f59e0b; }
 #steward-card.muted { border-left-color: #6b7280; opacity: 0.85; }
 #steward-card small.hidden, #steward-card.hidden, #ghost-tag.hidden { display: none; }
-#ghost-tag { position: absolute; top: calc(var(--pad) + 6.2em); left: 50%; transform: translateX(-50%); padding: 0.25em 0.8em; border-radius: 0.3em; background: rgba(255,255,255,0.18); color: #fff; font-size: 0.75em; font-weight: 800; letter-spacing: 0.1em; white-space: nowrap; pointer-events: none; }
+#ghost-tag { position: absolute; top: 10.3em; /* = 7.7 hud-em: below the lights (end ~7.3), this box's font is 0.75em */ left: 50%; transform: translateX(-50%); padding: 0.25em 0.8em; border-radius: 0.3em; background: rgba(255,255,255,0.18); color: #fff; font-size: 0.75em; font-weight: 800; letter-spacing: 0.1em; white-space: nowrap; pointer-events: none; }

@@ -427,7 +427,7 @@ window.updateSettingsUI = () => {
     const track = setTrack.selectedOptions[0]?.textContent || s.trackId;
     const out = s.outLaps ?? 1, timed = s.qualiLaps ?? 2, quali = s.qualifying ? `${out} out + ${timed} timed` : 'Off';
     const time = s.timeOfDay === 'night' ? 'Night' : 'Day';
-    const rows = [['Track', track], ['Time', time], ['Laps', s.maxLaps], ['Qualifying', quali], ['Collisions', s.collisions === false ? 'Off' : s.contactPenalties === false ? 'On, no penalties' : 'On, penalties'], ['Tyre wear', s.tyreWear === false ? 'Off' : 'On'],
+    const rows = [['Track', track], ['Time', time], ['Laps', s.maxLaps], ['Qualifying', quali], ['Collisions', s.collisions === false ? 'Off' : (s.contactPenalties === false ? 'On, no penalties' : 'On, penalties') + (s.ghostStart !== false ? ', ghost start' : '')], ['Tyre wear', s.tyreWear === false ? 'Off' : 'On'],
         ['Driver help', help.mode === 'fixed' ? `Same for all: braking ${{ 0: 'Off', 50: 'Low', 100: 'High' }[help.brake]}, steering ${help.steer ? 'On' : 'Off'}` : 'Each driver chooses']];
     settingsView.replaceChildren(...rows.map(([k, v]) => {
         const d = document.createElement('div');
