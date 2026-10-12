@@ -145,3 +145,39 @@ test('start: no throttle before the bot reacts, then it goes', () => {
     assert.ok(g.players[bot.id].input.throttle > 0, 'after it');
     assert.strictEqual(g.players[bot.id].jumpStart, false);
 });
+
+// Final review fixes
+const mk = (t, i, side = 0, v = 0, extra = {}) => {
+    const P = t.path[i], Q = t.path[(i + 1) % t.path.length], ang = Math.atan2(Q.y - P.y, Q.x - P.x);
+    return { x: P.x - Math.sin(ang) * side * t.scale, y: P.y + Math.cos(ang) * side * t.scale, angle: ang, speed: v * t.scale, lap: 1, rank: 1, tyreGrip: 1, ...extra };
+};
+const ctxOf = (t, cars, time) => ({ track: t, cars, time, frozen: false, mode: 'race', dt: 1 / 60, rng: () => 0.99, toEntryM: () => 1e9 });
+
+test('review: a bot queued at a standstill behind a stopped car never reverses into the car behind it', () => {
+    const { drive, state, ahead } = require('../src/game/bots/driver');
+    const t = tracks.monza, i = 300, off = t.racingLine.offset[i] / t.scale;
+    const me = mk(t, i, off, 0, { ai: { pace: 1, aggression: 0, mistake: 0, reaction: 0 } });
+    const front = mk(t, ahead(t, i, 9), t.racingLine.offset[ahead(t, i, 9)] / t.scale, 0, { rank: 2 });
+    const back = mk(t, (i - 1 + t.path.length) % t.path.length, off, 0, { rank: 3 });
+    for (let k = 0; k < 240; k++) drive(me, ctxOf(t, [me, front, back], 10 + k / 60));
+    assert.ok(!(state(me).reverse > 0), 'reversed with a car right behind');
+});
+
+test('review: ghost cars are not traffic (they cannot be hit)', () => {
+    const { drive, ahead } = require('../src/game/bots/driver');
+    const t = tracks.monza, i = 300, j = ahead(t, i, 20);
+    const me = mk(t, i, t.racingLine.offset[i] / t.scale, 60, { ai: { pace: 1, aggression: 0.5, mistake: 0, reaction: 0 } });
+    const ghost = mk(t, j, t.racingLine.offset[j] / t.scale, 0, { ghost: true, rank: 2 });
+    assert.strictEqual(drive(me, ctxOf(t, [me, ghost], 50)).brake, 0);
+});
+
+test('review: in the pit lane a bot brakes for a slower car just ahead in the lane', () => {
+    const { drive } = require('../src/game/bots/driver');
+    const t = tracks.monza, sc = t.scale, pit = t.pit, Drive = require('../public/js/sim/drive.js');
+    const at = (s) => Drive.pointOnPath(pit, s * sc);
+    const a = at(100), b = at(108);
+    const me = { x: a.x, y: a.y, angle: a.angle, speed: 20 * sc, inPit: true, pitS: 100 * sc, box: { s: 400 * sc }, lap: 1, rank: 1, tyreGrip: 1, ai: { pace: 1, aggression: 0.5, mistake: 0, reaction: 0 } };
+    const slow = { x: b.x, y: b.y, angle: b.angle, speed: 2 * sc, inPit: true, pitS: 108 * sc, lap: 1, rank: 2 };
+    const out = drive(me, ctxOf(t, [me, slow], 50));
+    assert.ok(out.brake > 0 && out.throttle === 0, JSON.stringify(out));
+});

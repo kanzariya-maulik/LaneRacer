@@ -82,14 +82,15 @@ function scan(p, ctx, v) {
     };
     const me = where(p), mine = me.off, r = { ahead: null, behind: null, alongside: null, lapper: null, close: false };
     for (const o of ctx.mode === 'quali' ? [] : ctx.cars) { // qualifying cars are ghosts: no traffic to race
-        if (o === p || o.finished || (o.inPit && o.stop)) continue;
+        if (o === p || o.finished || o.ghost || (o.inPit && o.stop && !p.inPit)) continue; // ghosts can't be hit; in the lane, lane cars count
         const w = where(o), oi = w.i, oo = w.off;
         let f = (((w.s - me.s) % total) + total) % total;
         if (f > total / 2) f -= total;
         const e = { o, f, l: oo - mine, off: oo, v: Math.abs(o.speed) / sc };
         if (o === b.passCar) r.target = e;
         if (Math.abs(f) < CAR_M && Math.abs(e.l) < 4) r.alongside = e;
-        if (f > 0 && f < AHEAD_M && Math.abs(oo - (t.racingLine.offset[oi] / sc + b.lane)) < PATH_M) { if (!r.ahead || f < r.ahead.f) r.ahead = e; }
+        const myPath = p.inPit ? Math.abs(e.l) < PATH_M : Math.abs(oo - (t.racingLine.offset[oi] / sc + b.lane)) < PATH_M; // in the lane: its cars
+        if (f > 0 && f < AHEAD_M && myPath) { if (!r.ahead || f < r.ahead.f) r.ahead = e; }
         else if (f < 0 && f > -60 && Math.abs(e.l) < 4) {
             if (!r.behind || f > r.behind.f) r.behind = e;
             if (o.lap > p.lap && o.rank < p.rank) r.lapper = e; // a lap or more up on me, catching me
@@ -136,22 +137,26 @@ function drive(p, ctx) {
     const t = ctx.track, sc = t.scale, L = lineOf(t), v = Math.abs(p.speed) / sc, ai = p.ai;
     b.idx = trackIndex(t.path, p.x, p.y, b.idx, 40 * sc);
     // Stuck (nose in a wall, beached): back off for a second with the wheel the other way, then drive on
+    const r = scan(p, ctx, v);
     if (b.reverse > 0) { b.reverse -= ctx.dt; return { throttle: 0, brake: 1, steer: -b.revSteer, drs: false }; } // brake at a standstill reverses
-    b.slowS = v < 1.5 && ctx.time > (ai.reaction || 0) + 3 ? (b.slowS || 0) + ctx.dt : 0;
+    const clearBehind = !r.behind || -r.behind.f > 15, queued = r.ahead && r.ahead.f < 20; // held up isn't stuck; never back into someone
+    b.slowS = v < 1.5 && ctx.time > (ai.reaction || 0) + 3 && clearBehind && !queued ? (b.slowS || 0) + ctx.dt : 0;
     if (b.slowS > 1.5) { b.slowS = 0; b.reverse = 1; b.revSteer = Math.sign(p.input?.steer || 1); }
     const pitting = ctx.mode === 'race' ? p.boxCall === 'this' : b.wantPit; // race: the game says this lap or next
     const toPit = pitting && t.pit && p.box ? ctx.toEntryM(p) : Infinity;
     const pastPit = toPit === Infinity ? Infinity : t.cum[t.path.length] / sc - toPit; // just past the mouth: still turning in
     // Turning in, just past the mouth, or in the lane with no stop (the game gave up on a jammed one): along the lane
     if (toPit < PIT_APPROACH_M) b.turningIn = true; else if (pastPit >= 150) b.turningIn = false;
-    if (toPit < PIT_APPROACH_M || (b.turningIn && pastPit < 150) || (p.inPit && t.pit && p.box)) return { ...Drive.pitAssist(p, t), drs: false };
+    if (toPit < PIT_APPROACH_M || (b.turningIn && pastPit < 150) || (p.inPit && t.pit && p.box)) {
+        const a = Drive.pitAssist(p, t), close = r.ahead && r.ahead.f < Math.max(12, v); // the lane has traffic too
+        return close ? { throttle: 0, brake: 1, steer: a.steer, drs: false } : { ...a, drs: false };
+    }
     if (ctx.mode === 'race' && ctx.time < ai.reaction) return IDLE;
     if (b.bog === undefined) b.bog = ctx.mode === 'race' && ctx.rng() < (ai.bog || 0);
     const bogging = b.bog && ctx.time < ai.reaction + 0.3;
     const here = b.idx;
     let factor = (PACE.base / ai.pace) * Math.sqrt(p.tyreGrip ?? 1);
     if (ctx.mode === 'quali' && p.lapStart === null) factor *= 0.9; // out-lap
-    const r = scan(p, ctx, v);
     // A mistake at a corner entry, never with someone right there; it lasts until the corner is done (or 2.5 s)
     const phNow = t.racingLine.phase[here];
     if (phNow === 2 && b.prevPhase !== 2 && !b.err && !r.close && ctx.rng() < ai.mistake) {
