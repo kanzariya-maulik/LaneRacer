@@ -11,7 +11,7 @@ const IDLE = Object.freeze({ throttle: 0, brake: 0, steer: 0, drs: false });
 const SPEED_LOOK_S = 0.25;                             // speed target read this far ahead (throttle/brake response)
 const EDGE_M = 1.5;                                    // lane moves stay this far inside the white lines
 const LANE_RATE_MS = 3;                                // sideways moves at most this fast
-const PIT_APPROACH_M = 80;                             // box called: the pit assist steers from this far before the entry
+const PIT_APPROACH_M = 40, PIT_SETUP_M = 300, PIT_DEC = 10; // box called: over to the pit side and down to the limit from PIT_SETUP_M, the pit assist steers in for the last PIT_APPROACH_M
 // Tuned by lap tests (test/botDriver.test.js): steering aim (s of travel, m bounds), steering gain (the grip cap makes the
 // real lock smaller than the geometric one), line speed × base / pace
 const PACE = { base: 1, lookS: 0.25, lookMin: 8, lookMax: 60, gain: 4 };
@@ -25,7 +25,9 @@ function lineOf(t) {
         const a = P[(i - 1 + n) % n], b = P[(i + 1) % n], l = Math.hypot(b.x - a.x, b.y - a.y) || 1;
         return { x: -(b.y - a.y) / l, y: (b.x - a.x) / l }; // RacingLine.normals convention: point = path + N × offset
     });
-    c = { N, lo: t.edgeL.map((e) => -(e - m)), hi: t.edgeR.map((e) => e - m), pts: RacingLine.linePoints(P, t.racingLine.offset) };
+    let pitOff = 0; // the pit entry's side of the road (centreline offset, world units)
+    if (t.pit) { const E = t.pit.path[0], i = trackIndex(P, E.x, E.y, null); pitOff = (E.x - P[i].x) * N[i].x + (E.y - P[i].y) * N[i].y; }
+    c = { pitOff, N, lo: t.edgeL.map((e) => -(e - m)), hi: t.edgeR.map((e) => e - m), pts: RacingLine.linePoints(P, t.racingLine.offset) };
     lines.set(t, c);
     return c;
 }
@@ -133,7 +135,9 @@ function drive(p, ctx) {
     if (ctx.frozen || p.finished) return IDLE;
     const t = ctx.track, sc = t.scale, L = lineOf(t), v = Math.abs(p.speed) / sc, ai = p.ai;
     b.idx = trackIndex(t.path, p.x, p.y, b.idx, 40 * sc);
-    if ((p.boxCall || b.wantPit) && t.pit && p.box && ctx.toEntryM(p) < PIT_APPROACH_M) return { ...Drive.pitAssist(p, t), drs: false };
+    const toPit = (p.boxCall || b.wantPit) && t.pit && p.box ? ctx.toEntryM(p) : Infinity;
+    const pastPit = toPit === Infinity ? Infinity : t.cum[t.path.length] / sc - toPit; // just past the mouth: still turning in
+    if (toPit < PIT_APPROACH_M || pastPit < 150) return { ...Drive.pitAssist(p, t), drs: false };
     if (ctx.mode === 'race' && ctx.time < ai.reaction) return IDLE;
     if (b.bog === undefined) b.bog = ctx.mode === 'race' && ctx.rng() < (ai.bog || 0);
     const bogging = b.bog && ctx.time < ai.reaction + 0.3;
@@ -153,11 +157,12 @@ function drive(p, ctx) {
     else if (b.err?.kind === 'early') factor *= 0.92;
     const vLine = t.racingLine.speed[ahead(t, here, Math.max(5, v * SPEED_LOOK_S))] * factor;
     const { laneT, cap } = racecraft(p, b, ctx, v, here, r, vLine);
-    const vt = Math.min(vLine, cap);
+    const pitV = toPit < PIT_SETUP_M ? Math.sqrt(((t.pit.limitKmh || Drive.PIT_LIMIT_KMH) / 3.6) ** 2 + 2 * PIT_DEC * Math.max(0, toPit - PIT_APPROACH_M)) : Infinity;
+    const vt = Math.min(vLine, cap, pitV);
     const laneWant = laneT + (b.err?.kind === 'apex' ? -insideSide(t, here) * 1.5 : 0);
     b.lane += clamp(laneWant - b.lane, -LANE_RATE_MS * ctx.dt, LANE_RATE_MS * ctx.dt);
     const j = ahead(t, here, clamp(v * PACE.lookS, PACE.lookMin, PACE.lookMax));
-    let o = clamp(t.racingLine.offset[j] + b.lane * sc, L.lo[j], L.hi[j]);
+    let o = clamp(toPit < PIT_SETUP_M ? L.pitOff : t.racingLine.offset[j] + b.lane * sc, L.lo[j], L.hi[j]);
     if (r.alongside) { // room: their side of the track stays theirs through the corner
         const lim = (r.alongside.off - Math.sign(r.alongside.l) * ROOM_M) * sc;
         o = r.alongside.l > 0 ? Math.min(o, lim) : Math.max(o, lim);

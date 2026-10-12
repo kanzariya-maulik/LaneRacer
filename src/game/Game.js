@@ -6,7 +6,7 @@ const Ticker = require('../ticker');
 const { pointAt, edgeAt } = require('./Track');
 const QualiSession = require('./QualiSession');
 const BotDriver = require('./bots/driver');
-let BotStrategy = { tick() {} }; // Task 5 replaces this with require('./bots/strategy')
+const BotStrategy = require('./bots/strategy');
 
 const TICK_RATE = 60;
 const CP_GATE_M = 30;        // a checkpoint also counts this far past it along the lap: wide of its circle (open grass), not a cut
