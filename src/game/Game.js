@@ -5,6 +5,8 @@ const Drive = require('../../public/js/sim/drive.js');
 const Ticker = require('../ticker');
 const { pointAt, edgeAt } = require('./Track');
 const QualiSession = require('./QualiSession');
+const BotDriver = require('./bots/driver');
+let BotStrategy = { tick() {} }; // Task 5 replaces this with require('./bots/strategy')
 
 const TICK_RATE = 60;
 const CP_GATE_M = 30;        // a checkpoint also counts this far past it along the lap: wide of its circle (open grass), not a cut
@@ -42,7 +44,7 @@ const STALL_S = 5, STALL_M = 1;        // lane/out: not this much further along 
 const STOP_CODE = { guide: 1, service: 2, hold: 3, lane: 4, out: 5, wait: 6 };
 
 const FLAGS = { inPit: 1, limiter: 2, drs: 4, drsAvailable: 8, finished: 16, lapValid: 32, ghost: 64 };
-const META_FIELDS = ['lap', 'checkpoint', 'rank', 'gap', 'lapsDown', 'lastLap', 'bestLap', 'lapStart', 'bestLapSectors', 'lastValid', 'penalty', 'compound', 'nextCompound', 'stops', 'compoundsUsed', 'wearPerM', 'lastStop', 'segBest', 'qualiOut', 'boxCall'];
+const META_FIELDS = ['lap', 'checkpoint', 'rank', 'gap', 'lapsDown', 'lastLap', 'bestLap', 'lapStart', 'bestLapSectors', 'lastValid', 'penalty', 'compound', 'nextCompound', 'stops', 'compoundsUsed', 'wearPerM', 'lastStop', 'segBest', 'qualiOut', 'boxCall', 'isBot'];
 const META_EVERY = 6; // ticks: info updates at 10 Hz
 const r1 = (v) => Math.round(v * 10) / 10;
 
@@ -97,6 +99,7 @@ class Game {
                 id: p.id,
                 username: p.username,
                 teamId: p.teamId,
+                isBot: !!p.isBot, ai: p.ai || null, color: p.color,
                 assist: p.assist || 'off',
                 x: slot.x, y: slot.y, angle: slot.angle,
                 vx: 0, vy: 0, speed: 0, steer: 0,
@@ -493,6 +496,18 @@ class Game {
         p.lapS = lapS;
     }
 
+    // AI drivers decide their inputs (and pit calls) before anyone moves, from the same state humans see
+    updateBots() {
+        const cars = Object.values(this.players);
+        if (!cars.some((p) => p.isBot)) return;
+        const ctx = { game: this, track: this.track, cars, time: this.time, frozen: this.frozen, mode: this.mode, dt: this.dt, rng: this.rng, toEntryM: (p) => this.toEntryM(p) };
+        for (const p of cars) {
+            if (!p.isBot) continue;
+            BotStrategy.tick(p, ctx);
+            p.input = BotDriver.drive(p, ctx);
+        }
+    }
+
     // In the pit lane = on pit asphalt and off the track's (where they overlap, it's track)
     updatePit(p, near = Physics.nearestOnTrack(p.x, p.y, this.track), nearPit = Physics.nearestOnPath(p.x, p.y, this.track.pit.path, false)) {
         const wasLimited = p.limiter;
@@ -531,6 +546,7 @@ class Game {
                 if (slack !== null) p.slackMin = Math.min(p.slackMin ?? slack, slack);
                 if (this.seq % SLACK_TICKS === 0 && p.slackMin !== undefined) { p.slack = p.slackMin; p.slackMin = undefined; }
             }
+            this.updateBots();
             if (this.mode === 'race') this.updateTow();
             for (const id of ids) {
                 const p = this.players[id];

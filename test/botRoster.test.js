@@ -17,7 +17,7 @@ test('fills every free seat up to 22, humans keep theirs, no team over its seats
     assert.strictEqual(new Set(bots.map((b) => b.id)).size, bots.length, 'ids unique');
     for (const b of bots) {
         assert.ok(b.isBot && b.id.startsWith('ai-'));
-        assert.deepStrictEqual(b.assist, { steer: 1, brake: 1 });
+        assert.deepStrictEqual(b.assist, { steer: 1, brake: 0 }); // the braking help's safe corner speeds would cap them
         assert.ok(Math.abs(b.ai.pace / LEVELS.hard.pace - 1) <= 0.015 + 1e-9, `pace ${b.ai.pace}`);
         assert.strictEqual(b.color, TEAMS.find((t) => t.id === b.teamId).chatColor);
     }

@@ -41,7 +41,7 @@ function fillGrid(humans, level, seed, max = 22) {
             taken[t.id] = (taken[t.id] || 0) + 1;
             bots.push({
                 id: `ai-${bots.length + 1}`, username: pool[bots.length], teamId: t.id, color: t.chatColor,
-                assist: { steer: 1, brake: 1 }, compound: 'M', isBot: true,
+                assist: { steer: 1, brake: 0 }, compound: 'M', isBot: true,
                 ai: { level: name, pace: L.pace * (1 + (rng() * 2 - 1) * SPREAD), aggression: Math.min(1, Math.max(0, L.aggression + (rng() - 0.5) * 0.1)),
                     mistake: L.mistake * (0.75 + rng() * 0.5), reaction: between(L.reaction), release: between(L.release), bog: L.bog },
             });
