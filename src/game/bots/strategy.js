@@ -4,7 +4,8 @@
 const { COMPOUNDS } = require('../../../public/js/sim/tyres.js');
 const { state } = require('./driver');
 
-const WEAR_CAP = 0.75; // a stint ends before this much wear (the grip cliff starts at 0.8)
+const WEAR_CAP = 0.75;
+const PIT_BUSY = 3; // cars already in or heading for the pit lane: a bot waits a lap (unless it's the last chance for the tyre rule) // a stint ends before this much wear (the grip cliff starts at 0.8)
 const PLANS = [['M', 'H'], ['H', 'M'], ['S', 'H'], ['S', 'M', 'S'], ['S', 'H', 'S']];
 
 // Laps per stint: each at least 1 and within cap × life × race; the rest shared out, weighted toward room left
@@ -43,13 +44,19 @@ function raceTick(p, ctx, b) {
     b.press = p.stop?.phase === 'hold' && p.stop.age >= p.ai.release;
     if (p.stop?.phase === 'lane') b.wantPit = false;
     if (p.stops > b.stopsSeen) { b.stopsSeen = p.stops; b.stint = Math.min(b.stint + 1, b.plan.length - 1); b.stintLap = p.lap; }
-    if (p.lap === b.lapSeen || ctx.frozen || p.finished) return;
+    if (ctx.frozen || p.finished) return;
+    // Tyre rule not met and the race nearly over (the leader's laps count: a lapped car gets the flag sooner): box now
+    const rule = p.compoundsUsed.length < 2 && g.settings.tyreWear !== false && maxLaps >= 2;
+    const mate = ctx.cars.some((o) => o !== p && o.teamId === p.teamId && (o.inPit || o.boxCall === 'this')); // one box per team: no double stack
+    const busy = ctx.cars.filter((o) => o !== p && (o.inPit || o.boxCall)).length >= PIT_BUSY; // a full pit lane jams: wait a lap
+    const toGo = maxLaps - Math.max(p.lap, ...ctx.cars.map((o) => o.lap)); // laps left for the leader
+    if (rule && !mate && !p.boxCall && !p.inPit && (toGo <= 2 || (toGo <= 3 && !busy))) return box(p, g, b);
+    if (p.lap === b.lapSeen) return;
     // Once a lap, on crossing the line: undercut bookkeeping, then the box decision
     b.lapSeen = p.lap;
     b.stuckLaps = b.followS > 0.6 * (p.lastLap || 90) ? b.stuckLaps + 1 : 0;
     b.followS = 0;
     if (p.boxCall || p.inPit) return;
-    const rule = p.compoundsUsed.length < 2 && g.settings.tyreWear !== false && maxLaps >= 2;
     if (p.lap >= maxLaps - 1 && !rule) return;                                     // the last lap: never
     const last = b.stint >= b.plan.length - 1;
     const lapsIn = p.lap - b.stintLap, planned = b.plan[b.stint].laps;
@@ -57,12 +64,14 @@ function raceTick(p, ctx, b) {
     const perLap = Math.max(p.wearPerM * lapM, lapsIn >= 1 ? p.wear / lapsIn : 0);
     const undercut = (p.ai.level === 'hard' || p.ai.level === 'pro') && b.stuckLaps >= 2 && lapsIn >= 0.7 * planned;
     const due = !last && (lapsIn + 1 >= planned || p.wear + perLap > WEAR_CAP + 0.05 || undercut);
-    if (due || (rule && p.lap >= maxLaps - 2)) {
-        const next = last ? (p.compoundsUsed.includes('H') ? 'M' : 'H') : b.plan[b.stint + 1].compound;
-        g.setNextCompound(p.id, next);
-        g.setBoxCall(p.id, true);
-        b.wantPit = true;
-    }
+    if (due && !busy && !mate) box(p, g, b);
+}
+
+function box(p, g, b) {
+    const last = b.stint >= b.plan.length - 1;
+    g.setNextCompound(p.id, last ? (p.compoundsUsed.includes('H') ? 'M' : 'H') : b.plan[b.stint + 1].compound);
+    g.setBoxCall(p.id, true);
+    b.wantPit = true;
 }
 
 // Exit window per level, as shares of the segment clock: later = more track evolution, never too late for a lap

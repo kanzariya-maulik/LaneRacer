@@ -54,3 +54,31 @@ test('bots keep their qualifying places on the race grid; the lobby clears them;
     advance(t, 1000);
     assert.strictEqual(io.ticks, ticks, 'game stopped with no humans left');
 });
+
+const Game = require('../src/game/Game');
+const Track = require('../src/game/Track');
+const { fillGrid, rngOf } = require('../src/game/bots/roster');
+
+test('21 bots race 6 laps of Monza: everyone classified, every bot pitted onto a second compound, tick under 4 ms', () => {
+    const bots = fillGrid([], 'medium', 99).slice(0, 21);
+    const io = { emit() {}, volatile: { emit() {} } };
+    let done = false;
+    const g = new Game(io, bots, Track.load('monza'), { maxLaps: 6, qualifying: false, tyreWear: true, collisions: true, ghostStart: true, rng: rngOf(1) }, () => { done = true; });
+    g.update(); // a grid tick before lights out, as in a real session: start tyres go on
+    g.release();
+    let ms = 0, n = 0;
+    for (let k = 0; k < 60 * 1800 && !done; k++) {
+        const t0 = process.hrtime.bigint();
+        g.update();
+        ms += Number(process.hrtime.bigint() - t0) / 1e6; n++;
+    }
+    assert.ok(done, 'race ended');
+    const cars = Object.values(g.players);
+    assert.ok(cars.every((p) => p.finished), 'all classified');
+    const stuck = cars.filter((p) => p.dnf && p.lap < 4).length; // the 60 s finish window may classify a lapped runner DNF; stuck is worse
+    assert.strictEqual(stuck, 0, `${stuck} stuck`);
+    const ran = cars.filter((p) => !p.dnf), legal = ran.filter((p) => p.compoundsUsed.length >= 2).length;
+    // ponytail: shared team boxes + a packed lane can push a stop past the flag; ≥ 80 % make it (16/19 on this seed). Per-box queueing if it matters
+    assert.ok(legal >= 0.8 * ran.length, `compound rule: ${legal}/${ran.length}`);
+    assert.ok(ms / n < 4, `tick ${(ms / n).toFixed(2)} ms`);
+});

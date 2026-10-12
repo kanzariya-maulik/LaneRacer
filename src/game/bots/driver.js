@@ -135,9 +135,16 @@ function drive(p, ctx) {
     if (ctx.frozen || p.finished) return IDLE;
     const t = ctx.track, sc = t.scale, L = lineOf(t), v = Math.abs(p.speed) / sc, ai = p.ai;
     b.idx = trackIndex(t.path, p.x, p.y, b.idx, 40 * sc);
-    const toPit = (p.boxCall || b.wantPit) && t.pit && p.box ? ctx.toEntryM(p) : Infinity;
+    // Stuck (nose in a wall, beached): back off for a second with the wheel the other way, then drive on
+    if (b.reverse > 0) { b.reverse -= ctx.dt; return { throttle: 0, brake: 1, steer: -b.revSteer, drs: false }; } // brake at a standstill reverses
+    b.slowS = v < 1.5 && ctx.time > (ai.reaction || 0) + 3 ? (b.slowS || 0) + ctx.dt : 0;
+    if (b.slowS > 1.5) { b.slowS = 0; b.reverse = 1; b.revSteer = Math.sign(p.input?.steer || 1); }
+    const pitting = ctx.mode === 'race' ? p.boxCall === 'this' : b.wantPit; // race: the game says this lap or next
+    const toPit = pitting && t.pit && p.box ? ctx.toEntryM(p) : Infinity;
     const pastPit = toPit === Infinity ? Infinity : t.cum[t.path.length] / sc - toPit; // just past the mouth: still turning in
-    if (toPit < PIT_APPROACH_M || pastPit < 150) return { ...Drive.pitAssist(p, t), drs: false };
+    // Turning in, just past the mouth, or in the lane with no stop (the game gave up on a jammed one): along the lane
+    if (toPit < PIT_APPROACH_M) b.turningIn = true; else if (pastPit >= 150) b.turningIn = false;
+    if (toPit < PIT_APPROACH_M || (b.turningIn && pastPit < 150) || (p.inPit && t.pit && p.box)) return { ...Drive.pitAssist(p, t), drs: false };
     if (ctx.mode === 'race' && ctx.time < ai.reaction) return IDLE;
     if (b.bog === undefined) b.bog = ctx.mode === 'race' && ctx.rng() < (ai.bog || 0);
     const bogging = b.bog && ctx.time < ai.reaction + 0.3;
