@@ -3,6 +3,7 @@ const Track = require('./game/Track');
 const lobby = require('./lobby');
 const { withNetSim } = require('./netsim');
 const netlog = require('./netlog');
+const { fillGrid } = require('./game/bots/roster');
 
 const TRACKS = Track.loadAll(); // throws at startup if track data is missing
 const RESULTS_MS = 8000;
@@ -12,6 +13,7 @@ const state = {
     status: 'LOBBY', // LOBBY, QUALIFYING, QUALI_RESULTS, COUNTDOWN, RACE, FINISHED
     players: {},
     hostId: null,
+    bots: [], // this session's AI drivers (never lobby players)
     settings: { trackId: 'monza', maxLaps: 3, qualifying: true, qualiFormat: 'full', collisions: true, tyreWear: true, contactPenalties: true, ghostStart: true, timeOfDay: 'day', outLaps: 1, qualiLaps: 2, aiDrivers: false, aiLevel: 'medium', help: { mode: 'choose', steer: 100, brake: 100 } }
 };
 
@@ -63,6 +65,7 @@ function removePlayer(io, id) {
                 gameInstance = null;
             }
             state.status = 'LOBBY';
+            state.bots = [];
         }
     }
 }
@@ -70,6 +73,9 @@ function removePlayer(io, id) {
 function lobbySnapshot() {
     return { players: state.players, hostId: state.hostId, status: state.status, settings: state.settings };
 }
+
+// A car's driver: a human in the lobby, or one of this session's AI drivers
+const driverById = (id) => state.players[id] || state.bots.find((b) => b.id === id);
 
 function setStatus(io, status) {
     state.status = status;
@@ -164,7 +170,7 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
         });
         socket.on('restart_session', () => {
             if (!isHost() || !gameInstance || !['QUALIFYING', 'COUNTDOWN', 'RACE'].includes(state.status)) return;
-            const racers = Object.keys(gameInstance.players).map((id) => state.players[id]).filter(Boolean);
+            const racers = Object.keys(gameInstance.players).map(driverById).filter(Boolean);
             const quali = gameInstance.mode === 'quali';
             clearTimers(); // the old session's lights must not fire into the new one
             gameInstance.stop();
@@ -216,8 +222,10 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
             overflow.forEach((p) => { p.isSpectating = true; });
             if (overflow.length) io.emit('lobby_state_sync', lobbySnapshot());
 
-            if (state.settings.qualifying) startQuali(io, racers);
-            else startRace(io, racers);
+            state.bots = state.settings.aiDrivers ? fillGrid(racers, state.settings.aiLevel, Date.now()) : [];
+            const grid = racers.concat(state.bots);
+            if (state.settings.qualifying) startQuali(io, grid);
+            else startRace(io, grid);
         });
 
         // "Box, box": the driver calls (or cancels) their pit stop
@@ -281,7 +289,7 @@ function startQuali(io, racers) {
         io.emit('session', { phase: 'QUALI_RESULTS', endsInMs: RESULTS_MS });
         later(() => {
             // Drivers who left during the results screen aren't on the grid
-            const grid = results.map(r => state.players[r.id]).filter(Boolean);
+            const grid = results.map((r) => driverById(r.id)).filter(Boolean);
             startRace(io, grid);
         }, RESULTS_MS);
     }, 'quali', net);
@@ -313,6 +321,7 @@ function finishRace(io) {
             state.players[id].isReady = false;
             state.players[id].isSpectating = false;
         }
+        state.bots = [];
         io.emit('lobby_state_sync', lobbySnapshot());
         gameInstance = null;
     }, FINISH_MS);
