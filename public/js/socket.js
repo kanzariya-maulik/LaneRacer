@@ -42,6 +42,7 @@ function setupWebRTC() {
         // When the server creates a DataChannel, this fires
         rtcPeerConnection.ondatachannel = (event) => {
             rtcDataChannel = event.channel;
+            rtcDataChannel.binaryType = 'arraybuffer'; // fast updates are binary (netcodec.js), control messages JSON text
 
             // ── CRITICAL: unordered + maxRetransmits:0 = pure UDP semantics ─
             rtcDataChannel.onopen = () => {
@@ -63,13 +64,11 @@ function setupWebRTC() {
             // ── Handle messages received over UDP ─────────────────────────
             rtcDataChannel.onmessage = (event) => {
                 lastUdpRx = performance.now();
+                if (typeof event.data !== 'string') return onFastPacket(event.data); // 60 Hz game state
                 try {
                     const msg = JSON.parse(event.data);
 
-                    if (msg.type === 'STATE') {
-                        // 60 Hz game state arriving over UDP
-                        onFastPacket(msg.data);
-                    } else if (msg.type === 'PONG') {
+                    if (msg.type === 'PONG') {
                         clientState.net.rttMs = performance.now() - msg.clientTime;
                     }
                 } catch (e) {}
@@ -196,9 +195,9 @@ setInterval(() => {
 socket.on('net_stats', (s) => { clientState.net.tickMs = s.tickMs; clientState.net.starve = s.starve || {}; });
 
 
-// Fast updates are queued; game3d.js drains them into its snapshot buffer every frame
+// Fast updates are queued (binary, or the plain object from a test server); game3d.js decodes and drains them every frame
 function onFastPacket(pkt) {
-    if (!pkt || !Array.isArray(pkt.c)) return;
+    if (!pkt || !(pkt instanceof ArrayBuffer || Array.isArray(pkt.c))) return;
     clientState.netIn.push([pkt, performance.now() / 1000]);
     if (clientState.netIn.length > 120) clientState.netIn.shift(); // background tab: keep only the last 2 s
 }

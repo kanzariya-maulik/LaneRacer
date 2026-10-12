@@ -1,5 +1,6 @@
 const nodeDataChannel = require('node-datachannel');
 const { withNetSim } = require('./netsim');
+const { encodeFast } = require('../public/js/netcodec.js');
 
 // Optional: reduce logging noise
 try {
@@ -121,14 +122,14 @@ class WebRTCManager {
     }
 
     broadcastGameState(stateSync, io) {
-        const payload = JSON.stringify({ type: 'STATE', data: stateSync });
+        const payload = Buffer.from(encodeFast(stateSync)); // binary: one datagram for a full grid (public/js/netcodec.js)
         const viaUDP = new Set();
 
         for (const [id, peer] of Object.entries(this.peers)) {
             if (live(peer)) {
                 // NET_SIM may deliver later (returns undefined); without it this runs now and reports failure
                 const ok = this.sendLater(() => {
-                    try { peer.dc.sendMessage(payload); return true; } catch (err) { peer.isOpen = false; return false; }
+                    try { peer.dc.sendMessageBinary(payload); return true; } catch (err) { peer.isOpen = false; return false; }
                 });
                 if (ok !== false) viaUDP.add(id);
             }
@@ -136,7 +137,7 @@ class WebRTCManager {
 
         // Socket.IO only for sockets still without an open channel (handshake, failed WebRTC, visitors), so one slow
         // peer doesn't double everyone's traffic
-        if (io) for (const [id, sock] of io.sockets.sockets) if (!viaUDP.has(id)) this.sendLater(() => sock.volatile.emit('game_state', stateSync));
+        if (io) for (const [id, sock] of io.sockets.sockets) if (!viaUDP.has(id)) this.sendLater(() => sock.volatile.emit('game_state', payload));
     }
 
     hasOpenChannel(socketId) {

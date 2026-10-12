@@ -10,7 +10,7 @@ const monza = Track.load('monza');
 const lp = (id, teamId = 'ferrari') => ({ id, username: id.toUpperCase(), teamId });
 const RACE = { maxLaps: 3, qualifying: false };
 // Fast-packet bytes per car at worst (see 'worst-case car entry'): a car in a pit stop with every field at its widest
-const CAR_BYTES = 88;
+const CAR_BYTES = 90; // as JSON (Socket.IO tests); on the wire it's 34 binary bytes (netcodec.js)
 const close = (a, b) => assert.ok(Math.abs(a - b) < 1e-9, `${a} vs ${b}`);
 
 // Teleport p through checkpoints in order; each call to lap() ends on the start line
@@ -797,7 +797,7 @@ test('fast update: compact per-car arrays with flags, at most CAR_BYTES per car 
     assert.strictEqual(typeof pkt.t, 'number');
     assert.strictEqual(pkt.c.length, 2);
     const a = pkt.c.find(e => e[0] === g.index.a);
-    assert.strictEqual(a.length, 14);
+    assert.strictEqual(a.length, 15);
     const F = Game.FLAGS;
     assert.strictEqual(a[6] & (F.inPit | F.limiter | F.ghost), F.inPit | F.limiter | F.ghost, 'garage car: in pit, limiter, ghost');
     for (const e of pkt.c) assert.ok(JSON.stringify(e).length <= CAR_BYTES, `${JSON.stringify(e).length} bytes`);
@@ -920,9 +920,9 @@ test('input queue: one input per tick in order; a missing input is guessed in it
     g.update();
     assert.strictEqual(a.lastSeq, 5);
     assert.strictEqual(a.input.steer, 0.5);
-    g.handleInputs('a', [6, 7, 8, 9, 10, 11, 12].map((s) => inp(s, 0)));
+    g.handleInputs('a', [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16].map((s) => inp(s, 0)));
     g.update();
-    assert.strictEqual(a.lastSeq, 9, 'queue capped at 4: skips ahead to the newest four');
+    assert.strictEqual(a.lastSeq, 9, 'queue capped at 8: skips ahead to the newest eight');
     g.handleInputs('a', [inp(6, 0.5)]);
     g.update();
     assert.strictEqual(a.lastSeq, 10, 'an input older than one already applied is never applied');
@@ -956,6 +956,21 @@ test('input queue: a client far behind the server slots (tab stall, reconnect) i
     assert.strictEqual(a.lastSeq, 101);
 });
 
+test('input cushion: each car reports the fewest spare inputs the server held over half a second, -1 if it guessed', () => {
+    const g = new Game(io, [lp('a')], monza, RACE, () => {});
+    g.frozen = false;
+    const a = g.players.a, inp = (seq) => ({ seq, steer: 0, throttle: 1, brake: 0, drs: false });
+    let seq = 0;
+    const slackAfter = (ticks, perTick) => {
+        for (let k = 0; k < ticks; k++) { g.handleInputs('a', Array.from({ length: perTick(k) }, () => inp(++seq))); g.update(); }
+        return g.fastPacket().c[0][14];
+    };
+    g.handleInputs('a', [inp(++seq), inp(++seq)]);                   // two spare once each tick adds one and uses one
+    assert.strictEqual(slackAfter(61, () => 1), 2, 'steady: two spare all window');
+    assert.strictEqual(slackAfter(30, (k) => (k === 10 ? 0 : k === 11 ? 2 : 1)), 1, 'one late input eats one spare');
+    assert.strictEqual(slackAfter(30, (k) => (k < 3 ? 0 : k < 6 ? 2 : 1)), -1, 'ran dry and guessed');
+});
+
 test('input queue: guessing stops when the client goes silent (controls released)', () => {
     const g = new Game(io, [lp('a')], monza, RACE, () => {});
     g.frozen = false;
@@ -977,8 +992,10 @@ test('fast update: worst-case car entry fits the per-car byte budget', () => {
         lastSeq: 9999999, wear: 0.99994, inPit: true, limiter: true, drs: true, drsAvailable: true, finished: true, lapValid: true,
         stop: { phase: 'hold', t: 2.94 } });
     const e = g.fastPacket().c.find((c) => c[0] === 19);
-    assert.strictEqual(JSON.stringify(e), '[19,-10140.4,-10140.4,-3.1416,-571.8,-0.563,127,-571.8,-571.8,0.19,9999999,0.9999,3,2.9]');
+    assert.strictEqual(JSON.stringify(e), '[19,-10140.4,-10140.4,-3.1416,-571.8,-0.563,127,-571.8,-571.8,0.19,9999999,0.9999,3,2.9,1]');
     assert.strictEqual(JSON.stringify(e).length, CAR_BYTES);
+    const back = require('../public/js/netcodec.js').decodeFast(require('../public/js/netcodec.js').encodeFast({ s: 1, t: 0, g: 0, c: [e] })).c[0];
+    e.forEach((v, i) => assert.ok(Math.abs(back[i] - v) < 0.06, `binary field ${i}: ${back[i]} vs ${v}`));
 });
 
 test('fast update carries velocity, tow and the last applied input for reconciliation', () => {
@@ -988,7 +1005,7 @@ test('fast update carries velocity, tow and the last applied input for reconcili
     g.frozen = false;
     for (let k = 0; k < 30; k++) { g.handleInputs('a', [{ seq: 7 + k, steer: 0, throttle: 1, brake: 0, drs: false }]); g.update(); }
     const e = pkt.c[0];
-    assert.strictEqual(e.length, 14); // … wear, stop code, stop time
+    assert.strictEqual(e.length, 15); // … wear, stop code, stop time, input cushion
     assert.ok(Math.abs(e[7]) + Math.abs(e[8]) > 0, 'velocity present');
     assert.strictEqual(e[10], 36);
     assert.ok(JSON.stringify(e).length <= CAR_BYTES, `${JSON.stringify(e).length} bytes`);

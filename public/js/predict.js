@@ -10,6 +10,16 @@ export const MAX_PENDING = 120;       // 2 s of unacknowledged inputs at most (t
 export const MAX_UNACKED = 60;        // 1 s with no server answer (results screen, dead link): stop driving alone
 
 const FIN = 16;
+
+// Input cushion: the server reports the fewest spare inputs it held for us over the last half second (-1: it ran dry
+// and guessed one, the cause of a correction). Run our 60 Hz steps a touch fast until a spare survives the WiFi jitter,
+// a touch slow when more pile up (each spare is a tick of delay in everyone else's view of us). Too small to feel.
+export function inputRate(slack) {
+    if (slack === undefined || slack === null) return 1;
+    if (slack < 0) return 1.04;
+    if (slack === 0) return 1.015;
+    return slack > 2 ? 0.99 : 1;
+}
 const lerpAngle = (a, b, k) => a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * k;
 
 export class Predictor {
@@ -24,6 +34,7 @@ export class Predictor {
         this.finished = false;
         this.lastS = -1;                  // newest server packet applied
         this.box = null;                  // this player's pit box (game_init): the stop guide drives into it
+        this.rate = 1;                    // step pace from the server's input cushion (inputRate)
     }
 
     // Server entry → simulation state
@@ -73,6 +84,7 @@ export class Predictor {
     onServer(e, s = Infinity) {
         if (s !== Infinity && s <= this.lastS) return;
         if (s !== Infinity) this.lastS = s;
+        this.rate = inputRate(e[14]);
         if (!this.car) { this.reset(e); this.lastS = s === Infinity ? -1 : s; return; }
         const lastSeq = e[10];
         if (lastSeq !== undefined && lastSeq >= 0) while (this.pending.length && this.pending[0].seq <= lastSeq) this.pending.shift();

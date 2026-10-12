@@ -9,6 +9,7 @@ import { placeScenery, seedOf, vergeReach, terrainHeights, terrainGround, skirtD
 import { heightAt, pathHeights } from './sim/elevation.js';
 import { themeOf, LANDS, SKIES, nightOf } from './themes.js';
 import { SnapshotBuffer, RenderClock, sample, samplePresent, decodeFlags } from './netsync.js';
+import { decodeFast } from './netcodec.js';
 import { Predictor, STEP_S } from './predict.js';
 import { stewardText } from './steward.js';
 import { clockText, lapBanner, fmtLap, boxBanner } from './qualiText.js';
@@ -302,7 +303,7 @@ function pollInput(dt) {
     const view = !!pad?.buttons[8]?.pressed; // gamepad View / Back / Select
     if (view && !padView && clientState.status !== 'LOBBY') toggleAssist();
     padView = view;
-    simAcc = Math.min(simAcc + dt, 0.25); // a long stall doesn't fire a burst of steps
+    simAcc = Math.min(simAcc + dt * (predictor?.rate ?? 1), 0.25); // paced to the server's input cushion; a long stall doesn't fire a burst
     while (simAcc >= STEP_S) { simStep(); simAcc -= STEP_S; }
 }
 
@@ -1699,8 +1700,9 @@ let othersMode = 'present';
 const presentClock = new RenderClock(); // 'present' mode time: server now, eased so packet jitter doesn't shake cars
 function applyNet(nowS, dt) {
     const myIdx = clientState.netIndex[clientState.me];
-    for (const [pkt, at] of clientState.netIn.splice(0)) {
-        if (!netBuf.push(pkt, at) || !predictor || myIdx === undefined) continue; // duplicate / stale: dropped
+    for (const [raw, at] of clientState.netIn.splice(0)) {
+        const pkt = raw instanceof ArrayBuffer ? decodeFast(raw) : raw;
+        if (!pkt || !netBuf.push(pkt, at) || !predictor || myIdx === undefined) continue; // duplicate / stale: dropped
         const mine = netBuf.latest().s === pkt.s && netBuf.latest().cars.get(myIdx);
         if (mine) predictor.onServer(mine, pkt.s);
     }

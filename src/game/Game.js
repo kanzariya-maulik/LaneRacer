@@ -24,7 +24,9 @@ const JUMP_PENALTY_S = 10;    // moving before lights out
 const JUMP_MOVE_M = 0.5;      // further than this from the grid slot = moved
 const FINISH_WINDOW_S = 60;   // after the winner finishes, the rest have this long before they're classified DNF
 const INPUT_TIMEOUT_S = 0.3;  // no input for this long = controls released
-const INPUT_QUEUE_MAX = 4;    // inputs buffered per player; a burst beyond this drops its oldest
+const INPUT_QUEUE_MAX = 8;    // inputs buffered per player; a burst beyond this drops its oldest
+const REALIGN_BEHIND = 4;     // newest input this many slots behind the server's: re-align at once
+const SLACK_TICKS = 30;       // input cushion report window: the fewest spare inputs held over this many ticks
 const LAG_REALIGN_BATCHES = 30; // input packets in a row landing behind the server's slots (~0.5 s) = lasting lag: re-align
 const DRS_GAP_S = 1;          // race: within this of the car ahead at the detection point
 const SLIP_MAX = 0.2;         // drag cut right behind another car…
@@ -296,7 +298,7 @@ class Game {
                 | (p.lapValid && FLAGS.lapValid) | ((this.mode === 'quali' || this.settings.collisions === false || p.ghost) && FLAGS.ghost);
             c.push([this.index[id], r1(p.x), r1(p.y), +p.angle.toFixed(4), r1(p.speed), +p.steer.toFixed(3), flags,
                     r1(p.vx), r1(p.vy), +(p.tow || 0).toFixed(2), p.lastSeq, +(p.wear || 0).toFixed(4),
-                    p.stop ? STOP_CODE[p.stop.phase] : 0, p.stop ? +p.stop.t.toFixed(1) : 0]);
+                    p.stop ? STOP_CODE[p.stop.phase] : 0, p.stop ? +p.stop.t.toFixed(1) : 0, p.slack ?? 1]);
         }
         return { s: this.seq, t: +this.clock.toFixed(3), g: +this.time.toFixed(3), c };
     }
@@ -357,7 +359,7 @@ class Game {
         if (fresh.length) {
             const newest = Math.max(...fresh.map((i) => i.seq));
             p.behind = newest <= p.lastSeq ? (p.behind || 0) + 1 : 0;
-            if (newest < p.lastSeq - INPUT_QUEUE_MAX || p.behind >= LAG_REALIGN_BATCHES) {
+            if (newest < p.lastSeq - REALIGN_BEHIND || p.behind >= LAG_REALIGN_BATCHES) {
                 p.behind = 0;
                 p.realigns = (p.realigns || 0) + 1; // network log: each one is a visible correction for this driver
                 p.lastSeq = Math.max(p.applied ?? -1, Math.min(...fresh.map((i) => i.seq)) - 1); // never re-apply a real input
@@ -515,13 +517,19 @@ class Game {
                     p.queue.splice(0, p.queue.length - INPUT_QUEUE_MAX);
                     p.lastSeq = p.queue[0].seq - 1; // buffered too far ahead: skip to the newest four
                 }
+                let slack = null;
                 if (p.queue.length && (p.lastSeq < 0 || p.queue[0].seq === p.lastSeq + 1)) {
                     p.input = p.queue.shift();
                     p.lastSeq = p.applied = p.input.seq; // applied: real inputs only, lastSeq also counts guessed slots
+                    slack = p.queue.length;
                 } else if (p.lastSeq >= 0 && this.clock - p.inputAt <= INPUT_TIMEOUT_S) {
                     p.lastSeq++;
                     p.starve++;
+                    slack = -1;
                 }
+                // Input cushion: the client paces its steps (predict.js inputRate) to keep one spare input through its jitter
+                if (slack !== null) p.slackMin = Math.min(p.slackMin ?? slack, slack);
+                if (this.seq % SLACK_TICKS === 0 && p.slackMin !== undefined) { p.slack = p.slackMin; p.slackMin = undefined; }
             }
             if (this.mode === 'race') this.updateTow();
             for (const id of ids) {
