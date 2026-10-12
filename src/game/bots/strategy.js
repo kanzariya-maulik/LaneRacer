@@ -65,9 +65,40 @@ function raceTick(p, ctx, b) {
     }
 }
 
+// Exit window per level, as shares of the segment clock: later = more track evolution, never too late for a lap
+const EXIT = { easy: [0, 0.6], medium: [0.3, 0.7], hard: [0.55, 0.75], pro: [0.55, 0.75] };
+
+function qualiTick(p, ctx, b) {
+    const g = ctx.game, q = g.quali, lap = q.refS / 1.15; // a racing lap at pace (refS carries a 15 % margin)
+    if (p.qualiOut || !q) return;
+    if (b.seg !== q.segment) { // a new segment: plan this one's first exit
+        const [lo, hi] = EXIT[p.ai.level] || EXIT.medium, len = Math.max(0, q.endsAt - ctx.time);
+        Object.assign(b, { seg: q.segment, runs: 0, timed: 0, wantPit: false, exitAt: ctx.time + len * (lo + (hi - lo) * ctx.rng()) });
+        b.exitAt = Math.max(ctx.time, Math.min(b.exitAt, q.endsAt - 2.8 * lap));
+    }
+    const parked = p.stop?.phase === 'wait';
+    if (parked) {
+        if (p.compound !== 'S') g.setNextCompound(p.id, 'S'); // parked: fitted at once
+        if (b.wantPit || b.timed) { // back from a run: go again only from the drop zone (or with no time) and with time for it
+            b.runs++; b.timed = 0; b.wantPit = false;
+            const rank = g.segmentRanking().findIndex((e) => e.id === p.id) + 1;
+            const atRisk = p.segBest === null || (q.format === 'full' && rank > g.survivors());
+            b.exitAt = atRisk && q.endsAt - ctx.time > 2.8 * lap ? ctx.time + 3 : Infinity;
+        }
+        b.press = q.phase === 'running' && ctx.time >= b.exitAt && g.canLeaveBox(p);
+        return;
+    }
+    b.press = false;
+    // On track: count finished timed laps; two of them (or no time for another), or the flag, and it's the in-lap
+    if (p.lap !== b.timedSeen) { if (b.timedSeen !== undefined && p.lastLap !== null) b.timed++; b.timedSeen = p.lap; }
+    const noTime = q.endsAt - ctx.time < lap;
+    if (b.timed >= 2 || (b.timed >= 1 && noTime) || (q.phase === 'flag' && p.lapStart === null)) b.wantPit = true;
+}
+
 function tick(p, ctx) {
     const b = state(p);
     if (ctx.mode === 'race') raceTick(p, ctx, b);
+    else qualiTick(p, ctx, b);
 }
 
 module.exports = { planRace, tick, WEAR_CAP };

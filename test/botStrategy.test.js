@@ -50,3 +50,18 @@ test('a bot race: it pits on its plan, uses two compounds, never boxes on the la
     assert.ok(['perfect', 'auto'].includes(p.lastStop.release), p.lastStop.release);
     assert.strictEqual(lastLapCall, false);
 });
+
+test('qualifying: every bot goes out on Softs, sets a time, comes back in and parks', () => {
+    const t = Track.load('monza'), bots = fillGrid([], 'hard', 4).slice(0, 3);
+    bots.forEach((b) => { b.ai.mistake = 0; });
+    const io = { emit() {}, volatile: { emit() {} } };
+    let results = null;
+    const g = new Game(io, bots, t, { maxLaps: 3, qualifying: true, qualiFormat: 'short', qualiScale: 0.6, tyreWear: true, rng: rngOf(2) }, (r) => { results = r; }, 'quali');
+    for (let k = 0; k < 60 * 900 && !results; k++) g.update();
+    assert.ok(results, 'session ended');
+    for (const b of bots) {
+        const p = g.players[b.id];
+        assert.ok(results.find((r) => r.id === b.id).time !== null, `${b.username}: no time`);
+        assert.strictEqual(p.compound, 'S');
+    }
+});

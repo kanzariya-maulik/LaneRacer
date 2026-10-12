@@ -81,7 +81,7 @@ function scan(p, ctx, v) {
         return { s: (t.cum[n.i] + n.t * (t.cum[n.i + 1] - t.cum[n.i])) / sc, off: ((o.x - n.px) * -ey + (o.y - n.py) * ex) / l / sc, i: n.i };
     };
     const me = where(p), mine = me.off, r = { ahead: null, behind: null, alongside: null, lapper: null, close: false };
-    for (const o of ctx.cars) {
+    for (const o of ctx.mode === 'quali' ? [] : ctx.cars) { // qualifying cars are ghosts: no traffic to race
         if (o === p || o.finished || (o.inPit && o.stop)) continue;
         const w = where(o), oi = w.i, oo = w.off;
         let f = (((w.s - me.s) % total) + total) % total;
@@ -155,7 +155,9 @@ function drive(p, ctx) {
     if (b.err && (ctx.time > b.err.until || (phNow === 0 && b.err.until - ctx.time < 1.5))) b.err = null;
     if (b.err?.kind === 'late') factor *= 1.06;
     else if (b.err?.kind === 'early') factor *= 0.92;
-    const vLine = t.racingLine.speed[ahead(t, here, Math.max(5, v * SPEED_LOOK_S))] * factor;
+    const js = ahead(t, here, Math.max(5, v * SPEED_LOOK_S));
+    // The line's corner speeds are the car's real limit: past them it runs wide, so only straights get faster than the line
+    const vLine = t.racingLine.speed[js] * (t.racingLine.phase[js] === 0 || b.err?.kind === 'late' ? factor : Math.min(factor, 1));
     const { laneT, cap } = racecraft(p, b, ctx, v, here, r, vLine);
     const pitV = toPit < PIT_SETUP_M ? Math.sqrt(((t.pit.limitKmh || Drive.PIT_LIMIT_KMH) / 3.6) ** 2 + 2 * PIT_DEC * Math.max(0, toPit - PIT_APPROACH_M)) : Infinity;
     const vt = Math.min(vLine, cap, pitV);
@@ -170,7 +172,8 @@ function drive(p, ctx) {
     const steer = steerTo(p, t.path[j].x + L.N[j].x * o, t.path[j].y + L.N[j].y * o, sc, v);
     const err = vt - v;
     const throttle = err > 0 ? Math.min(1, 0.35 + err * 0.5) : 0, brake = err < -0.5 ? Math.min(1, -err * 0.3) : 0;
-    return { throttle: bogging ? Math.min(throttle, 0.6) : throttle, brake, steer, drs: !!p.drsAvailable && brake === 0 };
+    const lift = Math.abs(steer) > 0.95 ? 0.2 : 1; // at full lock it can't make the turn: lift like a driver would
+    return { throttle: (bogging ? Math.min(throttle, 0.6) : throttle) * lift, brake, steer, drs: !!p.drsAvailable && brake === 0 };
 }
 
 module.exports = { drive, state, insideSide, ahead, lineOf, scan, PACE, IDLE };
