@@ -12,7 +12,7 @@ const state = {
     status: 'LOBBY', // LOBBY, QUALIFYING, QUALI_RESULTS, COUNTDOWN, RACE, FINISHED
     players: {},
     hostId: null,
-    settings: { trackId: 'monza', maxLaps: 3, qualifying: true, qualiFormat: 'full', collisions: true, tyreWear: true, contactPenalties: true, ghostStart: true, timeOfDay: 'day', outLaps: 1, qualiLaps: 2, help: { mode: 'choose', steer: 100, brake: 100 } }
+    settings: { trackId: 'monza', maxLaps: 3, qualifying: true, qualiFormat: 'full', collisions: true, tyreWear: true, contactPenalties: true, ghostStart: true, timeOfDay: 'day', outLaps: 1, qualiLaps: 2, aiDrivers: false, aiLevel: 'medium', help: { mode: 'choose', steer: 100, brake: 100 } }
 };
 
 let gameInstance = null;

@@ -32,6 +32,8 @@ function sanitizeSettings(current, incoming, trackIds) {
     if (Number.isFinite(incoming.outLaps)) next.outLaps = clamp(Math.round(incoming.outLaps), 1, 3);
     if (Number.isFinite(incoming.qualiLaps)) next.qualiLaps = clamp(Math.round(incoming.qualiLaps), 1, 10);
     if (typeof incoming.tyreWear === 'boolean') next.tyreWear = incoming.tyreWear;
+    if (typeof incoming.aiDrivers === 'boolean') next.aiDrivers = incoming.aiDrivers;
+    if (['easy', 'medium', 'hard', 'pro'].includes(incoming.aiLevel)) next.aiLevel = incoming.aiLevel;
     if (incoming.help !== undefined) next.help = sanitizeHelp(incoming.help, current.help || HELP_DEFAULT);
     return next;
 }
