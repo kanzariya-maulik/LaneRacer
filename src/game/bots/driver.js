@@ -5,6 +5,7 @@ const { C } = require('../CarPhysics');
 const RacingLine = require('../RacingLine');
 const Drive = require('../../../public/js/sim/drive.js');
 const { trackIndex } = require('../../../public/js/racingline.js');
+const Physics = require('../Physics');
 
 const IDLE = Object.freeze({ throttle: 0, brake: 0, steer: 0, drs: false });
 const SPEED_LOOK_S = 0.25;                             // speed target read this far ahead (throttle/brake response)
@@ -61,8 +62,70 @@ function state(p) {
     return p.bot || (p.bot = { idx: null, lane: 0, passSide: 0, defend: 0, defended: false, err: null, prevPhase: 0, followS: 0, press: false, wantPit: false, bog: undefined });
 }
 
-// Racecraft (Task 3) and mistakes (Task 4) plug in here; for now: the line, alone
-function racecraft() { return { laneT: 0, cap: Infinity }; }
+const CAR_M = 5.6, PASS_M = 3.5, DEFEND_M = 3, BLUE_M = 3.5; // metres
+const PATH_M = 3, ROOM_M = 3.5; // in my path within PATH_M sideways; side by side, never aim closer than ROOM_M // a car this close sideways is in my path (2 m wide car + margin)
+const FOLLOW_DEC = 8, FOLLOW_GAP_M = 6, AHEAD_M = 400; // cautious braking (cornering eats into it), so look far enough to stop from top speed // m/s² of braking the follow cap allows for (well under the car's limit), metres kept clear
+
+// Cars around me in track terms: f = metres along the lap ahead (+) / behind (−), l = their offset from the centreline
+// minus mine (+ = the path normal's side, the same frame as the racing line's offsets). "Ahead" = in the lane my line takes
+// at their point of the lap, so cars converging onto my line through a bend count before they're in front of my nose
+function scan(p, ctx, v) {
+    const t = ctx.track, sc = t.scale, L = lineOf(t), total = t.cum[t.path.length] / sc, b = state(p);
+    // Exact lap distance (m) and centreline offset (m) of a car: segment and fraction, not the ~10 m path points
+    const where = (o) => {
+        const n = Physics.nearestOnPathHint(o.x, o.y, t.path, o.aiSeg, true), P = t.path, a = P[n.i], c = P[(n.i + 1) % P.length];
+        o.aiSeg = n.i;
+        const ex = c.x - a.x, ey = c.y - a.y, l = Math.hypot(ex, ey) || 1;
+        return { s: (t.cum[n.i] + n.t * (t.cum[n.i + 1] - t.cum[n.i])) / sc, off: ((o.x - n.px) * -ey + (o.y - n.py) * ex) / l / sc, i: n.i };
+    };
+    const me = where(p), mine = me.off, r = { ahead: null, behind: null, alongside: null, lapper: null, close: false };
+    for (const o of ctx.cars) {
+        if (o === p || o.finished || (o.inPit && o.stop)) continue;
+        const w = where(o), oi = w.i, oo = w.off;
+        let f = (((w.s - me.s) % total) + total) % total;
+        if (f > total / 2) f -= total;
+        const e = { o, f, l: oo - mine, off: oo, v: Math.abs(o.speed) / sc };
+        if (o === b.passCar) r.target = e;
+        if (Math.abs(f) < CAR_M && Math.abs(e.l) < 4) r.alongside = e;
+        if (f > 0 && f < AHEAD_M && Math.abs(oo - (t.racingLine.offset[oi] / sc + b.lane)) < PATH_M) { if (!r.ahead || f < r.ahead.f) r.ahead = e; }
+        else if (f < 0 && f > -60 && Math.abs(e.l) < 4) {
+            if (!r.behind || f > r.behind.f) r.behind = e;
+            if (o.lap > p.lap && o.rank < p.rank) r.lapper = e; // a lap or more up on me, catching me
+        }
+    }
+    r.close = !!r.alongside || (!!r.behind && -r.behind.f < Math.max(10, 0.6 * v));
+    return r;
+}
+
+function racecraft(p, b, ctx, v, here, r, vt) {
+    const t = ctx.track, ai = p.ai, ph = t.racingLine.phase[here];
+    if (ph === 1) { b.defend = 0; b.defended = false; } // in the corner: the next straight allows a new move
+    if (r.lapper && -r.lapper.f < 1.5 * v + 10) { b.passSide = 0; return { laneT: -insideSide(t, here) * BLUE_M, cap: v * 0.97 }; } // blue flag
+    let laneT = 0, cap = Infinity;
+    const a = r.ahead;
+    if (a) {
+        const faster = vt > a.v + 0.5 || p.tow > 0 || p.drsAvailable;
+        if (!b.passSide && faster && !r.alongside && a.f < Math.max((0.5 + 0.5 * ai.aggression) * v, FOLLOW_GAP_M + 6) + CAR_M) { // held up, even from a standstill
+            const inside = insideSide(t, here);
+            b.passSide = Math.sign(a.l) === inside ? -inside : inside; // the inside, unless they're already on it
+            b.passCar = a.o;
+        }
+        if (b.passSide && ph === 2 && a.f > CAR_M * 0.5) b.passSide = 0; // not alongside by the braking point: back in line
+        cap = Math.sqrt(Math.max(0, a.v * a.v + 2 * FOLLOW_DEC * (a.f - CAR_M - FOLLOW_GAP_M))); // no ramming: can always stop behind it
+        if (a.f < 1.5 * v) b.followS += ctx.dt;
+    } else if (!r.target || r.target.f < -CAR_M || r.target.f > AHEAD_M) { b.passSide = 0; b.passCar = null; } // out of my lane isn't done: done once it's behind me
+    if (b.passSide) laneT = b.passSide * PASS_M;
+    else {
+        const brakingSoon = t.racingLine.phase[ahead(t, here, 150)] === 2;
+        if (!b.defended && ai.aggression >= 0.3 && r.behind && -r.behind.f < 0.5 * v + CAR_M && brakingSoon && ph === 0) {
+            b.defend = insideSide(t, here);
+            b.defended = true;
+        }
+        if (b.defend) laneT = b.defend * DEFEND_M;
+    }
+    if (r.alongside) laneT = b.lane; // side by side: hold my lane, never turn in across them
+    return { laneT, cap };
+}
 
 function drive(p, ctx) {
     const b = state(p);
@@ -75,15 +138,21 @@ function drive(p, ctx) {
     const here = b.idx;
     let factor = (PACE.base / ai.pace) * Math.sqrt(p.tyreGrip ?? 1);
     if (ctx.mode === 'quali' && p.lapStart === null) factor *= 0.9; // out-lap
-    const { laneT, cap } = racecraft(p, b, ctx, v, here);
-    const vt = Math.min(t.racingLine.speed[ahead(t, here, Math.max(5, v * SPEED_LOOK_S))] * factor, cap);
+    const r = scan(p, ctx, v);
+    const vLine = t.racingLine.speed[ahead(t, here, Math.max(5, v * SPEED_LOOK_S))] * factor;
+    const { laneT, cap } = racecraft(p, b, ctx, v, here, r, vLine);
+    const vt = Math.min(vLine, cap);
     b.lane += clamp(laneT - b.lane, -LANE_RATE_MS * ctx.dt, LANE_RATE_MS * ctx.dt);
     const j = ahead(t, here, clamp(v * PACE.lookS, PACE.lookMin, PACE.lookMax));
-    const o = clamp(t.racingLine.offset[j] + b.lane * sc, L.lo[j], L.hi[j]);
+    let o = clamp(t.racingLine.offset[j] + b.lane * sc, L.lo[j], L.hi[j]);
+    if (r.alongside) { // room: their side of the track stays theirs through the corner
+        const lim = (r.alongside.off - Math.sign(r.alongside.l) * ROOM_M) * sc;
+        o = r.alongside.l > 0 ? Math.min(o, lim) : Math.max(o, lim);
+    }
     const steer = steerTo(p, t.path[j].x + L.N[j].x * o, t.path[j].y + L.N[j].y * o, sc, v);
     const err = vt - v;
     const throttle = err > 0 ? Math.min(1, 0.35 + err * 0.5) : 0, brake = err < -0.5 ? Math.min(1, -err * 0.3) : 0;
     return { throttle, brake, steer, drs: !!p.drsAvailable && brake === 0 };
 }
 
-module.exports = { drive, state, insideSide, ahead, lineOf, PACE, IDLE };
+module.exports = { drive, state, insideSide, ahead, lineOf, scan, PACE, IDLE };
