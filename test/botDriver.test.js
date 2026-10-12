@@ -104,3 +104,44 @@ test('defending: one move toward the inside before the braking zone, never a sec
     drive(me, ctx(back(-1)));
     assert.strictEqual(state(me).defend, side, 'no second move when the attacker switches');
 });
+
+test('mistakes: forced at every corner, the bot is slower but recovers and keeps lapping', () => {
+    const clean = lone(tracks.silverstone, 'medium', 2, 1.05).times[1];
+    const bot = fillGrid([], 'medium', 11)[0];
+    bot.ai.pace = 1.05; bot.ai.mistake = 1;
+    const g = new Game(io, [bot], tracks.silverstone, { ...RACE, rng: () => 0.5 }, () => {});
+    g.release();
+    const p = g.players[bot.id];
+    let kinds = new Set();
+    for (let k = 0; k < 60 * 400 && p.lap < 2; k++) { g.update(); if (p.bot?.err) kinds.add(p.bot.err.kind); }
+    assert.strictEqual(p.lap, 2, 'stuck after a mistake');
+    assert.ok(p.lastLap > clean, `mistake lap ${p.lastLap} vs clean ${clean}`);
+    assert.ok(kinds.size >= 1);
+});
+
+test('no mistakes with a car alongside or close behind', () => {
+    const { drive, state, ahead } = require('../src/game/bots/driver');
+    const t = tracks.monza, ph = t.racingLine.phase;
+    let i = 0;
+    for (let k = 1; k < ph.length; k++) if (ph[k] === 2 && ph[k - 1] !== 2) { i = k; break; }
+    const P = t.path[i], Q = t.path[i + 1], ang = Math.atan2(Q.y - P.y, Q.x - P.x);
+    const me = { x: P.x, y: P.y, angle: ang, speed: 60 * t.scale, ai: { pace: 1, aggression: 0.5, mistake: 1, reaction: 0 }, lap: 1, rank: 1, tyreGrip: 1 };
+    const side = { x: P.x - Math.sin(ang) * 3 * t.scale, y: P.y + Math.cos(ang) * 3 * t.scale, speed: 60 * t.scale, lap: 1, rank: 2 };
+    state(me).prevPhase = 0;
+    drive(me, { track: t, cars: [me, side], time: 50, frozen: false, mode: 'race', dt: 1 / 60, rng: () => 0, toEntryM: () => 1e9 });
+    assert.strictEqual(state(me).err, null);
+});
+
+test('start: no throttle before the bot reacts, then it goes', () => {
+    const bot = fillGrid([], 'easy', 2)[0];
+    bot.ai.reaction = 0.4; bot.ai.bog = 0;
+    const g = new Game(io, [bot], tracks.monza, RACE, () => {});
+    g.update();
+    assert.strictEqual(g.players[bot.id].input.throttle, 0, 'lights still on');
+    g.release();
+    for (let k = 0; k < 20; k++) g.update(); // 0.33 s
+    assert.strictEqual(g.players[bot.id].input.throttle, 0, 'before its reaction time');
+    for (let k = 0; k < 10; k++) g.update();
+    assert.ok(g.players[bot.id].input.throttle > 0, 'after it');
+    assert.strictEqual(g.players[bot.id].jumpStart, false);
+});

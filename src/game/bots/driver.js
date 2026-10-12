@@ -135,14 +135,27 @@ function drive(p, ctx) {
     b.idx = trackIndex(t.path, p.x, p.y, b.idx, 40 * sc);
     if ((p.boxCall || b.wantPit) && t.pit && p.box && ctx.toEntryM(p) < PIT_APPROACH_M) return { ...Drive.pitAssist(p, t), drs: false };
     if (ctx.mode === 'race' && ctx.time < ai.reaction) return IDLE;
+    if (b.bog === undefined) b.bog = ctx.mode === 'race' && ctx.rng() < (ai.bog || 0);
+    const bogging = b.bog && ctx.time < ai.reaction + 0.3;
     const here = b.idx;
     let factor = (PACE.base / ai.pace) * Math.sqrt(p.tyreGrip ?? 1);
     if (ctx.mode === 'quali' && p.lapStart === null) factor *= 0.9; // out-lap
     const r = scan(p, ctx, v);
+    // A mistake at a corner entry, never with someone right there; it lasts until the corner is done (or 2.5 s)
+    const phNow = t.racingLine.phase[here];
+    if (phNow === 2 && b.prevPhase !== 2 && !b.err && !r.close && ctx.rng() < ai.mistake) {
+        const roll = ctx.rng();
+        b.err = { kind: roll < 0.4 ? 'late' : roll < 0.7 ? 'early' : 'apex', until: ctx.time + 2.5 };
+    }
+    b.prevPhase = phNow;
+    if (b.err && (ctx.time > b.err.until || (phNow === 0 && b.err.until - ctx.time < 1.5))) b.err = null;
+    if (b.err?.kind === 'late') factor *= 1.06;
+    else if (b.err?.kind === 'early') factor *= 0.92;
     const vLine = t.racingLine.speed[ahead(t, here, Math.max(5, v * SPEED_LOOK_S))] * factor;
     const { laneT, cap } = racecraft(p, b, ctx, v, here, r, vLine);
     const vt = Math.min(vLine, cap);
-    b.lane += clamp(laneT - b.lane, -LANE_RATE_MS * ctx.dt, LANE_RATE_MS * ctx.dt);
+    const laneWant = laneT + (b.err?.kind === 'apex' ? -insideSide(t, here) * 1.5 : 0);
+    b.lane += clamp(laneWant - b.lane, -LANE_RATE_MS * ctx.dt, LANE_RATE_MS * ctx.dt);
     const j = ahead(t, here, clamp(v * PACE.lookS, PACE.lookMin, PACE.lookMax));
     let o = clamp(t.racingLine.offset[j] + b.lane * sc, L.lo[j], L.hi[j]);
     if (r.alongside) { // room: their side of the track stays theirs through the corner
@@ -152,7 +165,7 @@ function drive(p, ctx) {
     const steer = steerTo(p, t.path[j].x + L.N[j].x * o, t.path[j].y + L.N[j].y * o, sc, v);
     const err = vt - v;
     const throttle = err > 0 ? Math.min(1, 0.35 + err * 0.5) : 0, brake = err < -0.5 ? Math.min(1, -err * 0.3) : 0;
-    return { throttle, brake, steer, drs: !!p.drsAvailable && brake === 0 };
+    return { throttle: bogging ? Math.min(throttle, 0.6) : throttle, brake, steer, drs: !!p.drsAvailable && brake === 0 };
 }
 
 module.exports = { drive, state, insideSide, ahead, lineOf, scan, PACE, IDLE };
