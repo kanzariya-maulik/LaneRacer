@@ -13,6 +13,7 @@ let clientState = {
     mySectors: [null, null, null],   // current lap: the server's sector events { id, sector, time, valid, personalBest }
     myBestSectors: [null, null, null],
     gameState: null,
+    bots: {},        // this session's AI drivers: names, teams, colours (from game_init)
     trackData: null, // static track geometry
     netIn: [],       // fast updates waiting for game3d.js: [packet, arrival s]
     netIndex: {},    // player id -> car index in fast updates
@@ -278,6 +279,9 @@ socket.on('status_change', (status) => {
 
 socket.on('game_init', (data) => {
     clientState.gameState = data.players;
+    // AI drivers aren't lobby players: their names, teams and colours come with the session
+    clientState.bots = Object.fromEntries(Object.values(data.players).filter((p) => p.isBot)
+        .map((p) => [p.id, { id: p.id, username: p.username, teamId: p.teamId, color: p.color, isBot: true }]));
     clientState.trackData = data.track;
     clientState.netIndex = data.index || {};
     clientState.netIn = [];
@@ -402,3 +406,6 @@ socket.on('track_limits', (e) => {
     if (e.kind === 'box_missed') { window.showBanner?.('MISSED THE BOX — STAYING OUT'); return; }
     window.showSteward?.(e);
 });
+
+// A car's driver for names, teams and colours: a lobby player or an AI driver
+window.driverOf = (id) => clientState.players[id] || clientState.bots[id];

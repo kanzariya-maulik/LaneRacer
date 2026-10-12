@@ -19,6 +19,8 @@ const setTrack = document.getElementById('setting-track');
 const setLaps = document.getElementById('setting-laps');
 const setQuali = document.getElementById('setting-quali');
 const setCollisions = document.getElementById('setting-collisions');
+const setAi = document.getElementById('setting-ai');
+const setAiLevel = document.getElementById('setting-ai-level');
 const setGhost = document.getElementById('setting-ghost');
 const setTyres = document.getElementById('setting-tyres');
 const setPenalties = document.getElementById('setting-penalties');
@@ -304,6 +306,8 @@ function emitSettings() {
         ghostStart: setGhost.value === '1',
         tyreWear: setTyres.value === '1',
         contactPenalties: setPenalties.value === '1',
+        aiDrivers: setAi.value === '1',
+        aiLevel: setAiLevel.value,
         help: { mode: setHelp.value, brake: +setHelpBrake.value, steer: +setHelpSteer.value }
     });
 }
@@ -314,6 +318,8 @@ setCollisions.addEventListener('change', emitSettings);
 setGhost.addEventListener('change', emitSettings);
 setTyres.addEventListener('change', emitSettings);
 setPenalties.addEventListener('change', emitSettings);
+setAi.addEventListener('change', emitSettings);
+setAiLevel.addEventListener('change', emitSettings);
 setTime.addEventListener('change', emitSettings);
 [setHelp, setHelpBrake, setHelpSteer].forEach((el) => el.addEventListener('change', emitSettings));
 
@@ -425,6 +431,8 @@ window.updateSettingsUI = () => {
     setGhost.value = clientState.settings.ghostStart === false ? '0' : '1';
     setTyres.value = clientState.settings.tyreWear === false ? '0' : '1';
     setPenalties.value = clientState.settings.contactPenalties === false ? '0' : '1';
+    setAi.value = clientState.settings.aiDrivers ? '1' : '0';
+    setAiLevel.value = clientState.settings.aiLevel || 'medium';
     const help = clientState.settings.help || { mode: 'choose', steer: 100, brake: 100 };
     setHelp.value = help.mode;
     setHelpBrake.value = String(help.brake);

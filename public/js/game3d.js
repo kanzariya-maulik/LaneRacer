@@ -10,6 +10,7 @@ import { heightAt, pathHeights } from './sim/elevation.js';
 import { themeOf, LANDS, SKIES, nightOf } from './themes.js';
 import { SnapshotBuffer, RenderClock, sample, samplePresent, decodeFlags } from './netsync.js';
 import { decodeFast } from './netcodec.js';
+const driverOf = (id) => window.driverOf(id); // lobby player or AI driver (socket.js)
 import { Predictor, STEP_S } from './predict.js';
 import { stewardText } from './steward.js';
 import { clockText, lapBanner, fmtLap, boxBanner } from './qualiText.js';
@@ -1586,7 +1587,7 @@ function envTexture() {
 }
 
 function makeCar(id) {
-    const lp = clientState.players[id];
+    const lp = driverOf(id);
     if (!lp) return null;
     const root = new THREE.Group();
     const wheels = [];
@@ -1854,10 +1855,10 @@ window.showQualiResults = (list) => {
     ol.innerHTML = '';
     const pole = list[0]?.bestLap;
     for (const r of list) {
-        const lp = clientState.players[r.id];
+        const lp = driverOf(r.id);
         const li = document.createElement('li');
         const gap = r.position > 1 && r.bestLap !== null && pole !== null ? `  +${(r.bestLap - pole).toFixed(3)}` : '';
-        li.textContent = `P${r.position}  ${lp ? lp.username : '—'}${helpTags(lp?.assist) ? ' · ' + helpTags(lp.assist) : ''}  ${r.bestLap === null ? 'no time' : fmtTime(r.bestLap)}${gap}`;
+        li.textContent = `P${r.position}  ${lp ? lp.username : '—'}${driverTags(lp) ? ' · ' + driverTags(lp) : ''}  ${r.bestLap === null ? 'no time' : fmtTime(r.bestLap)}${gap}`;
         ol.appendChild(li);
     }
 };
@@ -1870,14 +1871,14 @@ window.showRaceResults = (res) => {
     $('rr-track').textContent = (clientState.trackData?.name || '').toUpperCase();
     const span = (cls, text = '') => Object.assign(document.createElement('span'), { className: cls, textContent: text });
     for (const r of res.rows) {
-        const lp = clientState.players[r.id] || clientState.gameState?.[r.id], c = resultCells(r, fmtTime);
+        const lp = driverOf(r.id) || clientState.gameState?.[r.id], c = resultCells(r, fmtTime);
         const li = document.createElement('li');
         li.className = (r.id === clientState.me ? 'me ' : '') + (r.position <= 3 && !r.dnf ? 'podium' : '');
         const team = span('rr-team');
         team.style.background = teamInfo[lp?.teamId]?.chatColor || '#888';
         const best = span('rr-best' + (r.id === res.fastestLapId ? ' fl' : ''), r.bestLap === null ? '—' : fmtTime(r.bestLap));
         if (r.id === res.fastestLapId) best.insertAdjacentHTML('afterbegin', STOPWATCH + ' ');
-        li.append(span('rr-pos', r.position), team, span('rr-name', `${lp?.username || '—'}${helpTags(lp?.assist) ? ' · ' + helpTags(lp.assist) : ''}`), span('rr-chg ' + c.changeCls, c.change),
+        li.append(span('rr-pos', r.position), team, span('rr-name', `${lp?.username || '—'}${driverTags(lp) ? ' · ' + driverTags(lp) : ''}`), span('rr-chg ' + c.changeCls, c.change),
             span('rr-laps', r.laps), best, span('rr-pen', c.pen), span('rr-time' + (r.dnf ? ' dnf' : ''), c.time));
         ol.appendChild(li);
     }
@@ -2015,12 +2016,13 @@ window.onSectorAll = (s) => { liveSectors(liveSec, s); };
 const STOPWATCH = document.querySelector('#fl-card .stopwatch').outerHTML;
 // Driver help badges: B = braking help (Low or High), S = steering help
 const helpTags = (a) => (a ? `${a.brake > 0 ? 'B' : ''}${a.steer > 0 ? 'S' : ''}` : '');
-const codeOf = (id) => { const lp = clientState.players[id]; return lp ? driverCode(lp.username) : '---'; };
+const driverTags = (lp) => (lp?.isBot ? 'AI' : helpTags(lp?.assist)); // AI drivers say so instead of their help levels
+const codeOf = (id) => { const lp = driverOf(id); return lp ? driverCode(lp.username) : '---'; };
 
 // F1 TV-style purple card when anyone sets the session's fastest lap
 let flTimer;
 window.showFastestLap = (fl) => {
-    const card = $('fl-card'), lp = clientState.players[fl.id];
+    const card = $('fl-card'), lp = driverOf(fl.id);
     card.querySelector('.fl-team').style.background = teamInfo[lp?.teamId]?.chatColor || '#888';
     card.querySelector('.fl-name').textContent = lp ? lp.username : '—';
     card.querySelector('.fl-time').textContent = fmtTime(fl.time);
@@ -2066,7 +2068,7 @@ function updateHUD(withTower = true) {
     // Finished and watching: say whose car is on screen and how to switch
     const w = watchingAfterFinish(), wo = $('watch-overlay');
     wo.classList.toggle('hidden', !w);
-    if (w) $('watch-name').textContent = clientState.players[spectateId]?.username || '';
+    if (w) $('watch-name').textContent = driverOf(spectateId)?.username || '';
     $('hud-rank').innerText = racing ? me.rank : '--';
     $('hud-lap').innerText = racing ? lapLabel(me.lap) : '--';
     $('hud-laps').textContent = racing && clientState.status !== 'QUALIFYING' ? `/${clientState.settings.maxLaps}` : '';
@@ -2220,16 +2222,16 @@ function updateHUD(withTower = true) {
         const quali = clientState.status === 'QUALIFYING' || clientState.status === 'QUALI_RESULTS'; // ghosts also mean collisions off
         const ol = $('leaderboard-list');
         ol.innerHTML = '';
-        const sorted = Object.entries(gs).filter(([id]) => clientState.players[id]).sort((a, b) => a[1].rank - b[1].rank);
+        const sorted = Object.entries(gs).filter(([id]) => driverOf(id)).sort((a, b) => a[1].rank - b[1].rank);
         const rows = sorted.map(([, p]) => ({ gap: p.gap, lapsDown: p.lapsDown || 0 }));
-        const codes = sorted.map(([id]) => driverCode(clientState.players[id].username));
+        const codes = sorted.map(([id]) => driverCode(driverOf(id).username));
         const el = (tag, cls, text = '') => Object.assign(document.createElement(tag), { className: cls, textContent: text });
         // Top 10, or top 9 plus your own row when you're further back
         const mine = sorted.findIndex(([id]) => id === clientState.me);
         const shown = mine >= 10 ? [...sorted.keys()].slice(0, 9).concat(mine) : [...sorted.keys()].slice(0, 10);
         shown.forEach((i, n) => {
             const [id, p] = sorted[i];
-            const lp = clientState.players[id];
+            const lp = driverOf(id);
             const li = el('li', (id === clientState.me ? 'me' : '') + (n > 0 && i !== shown[n - 1] + 1 ? ' gapline' : ''));
             const team = el('span', 'tt-team');
             team.style.background = teamInfo[lp.teamId]?.chatColor || '#888';
@@ -2238,7 +2240,7 @@ function updateHUD(withTower = true) {
             li.append(el('span', 'tt-pos', p.rank), team, name);
             if (p.inPit && !quali) li.append(el('span', 'tt-tag', 'PIT'));
             if (p.compound) li.append(el('span', `tt-tyre tyre-${p.compound}`, `${p.compound}${p.stops ? ' ' + p.stops : ''}`));
-            const tags = helpTags(lp.assist); if (tags) li.append(el('span', 'tt-tag help', tags));
+            const tags = driverTags(lp); if (tags) li.append(el('span', 'tt-tag help', tags));
             if (p.penalty) li.append(el('span', 'tt-tag pen', `+${p.penalty}s`));
             if (!quali && p.boxCall) li.append(el('span', 'tt-tag box', 'BOX'));
             if (quali && p.qualiOut) { li.classList.add('out'); li.append(el('span', 'tt-tag out', 'OUT')); }
@@ -2307,7 +2309,7 @@ function drawMinimap() {
     mm.stroke();
 
     for (const id in gs) {
-        const lp = clientState.players[id];
+        const lp = driverOf(id);
         if (!lp) continue;
         const isMe = id === clientState.me;
         mm.fillStyle = lp.color;
@@ -2462,7 +2464,7 @@ window.onQualiClock = (d) => {
 // A timed lap: your own banner (improved / drop zone / pole); everyone hears about a new provisional pole
 let koPos = null, qbTimer = null;
 window.onQualiLap = (d) => {
-    const name = clientState.players[d.id]?.username || '';
+    const name = driverOf(d.id)?.username || '';
     if (d.id === clientState.me) { const t = lapBanner(d, clientState.qualiClock?.survive ?? 99); if (t) window.showBanner?.(t, true); }
     else if (d.pole) window.showBanner?.(`PROVISIONAL POLE — ${name.toUpperCase()} ${fmtLap(d.time)}`, true);
 };
@@ -2473,7 +2475,7 @@ window.showQualiBreak = (d) => {
     list.replaceChildren(...d.rows.map((r, i) => {
         const li = document.createElement('li');
         li.className = (r.out ? 'out ' : '') + (r.id === clientState.me ? 'me' : '');
-        const name = clientState.players[r.id]?.username || r.id;
+        const name = driverOf(r.id)?.username || r.id;
         li.textContent = `${i + 1}  ${name}  ${r.time === null ? '—' : fmtLap(r.time)}  ${i && r.gap !== null ? '+' + r.gap.toFixed(3) : ''}  ${d.next ? (r.out ? 'KNOCKED OUT' : 'THROUGH') : ''}`;
         if (r.id === clientState.me && r.out) koPos = i + 1;
         return li;
@@ -2482,7 +2484,7 @@ window.showQualiBreak = (d) => {
     const until = performance.now() + d.breakMs;
     clearInterval(qbTimer);
     const tick = () => { foot.textContent = d.next ? `Q${d.next} starts in 0:${String(Math.max(0, Math.ceil((until - performance.now()) / 1000))).padStart(2, '0')}`
-        : pole && pole.time !== null ? `POLE POSITION — ${(clientState.players[pole.id]?.username || '').toUpperCase()} ${fmtLap(pole.time)}` : ''; };
+        : pole && pole.time !== null ? `POLE POSITION — ${(driverOf(pole.id)?.username || '').toUpperCase()} ${fmtLap(pole.time)}` : ''; };
     tick();
     if (d.next) qbTimer = setInterval(tick, 250);
     box.classList.remove('hidden');
