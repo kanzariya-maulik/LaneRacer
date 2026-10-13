@@ -1866,7 +1866,7 @@ function updateCamera(dt) {
     activeView = layeredNow ? v : 'chase';
     setLayered(layeredNow ? car : null);
     document.body.classList.toggle('view-cockpit', activeView === 'cockpit'); // the wheel's display replaces the dash's gear and revs
-    if (v === 'cockpit' && layeredNow) {
+    if (layeredNow) { // the wheel shows from both onboard views (T-cam looks down into the cockpit)
         steeringWheel ||= buildSteeringWheel(document.createElement('canvas'));
         if (steeringWheel.root.parent !== car.model) {
             car.model.add(steeringWheel.root);
@@ -2488,7 +2488,7 @@ function frame(now) {
 
     if (now - lastHud > 66) { // HUD and minimap at 15 Hz, timing tower at 4 Hz
         updateHUD(now - lastTower > 250);
-        if (activeView === 'cockpit' && steeringWheel && layered) {
+        if (activeView !== 'chase' && steeringWheel && layered) {
             steeringWheel.draw({ gear: hudGear, kmh: String(kmh(clientState.gameState[layered.id]?.speed ?? 0)), lit: Math.max(0, hudLit), drs: !!clientState.gameState[layered.id]?.drs });
         }
         if (now - lastTower > 250) lastTower = now;

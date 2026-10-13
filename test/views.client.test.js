@@ -13,7 +13,7 @@ test('views cycle chase → T-cam → cockpit → chase; junk and unknown start 
     for (const junk of ['helicopter', null, undefined, '', 3]) assert.strictEqual(V.viewOf(junk), 'chase');
     assert.strictEqual(V.onboard('chase'), false);
     assert.ok(V.onboard('tcam') && V.onboard('cockpit'));
-    assert.deepStrictEqual(V.VIEW_FOV, { chase: 60, tcam: 60, cockpit: 75 });
+    assert.deepStrictEqual(V.VIEW_FOV, { chase: 60, tcam: 75, cockpit: 75 });
 });
 
 test('cockpit eye sits inside the helmet (outward faces culled from inside), T-cam above the airbox pod', () => {

@@ -3,9 +3,9 @@
 // point out, so from inside they're culled and the helmet needs no hiding. Calibration knobs: tune by eye in the browser.
 export const VIEWS = ['chase', 'tcam', 'cockpit'];
 export const VIEW_NAMES = { chase: 'CHASE', tcam: 'T-CAM', cockpit: 'COCKPIT' };
-export const VIEW_FOV = { chase: 60, tcam: 60, cockpit: 75 };
-export const EYE = { tcam: [0.03, 0, 1.02], cockpit: [0.16, 0, 0.78] };
-export const EYE_TILT = { tcam: -0.10, cockpit: -0.08 }; // nose down a touch: the road ahead fills the lower frame
+export const VIEW_FOV = { chase: 60, tcam: 75, cockpit: 75 };
+export const EYE = { tcam: [0.0, 0, 1.06], cockpit: [0.16, 0, 0.78] }; // T-cam as the F1 games: helmet top at the bottom, halo, wheel and both front tyres
+export const EYE_TILT = { tcam: -0.18, cockpit: -0.08 }; // nose down a touch: the road ahead fills the lower frame
 export const WHEEL_POS = [0.45, 0, 0.66]; // clear of the cockpit lid (z 0.628)
 
 export const nextView = (v) => VIEWS[(VIEWS.indexOf(v) + 1) % VIEWS.length];
