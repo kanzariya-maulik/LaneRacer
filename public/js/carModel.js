@@ -3,6 +3,7 @@
 // Liveries are painted off the main thread (livery-worker.js) into canvas textures.
 import * as THREE from 'three';
 import { bodyArrays, WHEELS, WHEEL_RADIUS, ATLAS } from './carShape.js';
+import { WHEEL_POS, toThree } from './views.js';
 export { WHEEL_RADIUS };
 
 const toGeometry = ({ pos, nrm, uv, idx, col }) => {
@@ -70,6 +71,55 @@ export function buildCar(detail = 'mid', lodM = Infinity) {
         root.add(g);
     }
     return root;
+}
+
+// The steering wheel, cockpit view only (one, on the car the camera follows): an F1 rim with grips, a display, two gloves.
+// Model frame (metres, three.js: x forward, y up, z right). spin turns about the column: +x = clockwise from the driver = right.
+export function buildSteeringWheel(canvas, glove = '#e10600') {
+    const root = new THREE.Group(), spin = new THREE.Group();
+    root.name = 'steeringWheel';
+    root.position.set(...toThree(WHEEL_POS));
+    root.rotation.z = 0.35; // top leaning back toward the driver
+    root.add(spin);
+    const carbon = new THREE.MeshStandardMaterial({ color: 0x1a1a1e, roughness: 0.45, metalness: 0.3 });
+    const rubber = new THREE.MeshStandardMaterial({ color: 0x0c0c0e, roughness: 0.95 });
+    const gloveMat = new THREE.MeshStandardMaterial({ color: glove, roughness: 0.8 });
+    const rim = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.12, 0.2), carbon);
+    rim.name = 'rim';
+    spin.add(rim);
+    for (const s of [1, -1]) {
+        const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.024, 0.13, 12), rubber);
+        grip.name = 'grip';
+        grip.position.set(-0.005, -0.005, 0.12 * s);
+        const hand = new THREE.Mesh(new THREE.SphereGeometry(0.042, 12, 8), gloveMat);
+        hand.name = 'glove';
+        hand.scale.set(1, 1.35, 1);
+        hand.position.set(-0.03, 0, 0.125 * s);
+        spin.add(grip, hand);
+    }
+    canvas.width = 256; canvas.height = 128;
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const display = new THREE.Mesh(new THREE.PlaneGeometry(0.1, 0.05), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
+    display.name = 'wheelDisplay';
+    display.position.set(-0.016, 0.01, 0);
+    display.rotation.y = -Math.PI / 2; // faces the driver (-x)
+    spin.add(display);
+    root.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.layers.enable(1); } });
+    const ctx = canvas.getContext('2d');
+    const REV = ['#22c55e', '#22c55e', '#22c55e', '#22c55e', '#22c55e', '#ef4444', '#ef4444', '#ef4444', '#ef4444', '#ef4444', '#3b82f6', '#3b82f6', '#3b82f6', '#3b82f6', '#3b82f6'];
+    function draw({ gear, kmh, lit, drs }) {
+        ctx.fillStyle = '#05070a'; ctx.fillRect(0, 0, 256, 128);
+        REV.forEach((c, i) => { ctx.fillStyle = i < lit ? c : '#1f2937'; ctx.fillRect(8 + i * 16, 6, 12, 12); });
+        ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.font = '900 72px sans-serif'; ctx.fillText(gear || 'N', 128, 76);
+        ctx.font = '800 26px sans-serif'; ctx.textAlign = 'left'; ctx.fillText(kmh, 10, 76);
+        ctx.fillStyle = drs ? '#22c55e' : '#1f2937'; ctx.fillRect(196, 62, 52, 28);
+        ctx.fillStyle = drs ? '#05070a' : '#6b7280'; ctx.font = '800 18px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('DRS', 222, 77);
+        tex.needsUpdate = true;
+    }
+    draw({ gear: 'N', kmh: '0', lit: 0, drs: false });
+    return { root, spin, setGlove: (c) => gloveMat.color.set(c), draw };
 }
 
 // Team liveries, painted in a worker and cached as textures; until one is ready the car shows plain grey
