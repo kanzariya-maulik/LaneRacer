@@ -23,3 +23,9 @@ test('box banner names the tyres', () => {
     assert.strictEqual(T.boxBanner('this', 'S'), 'BOX THIS LAP — SOFTS');
     assert.strictEqual(T.boxBanner('next', 'H'), 'BOX NEXT LAP — HARDS');
 });
+
+test('quali clock time left: counts down live, holds while paused (frozen), carries on after', () => {
+    const qc = { endsInMs: 60000, at: 1000 };
+    assert.strictEqual(T.clockLeftMs(qc, 11000), 50000);
+    assert.strictEqual(T.clockLeftMs({ ...qc, frozen: 11000 }, 41000), 50000); // paused at 11 s: 30 s later still 50 s left
+});

@@ -14,7 +14,7 @@ import { decodeFast } from './netcodec.js';
 const driverOf = (id) => window.driverOf(id); // lobby player or AI driver (socket.js)
 import { Predictor, STEP_S } from './predict.js';
 import { stewardText } from './steward.js';
-import { clockText, lapBanner, fmtLap, boxBanner } from './qualiText.js';
+import { clockText, lapBanner, fmtLap, boxBanner, clockLeftMs } from './qualiText.js';
 import { nextHarder } from './sim/tyres.js';
 import { Gearbox, shiftLights } from './audio/gearbox.js';
 import { estimateLoad } from './audio/mix.js';
@@ -2267,12 +2267,12 @@ function updateHUD(withTower = true) {
     const qc = clientState.qualiClock, inQuali = clientState.status === 'QUALIFYING' && !!qc;
     const onTimed = me?.lapStart !== null && me?.lapStart !== undefined;
     const runState = !racing || me?.qualiOut || qc?.qphase === 'flag' || qc?.format === 'oneshot' ? '' : onTimed ? ' · PUSH LAP' : me?.inPit ? ' · PIT LANE' : ' · OUT LAP';
-    const clockStr = inQuali ? clockText({ ...qc, endsInMs: qc.endsInMs - (performance.now() - qc.at) }, { onTimedLap: onTimed }) + runState : '';
+    const clockStr = inQuali ? clockText({ ...qc, endsInMs: clockLeftMs(qc, performance.now()) }, { onTimedLap: onTimed }) + runState : '';
     if (clockStr !== hudQClock) {
         hudQClock = clockStr;
         const el = $('quali-clock');
         el.textContent = clockStr;
-        el.className = !clockStr ? 'hidden' : qc.qphase === 'flag' ? 'flag' : qc.qphase === 'running' && qc.format !== 'oneshot' && qc.endsInMs - (performance.now() - qc.at) < 60000 ? 'low' : '';
+        el.className = !clockStr ? 'hidden' : qc.qphase === 'flag' ? 'flag' : qc.qphase === 'running' && qc.format !== 'oneshot' && clockLeftMs(qc, performance.now()) < 60000 ? 'low' : '';
     }
     const ko = inQuali && me?.qualiOut ? `KNOCKED OUT${koPos ? ' — P' + koPos : ''}` : '';
     if ($('ko-chip').textContent !== ko) { $('ko-chip').textContent = ko; $('ko-chip').classList.toggle('hidden', !ko); }

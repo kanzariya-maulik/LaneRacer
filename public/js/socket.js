@@ -306,6 +306,9 @@ socket.on('paused', ({ paused }) => {
     if (clientState.paused === paused && !counting) return;
     clientState.paused = paused;
     // The session clock stands still while paused (the server's does): push its end back by the time we stood
+    const qc = clientState.qualiClock; // the quali clock holds too, and carries on from where it stood
+    if (paused) qc && (qc.frozen ??= performance.now());
+    else if (qc?.frozen !== undefined) { qc.at += performance.now() - qc.frozen; qc.frozen = undefined; }
     if (paused) clientState.pausedAt ??= Date.now();
     else if (clientState.pausedAt) {
         if (clientState.session?.endsAt) clientState.session.endsAt += Date.now() - clientState.pausedAt;
@@ -335,7 +338,7 @@ socket.on('lights', ({ count }) => {
 });
 
 socket.on('quali_clock', (d) => {
-    clientState.qualiClock = { ...d, at: performance.now() };
+    clientState.qualiClock = { ...d, at: performance.now(), frozen: clientState.paused ? performance.now() : undefined };
     window.onQualiClock?.(d); // game3d: the predictor's track evolution
 });
 

@@ -16,3 +16,6 @@ export function lapBanner(e, survive) {
 
 const TYRE_NAMES = { S: 'SOFTS', M: 'MEDIUMS', H: 'HARDS' };
 export const boxBanner = (call, c) => `BOX ${call === 'next' ? 'NEXT' : 'THIS'} LAP — ${TYRE_NAMES[c] || ''}`.trim();
+
+// Session time left on the quali clock: counts down from the server's last word, held while the host has paused
+export const clockLeftMs = (qc, now) => qc.endsInMs - ((qc.frozen ?? now) - qc.at);
