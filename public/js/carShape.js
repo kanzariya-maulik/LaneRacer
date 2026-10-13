@@ -113,11 +113,11 @@ function parts() {
     P.push(loft('light', [[-2.48, 0.035, 0.035, 0.225, 0.295], [-2.50, 0.035, 0.035, 0.225, 0.295]], { p: 8, nu: 1, nv: 8 }));  // rain light
     P.push(loft('tcam', [[0.08, 0.05, 0.05, 0.955, 0.985], [-0.02, 0.05, 0.05, 0.955, 0.985]], { p: 6, nu: 1, nv: 12 }));   // T-camera on the airbox
     // Halo: side arms over the cockpit into the centre pillar; the driver's helmet under it
-    P.push(tube('halo', [[-0.10, 0.30, 0.60], [0.05, 0.28, 0.77], [0.35, 0.17, 0.83], [0.58, 0.0, 0.81], [0.35, -0.17, 0.83], [0.05, -0.28, 0.77], [-0.10, -0.30, 0.60]], 0.03, { nu: 40 }));
+    P.push(tube('halo', [[-0.10, 0.30, 0.60], [0.05, 0.28, 0.77], [0.35, 0.17, 0.83], [0.58, 0.0, 0.81], [0.35, -0.17, 0.83], [0.05, -0.28, 0.77], [-0.10, -0.30, 0.60]], 0.03, { nu: 64, nv: 16 }));
     P.push(tube('halo', [[0.58, 0, 0.81], [0.78, 0, 0.75], [0.96, 0, 0.62]], 0.028)); // front pillar onto the chassis (FIA: x ~0.98)
     P.push(ellipsoid('helmet', [0.18, 0, 0.74], [0.13, 0.115, 0.13], { nu: 14, nv: 22 }));
     // Mirrors on stalks
-    mirror((s) => ellipsoid('chassis', [0.74, 0.56 * s, 0.68], [0.05, 0.10, 0.032], { nu: 8, nv: 14 })); // FIA box: x 0.65-0.83, y 0.47-0.68
+    mirror((s) => ellipsoid('mirror', [0.74, 0.56 * s, 0.68], [0.05, 0.10, 0.032], { nu: 8, nv: 14 })); // FIA box: x 0.65-0.83, y 0.47-0.68
     mirror((s) => strut('chassis', [0.72, 0.30 * s, 0.59], [0.74, 0.47 * s, 0.67], 0.012));
     // Suspension (carbon): wishbones front and rear, pull rods
     for (const s of [1, -1]) for (const [a, b] of [[[1.42, 0.22, 0.42], [1.60, 0.68, 0.45]], [[1.80, 0.20, 0.42], [1.60, 0.68, 0.45]], [[1.40, 0.20, 0.18], [1.60, 0.68, 0.24]],
@@ -276,7 +276,8 @@ const WINGS = ['fw_main', 'fw_flap', 'rw_main', 'rw_flap'], BODYWORK = ['chassis
 const band = (a, lo, hi) => a >= lo && a <= hi;
 const nose = (t) => t.is('chassis') && t.x > 1.35;
 const common = (body, wings = CARBON, halo = CARBON) => [[body, () => true], [CARBON, (t) => t.is('floor', 'rw_pillar', 'suspension', 'cockpit', 'intake', 'inlet', 'tcam')],
-    [wings, (t) => t.is(...WINGS)], [halo, (t) => t.is('halo')], ['#ff1b1b', (t) => t.is('light')], ['#ffd400', (t) => t.is('tcam') && t.z > 0.975]];
+    [wings, (t) => t.is(...WINGS)], [halo, (t) => t.is('halo')], ['#ff1b1b', (t) => t.is('light')], ['#ffd400', (t) => t.is('tcam') && t.z > 0.975],
+    ['#0b1016', (t) => t.is('mirror') && t.x < 0.735]]; // the mirror glass faces the driver
 export const LIVERIES = {
     redbull: () => { const NAVY = '#1b2a4a', RED = '#d7182a', YELLOW = '#ffcc00'; return [...common(NAVY),
         [RED, (t) => nose(t) && t.x > 2.35], [RED, (t) => t.is('engine') && t.side && band(t.x, -1.3, -0.4) && t.z > 0.32],
@@ -323,7 +324,7 @@ export const LIVERIES = {
 export function paintLivery(teamId, size = ATLAS) {
     const B = bakeAtlas(size), rules = (LIVERIES[teamId] || (() => common('#8a8f96')))(), out = new Uint8ClampedArray(size * size * 4);
     const rgb = new Map(), hex = (h) => rgb.get(h) || (rgb.set(h, [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16))), rgb.get(h));
-    const t = { x: 0, y: 0, z: 0, side: false, top: false, part: '', is: (...names) => names.includes(t.part) };
+    const t = { x: 0, y: 0, z: 0, side: false, top: false, part: '', is: (...names) => names.includes(t.part) || (t.part === 'mirror' && names.includes('chassis')) }; // mirrors keep the chassis paint
     for (let k = 0; k < size * size; k++) {
         const o = B.owner[k];
         let c = '#000000';
