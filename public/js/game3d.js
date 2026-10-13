@@ -2470,10 +2470,12 @@ function frame(now) {
             fpCam.position.copy(camera.position);
             fpCam.quaternion.copy(camera.quaternion);
             if (fpCam.fov !== camera.fov || fpCam.aspect !== camera.aspect) { fpCam.fov = camera.fov; fpCam.aspect = camera.aspect; fpCam.updateProjectionMatrix(); }
-            renderer.autoClear = false; renderer.shadowMap.autoUpdate = false; // keep this frame's colour and shadow map
+            // keep this frame's colour and shadow map (a Color background force-clears the colour even with autoClear off)
+            const bg = scene.background;
+            renderer.autoClear = false; renderer.shadowMap.autoUpdate = false; scene.background = null;
             renderer.clearDepth();
             renderer.render(scene, fpCam);
-            renderer.autoClear = true; renderer.shadowMap.autoUpdate = true;
+            renderer.autoClear = true; renderer.shadowMap.autoUpdate = true; scene.background = bg;
         }
     }
 

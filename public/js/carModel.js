@@ -79,7 +79,7 @@ export function buildSteeringWheel(canvas, glove = '#e10600') {
     const root = new THREE.Group(), spin = new THREE.Group();
     root.name = 'steeringWheel';
     root.position.set(...toThree(WHEEL_POS));
-    root.rotation.z = 0.35; // top leaning back toward the driver
+    root.rotation.z = -0.5; // top leaning forward: the face looks up at the driver's eyes, like the column in a real F1 car
     root.add(spin);
     const carbon = new THREE.MeshStandardMaterial({ color: 0x1a1a1e, roughness: 0.45, metalness: 0.3 });
     const rubber = new THREE.MeshStandardMaterial({ color: 0x0c0c0e, roughness: 0.95 });
@@ -91,7 +91,7 @@ export function buildSteeringWheel(canvas, glove = '#e10600') {
         const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.024, 0.13, 12), rubber);
         grip.name = 'grip';
         grip.position.set(-0.005, -0.005, 0.12 * s);
-        const hand = new THREE.Mesh(new THREE.SphereGeometry(0.042, 12, 8), gloveMat);
+        const hand = new THREE.Mesh(new THREE.SphereGeometry(0.032, 12, 8), gloveMat);
         hand.name = 'glove';
         hand.scale.set(1, 1.35, 1);
         hand.position.set(-0.03, 0, 0.125 * s);

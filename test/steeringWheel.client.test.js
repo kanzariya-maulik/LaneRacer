@@ -1,7 +1,7 @@
 const { test, before } = require('node:test');
 const assert = require('node:assert');
-let M, THREE;
-before(async () => { THREE = await import('three'); M = await import('../public/js/carModel.js'); });
+let M, THREE, V;
+before(async () => { THREE = await import('three'); M = await import('../public/js/carModel.js'); V = await import('../public/js/views.js'); });
 
 // A canvas stand-in: every 2D call is a no-op
 const fakeCanvas = () => { const ctx = new Proxy({}, { get: () => () => {} }); return { width: 0, height: 0, getContext: () => ctx }; };
@@ -10,7 +10,7 @@ test('steering wheel: F1-sized, in front of the cockpit eye, turns with steering
     const w = M.buildSteeringWheel(fakeCanvas(), '#00a19c');
     const box = new THREE.Box3().setFromObject(w.root), size = box.getSize(new THREE.Vector3());
     assert.ok(size.z > 0.27 && size.z < 0.36, `width with the gloves on ${size.z.toFixed(3)} m`); // rim 0.20 + grips at ±0.12 + gloves
-    assert.ok(Math.abs(w.root.position.x - 0.45) < 1e-9 && Math.abs(w.root.position.y - 0.66) < 1e-9);
+    assert.ok(Math.abs(w.root.position.x - V.WHEEL_POS[0]) < 1e-9 && Math.abs(w.root.position.y - V.WHEEL_POS[2]) < 1e-9);
     w.spin.rotation.x = Math.PI / 2;
     w.root.updateMatrixWorld(true);
     const turned = new THREE.Box3().setFromObject(w.spin).getSize(new THREE.Vector3());

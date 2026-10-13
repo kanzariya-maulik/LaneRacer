@@ -859,4 +859,4 @@ body.touch #tyre-card { bottom: 180px; }
 #cam-btn { display: none; }
 body.touch #cam-btn { display: block; position: absolute; right: var(--pad); top: calc(var(--pad) + 13em); min-width: 44px; min-height: 44px; padding: 0 10px; border: 0; border-radius: 8px;
     background: rgba(0,0,0,0.6); color: #fff; font-weight: 900; letter-spacing: 0.1em; pointer-events: auto; }
-body.view-cockpit #rev-lights, body.view-cockpit #cluster .cl-main { display: none; }
+body.view-cockpit #cluster #rev-lights, body.view-cockpit #cluster .cl-main { display: none; }
