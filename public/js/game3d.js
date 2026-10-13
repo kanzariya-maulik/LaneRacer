@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { buildCar, liveryTexture as carLivery, WHEEL_RADIUS } from './carModel.js';
+import { buildCar, buildSteeringWheel, liveryTexture as carLivery, WHEEL_RADIUS } from './carModel.js';
+import { VIEW_NAMES, VIEW_FOV, EYE, EYE_TILT, nextView, viewOf, onboard, wheelAngle, shadowHalf, toThree } from './views.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { keyboardStep, gamepadInput, liftOffBrake } from './input.js';
@@ -120,6 +121,18 @@ Object.assign(sun.shadow.camera, { left: -360, right: 360, top: 360, bottom: -36
 sun.shadow.bias = -0.0004;
 sun.shadow.normalBias = 0;
 scene.add(sun, sun.target);
+// Onboard views: after the world, depth is cleared and only the followed car (layer 1) is drawn again with a 1 cm near plane,
+// so the halo and wheel never clip and the track keeps its depth precision. The lights must be on layer 1 to light it.
+sun.layers.enable(1); hemi.layers.enable(1);
+const fpCam = new THREE.PerspectiveCamera(60, 1, 0.06, 60);
+fpCam.layers.set(1);
+let activeView = 'chase', layered = null, steeringWheel = null;
+function setLayered(car) {
+    if (layered === car) return;
+    layered?.model?.traverse((o) => o.layers.disable(1));
+    car?.model?.traverse((o) => o.layers.enable(1));
+    layered = car;
+}
 
 // Shadows, fog, draw distance and resolution limits for a level (applied when a track is built)
 let appliedLevel = null;
@@ -181,6 +194,15 @@ function toggleCoach() {
     window.showBanner?.(`COACH: ${coachOn ? 'ON' : 'OFF'}`, true);
     if (!coachOn) document.getElementById('coach-line').classList.add('hidden');
 }
+let view = viewOf(store.get('lanrace.view')); // chase / T-cam / cockpit, remembered
+document.body.classList.toggle('view-cockpit', view === 'cockpit');
+function cycleView() {
+    view = nextView(view);
+    store.set('lanrace.view', view);
+    document.body.classList.toggle('view-cockpit', view === 'cockpit'); // the wheel's display replaces the dash's gear and revs
+    window.showBanner?.(`CAMERA: ${VIEW_NAMES[view]}`, true);
+}
+document.getElementById('cam-btn').addEventListener('click', (e) => { e.currentTarget.blur(); if (clientState.status !== 'LOBBY') cycleView(); });
 function toggleLine() {
     if (!line) return; // no line on this track
     lineMode = nextMode(lineMode);
@@ -249,6 +271,7 @@ function onKey(e, down) {
     if (down && key === 't' && !e.repeat && clientState.status !== 'LOBBY') toggleTower();
     if (down && key === 'r' && !e.repeat && clientState.status !== 'LOBBY') toggleLine();
     if (down && key === 'c' && !e.repeat && clientState.status !== 'LOBBY') toggleCoach();
+    if (down && key === 'v' && !e.repeat && clientState.status !== 'LOBBY') cycleView();
     if (down && key === 'b' && !e.repeat) callBox();
     if (down && key === 'q' && !e.repeat && clientState.status !== 'LOBBY') toggleAssist();
     if (down && key === 'escape' && !e.repeat) toggleHostPanel();
@@ -259,9 +282,9 @@ function onKey(e, down) {
         if (key === 'arrowleft') spectateId = stepFollow(others, spectateId, -1);
         if (key === 'arrowright') spectateId = stepFollow(others, spectateId, 1);
     }
-    if (down && key === 'v' && !e.repeat && clientState.gameState?.[clientState.me]?.finished && !isSpectator()) {
+    if (down && key === 'f' && !e.repeat && clientState.gameState?.[clientState.me]?.finished && !isSpectator()) {
         ownView = !ownView;
-        window.showBanner?.(ownView ? 'YOUR CAR · V TO WATCH' : 'WATCHING', true);
+        window.showBanner?.(ownView ? 'YOUR CAR · F TO WATCH' : 'WATCHING', true);
     }
     // Tyre pick: 1 soft, 2 medium, 3 hard (Q, W and E are taken: assist, throttle, DRS)
     if (down && !e.repeat && ['1', '2', '3'].includes(key)) pickTyre('SMH'[+key - 1]);
@@ -1592,8 +1615,9 @@ function makeCar(id) {
     const root = new THREE.Group();
     const wheels = [];
     carTemplate = carTemplateFor();
+    let model = null;
     if (carTemplate) {
-        const model = carTemplate.clone(true);
+        model = carTemplate.clone(true);
         const map = liveryTexture(lp.teamId);
         model.traverse((o) => {
             if (!o.isMesh) return;
@@ -1630,7 +1654,7 @@ function makeCar(id) {
     if (tag) root.add(tag);
     root.add(blobShadow(Q.shadows ? 0.75 : 1)); // contact shadow: the car sits on the road, whatever the sun does
     singlePass(root);
-    return { root, wheels, teamId: lp.teamId, ghost: false, tag };
+    return { id, root, model, wheels, teamId: lp.teamId, ghost: false, tag };
 }
 
 function updateCars(dt) {
@@ -1782,6 +1806,7 @@ function updateWheelBatch() {
 
 // ---------- camera ----------
 const look = new THREE.Vector3(), pitCam = new THREE.Vector3();
+const eyeTurn = new THREE.Quaternion(), eyeEuler = new THREE.Euler();
 const PIT_CAM_AHEAD_M = 7, PIT_CAM_SIDE_M = 4, PIT_CAM_UP_M = 3.4;
 let camHeading = 0, pitBlend = 0; // pitBlend: 0 = chase camera, 1 = TV pit camera
 
@@ -1806,11 +1831,21 @@ function updateCamera(dt) {
     const d = target - camHeading;
     camHeading += Math.atan2(Math.sin(d), Math.cos(d)) * (1 - Math.exp(-CAM_TURN_SMOOTH * dt));
     const h = camHeading;
-    // Height: the road behind the car (so the camera rises before a crest, not into it), never below the car's own level
-    const bx = p.x - Math.cos(h) * CHASE_BACK_M * scale, bz = p.z - Math.sin(h) * CHASE_BACK_M * scale;
-    camera.position.set(bx, Math.max(p.y, roadY(bx, bz, h)) + CHASE_UP_M * scale, bz);
-    look.set(p.x + Math.cos(h) * LOOK_AHEAD_M * scale, p.y + 1 * scale, p.z + Math.sin(h) * LOOK_AHEAD_M * scale);
-    // TV pit camera: while your own car is serviced, ease from the chase pose to the garage side of its box
+    const v = onboard(view) && car.model ? view : 'chase'; // box fallback car: chase
+    if (camera.fov !== VIEW_FOV[v]) { camera.fov = VIEW_FOV[v]; camera.updateProjectionMatrix(); }
+    if (v === 'chase') {
+        // Height: the road behind the car (so the camera rises before a crest, not into it), never below the car's own level
+        const bx = p.x - Math.cos(h) * CHASE_BACK_M * scale, bz = p.z - Math.sin(h) * CHASE_BACK_M * scale;
+        camera.position.set(bx, Math.max(p.y, roadY(bx, bz, h)) + CHASE_UP_M * scale, bz);
+        look.set(p.x + Math.cos(h) * LOOK_AHEAD_M * scale, p.y + 1 * scale, p.z + Math.sin(h) * LOOK_AHEAD_M * scale);
+    } else {
+        // Bolted to the car: its heading, pitch and roll, no smoothing (TV onboards and the F1 games look like this)
+        car.root.updateMatrixWorld();
+        camera.position.set(...toThree(EYE[v])).multiplyScalar(scale).applyMatrix4(car.root.matrixWorld);
+        car.root.getWorldQuaternion(camera.quaternion).multiply(eyeTurn.setFromEuler(eyeEuler.set(EYE_TILT[v], -Math.PI / 2, 0, 'YXZ'))); // camera -z → car +x
+        look.set(0, 0, -10 * scale).applyQuaternion(camera.quaternion).add(camera.position);
+    }
+    // TV pit camera: while your own car is serviced, ease from the current pose to the garage side of its box
     const own = car === cars[clientState.me] && !isSpectator(), ph = predictor?.car?.stop?.phase, box = predictor?.box, td = clientState.trackData;
     pitBlend += ((own && box && td?.pit && (ph === 'service' || ph === 'hold' || ph === 'wait') ? 1 : 0) - pitBlend) * (1 - Math.exp(-dt * 3));
     if (!own) pitBlend = 0;
@@ -1820,9 +1855,28 @@ function updateCamera(dt) {
         camera.position.lerp(pitCam.set(c.x + ca, pitY(box.x, box.y) + PIT_CAM_UP_M * scale, c.y + sa), pitBlend);
         look.lerp(p, pitBlend);
     }
-    camera.lookAt(look);
-    // Moved in whole shadow-map texels so shadow edges don't shimmer as the car drives
-    const q = snapLight({ x: p.x, y: p.y, z: p.z }, SUN_OFF, 720 / (Q.shadows || 1024));
+    if (v === 'chase' || pitBlend > 0.001) camera.lookAt(look); // onboard keeps the car's roll
+    // The close-range pass: off for the pit camera (it's metres away, the crew can stand in front of the car)
+    const layeredNow = v !== 'chase' && pitBlend <= 0.001;
+    activeView = layeredNow ? v : 'chase';
+    setLayered(layeredNow ? car : null);
+    if (v === 'cockpit' && layeredNow) {
+        steeringWheel ||= buildSteeringWheel(document.createElement('canvas'));
+        if (steeringWheel.root.parent !== car.model) {
+            car.model.add(steeringWheel.root);
+            steeringWheel.setGlove(teamInfo[car.teamId]?.chatColor || '#e10600');
+        }
+        steeringWheel.root.traverse((o) => o.isMesh && o.layers.enable(1));
+        steeringWheel.root.visible = true;
+        steeringWheel.spin.rotation.x = wheelAngle(clientState.gameState?.[car.id]?.steer);
+    } else if (steeringWheel) steeringWheel.root.visible = false;
+    // Moved in whole shadow-map texels so shadow edges don't shimmer as the car drives; onboard, a tighter box: sharper
+    const half = shadowHalf(activeView);
+    if (sun.shadow.camera.right !== half) {
+        Object.assign(sun.shadow.camera, { left: -half, right: half, top: half, bottom: -half });
+        sun.shadow.camera.updateProjectionMatrix();
+    }
+    const q = snapLight({ x: p.x, y: p.y, z: p.z }, SUN_OFF, (2 * half) / (Q.shadows || 1024));
     sun.position.set(q.x + SUN_OFF.x, q.y + SUN_OFF.y, q.z + SUN_OFF.z);
     sun.target.position.set(q.x, q.y, q.z);
 }
@@ -2410,10 +2464,24 @@ function frame(now) {
     skyDome.position.copy(camera.position);
     skyDome.scale.setScalar(camera.far * 0.9);
     if (paused) Sound.update(silentFrame); else updateSound(dt);
-    if (!compiling) renderer.render(scene, camera); // a draw before the shaders are ready compiles them there and then (a ~1.6 s freeze)
+    if (!compiling) { // a draw before the shaders are ready compiles them there and then (a ~1.6 s freeze)
+        renderer.render(scene, camera);
+        if (activeView !== 'chase' && layered) { // onboard: the followed car again over the world, with a 1 cm near plane
+            fpCam.position.copy(camera.position);
+            fpCam.quaternion.copy(camera.quaternion);
+            if (fpCam.fov !== camera.fov || fpCam.aspect !== camera.aspect) { fpCam.fov = camera.fov; fpCam.aspect = camera.aspect; fpCam.updateProjectionMatrix(); }
+            renderer.autoClear = false; renderer.shadowMap.autoUpdate = false; // keep this frame's colour and shadow map
+            renderer.clearDepth();
+            renderer.render(scene, fpCam);
+            renderer.autoClear = true; renderer.shadowMap.autoUpdate = true;
+        }
+    }
 
     if (now - lastHud > 66) { // HUD and minimap at 15 Hz, timing tower at 4 Hz
         updateHUD(now - lastTower > 250);
+        if (activeView === 'cockpit' && steeringWheel && layered) {
+            steeringWheel.draw({ gear: hudGear, kmh: document.getElementById('hud-speed').innerText, lit: Math.max(0, hudLit), drs: !!clientState.gameState[layered.id]?.drs });
+        }
         if (now - lastTower > 250) lastTower = now;
         drawMinimap();
         colourLine();
