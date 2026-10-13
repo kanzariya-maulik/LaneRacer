@@ -127,10 +127,14 @@ sun.layers.enable(1); hemi.layers.enable(1);
 const fpCam = new THREE.PerspectiveCamera(60, 1, 0.06, 60);
 fpCam.layers.set(1);
 let activeView = 'chase', layered = null, steeringWheel = null;
+// Its tyres are the shared wheel batch (layer 0), which the body would overdraw: in the close pass its own wheel meshes stand in
+const ownWheels = (car, on) => car?.wheels.forEach((w) => w.traverse((o) => { if (o.isMesh) { o.visible = on; o.layers.set(on ? 1 : 0); } }));
 function setLayered(car) {
     if (layered === car) return;
     layered?.model?.traverse((o) => o.layers.disable(1));
+    ownWheels(layered, false);
     car?.model?.traverse((o) => o.layers.enable(1));
+    ownWheels(car, true);
     layered = car;
 }
 
@@ -195,11 +199,9 @@ function toggleCoach() {
     if (!coachOn) document.getElementById('coach-line').classList.add('hidden');
 }
 let view = viewOf(store.get('lanrace.view')); // chase / T-cam / cockpit, remembered
-document.body.classList.toggle('view-cockpit', view === 'cockpit');
 function cycleView() {
     view = nextView(view);
     store.set('lanrace.view', view);
-    document.body.classList.toggle('view-cockpit', view === 'cockpit'); // the wheel's display replaces the dash's gear and revs
     window.showBanner?.(`CAMERA: ${VIEW_NAMES[view]}`, true);
 }
 document.getElementById('cam-btn').addEventListener('click', (e) => { e.currentTarget.blur(); if (clientState.status !== 'LOBBY') cycleView(); });
@@ -228,7 +230,7 @@ window.onAssistChange = (v) => {
     }
 };
 
-// After finishing (race or qualifying run): watch the cars still out there, like F1 TV after the flag; V: your own car
+// After finishing (race or qualifying run): watch the cars still out there, like F1 TV after the flag; F: your own car
 const WATCH_DELAY_MS = 2000;
 let finishedAt = null, ownView = false;
 function watchingAfterFinish() {
@@ -1796,7 +1798,10 @@ function updateWheelBatch() {
                 if (i >= mesh.instanceMatrix.count) return;
                 mesh.setMatrixAt(i, o.matrixWorld);
                 counts[k - 1]++;
-                if (k === 1) mesh.setColorAt(i, compoundColor[clientState.gameState?.[id]?.compound] || compoundColor.M); // tyre part carries the compound
+                if (k !== 1) return;
+                const band = compoundColor[clientState.gameState?.[id]?.compound] || compoundColor.M; // tyre part carries the compound
+                mesh.setColorAt(i, band);
+                if (cars[id] === layered) o.material.color.copy(band); // the close pass draws this tyre itself
             });
         }
     }
@@ -1823,7 +1828,7 @@ function followedCar() {
 
 function updateCamera(dt) {
     const car = followedCar();
-    if (!car) return;
+    if (!car) { activeView = 'chase'; setLayered(null); return; }
     const p = car.root.position;
     // Camera sits exactly behind the car; only its swing round corners is smoothed
     const target = -car.root.rotation.y; // back to server heading
@@ -1860,6 +1865,7 @@ function updateCamera(dt) {
     const layeredNow = v !== 'chase' && pitBlend <= 0.001;
     activeView = layeredNow ? v : 'chase';
     setLayered(layeredNow ? car : null);
+    document.body.classList.toggle('view-cockpit', activeView === 'cockpit'); // the wheel's display replaces the dash's gear and revs
     if (v === 'cockpit' && layeredNow) {
         steeringWheel ||= buildSteeringWheel(document.createElement('canvas'));
         if (steeringWheel.root.parent !== car.model) {
@@ -2461,6 +2467,7 @@ function frame(now) {
     updateCrews(dt);
     updateWheelBatch();
     if (!window.lanraceDebug?.freeCam) updateCamera(dt);
+    else { activeView = 'chase'; setLayered(null); }
     skyDome.position.copy(camera.position);
     skyDome.scale.setScalar(camera.far * 0.9);
     if (paused) Sound.update(silentFrame); else updateSound(dt);
@@ -2482,7 +2489,7 @@ function frame(now) {
     if (now - lastHud > 66) { // HUD and minimap at 15 Hz, timing tower at 4 Hz
         updateHUD(now - lastTower > 250);
         if (activeView === 'cockpit' && steeringWheel && layered) {
-            steeringWheel.draw({ gear: hudGear, kmh: document.getElementById('hud-speed').innerText, lit: Math.max(0, hudLit), drs: !!clientState.gameState[layered.id]?.drs });
+            steeringWheel.draw({ gear: hudGear, kmh: String(kmh(clientState.gameState[layered.id]?.speed ?? 0)), lit: Math.max(0, hudLit), drs: !!clientState.gameState[layered.id]?.drs });
         }
         if (now - lastTower > 250) lastTower = now;
         drawMinimap();
