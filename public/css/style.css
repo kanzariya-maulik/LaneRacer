@@ -520,10 +520,12 @@ input:disabled { opacity: 0.7; }
 #leaderboard-list li.me { background: rgba(250, 204, 21, 0.22); }
 .tt-pos { width: 22px; text-align: right; color: #cbd5e1; }
 .tt-team { width: 4px; height: 16px; border-radius: 2px; }
-.tt-name { flex: 1; letter-spacing: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Name is a column (3-letter code) so tyre pills line up; badges never shrink or wrap, the tower widens instead */
+.tt-name { flex: none; min-width: 3.6em; max-width: 6em; letter-spacing: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#leaderboard-list li > :not(.tt-name) { flex: none; white-space: nowrap; }
 .tt-tag { font-size: 0.65rem; font-weight: 900; padding: 1px 5px; border-radius: 3px; background: #1e5bd8; }
 .tt-tag.pen { background: #b91c1c; }
-.tt-gap { min-width: 74px; text-align: right; }
+.tt-gap { min-width: 74px; margin-left: auto; text-align: right; }
 .tt-gap.lead { color: #94a3b8; font-size: 0.8rem; letter-spacing: 1px; }
 
 #quali-results {
@@ -710,7 +712,7 @@ input:disabled { opacity: 0.7; }
 
 /* ===================== HUD v3: map top right, timing tower top left, one dash card ===================== */
 #minimap { top: var(--pad); left: auto; right: var(--pad); width: 12em; height: 12em; }
-#leaderboard { top: calc(var(--pad) + 3.4em); left: var(--pad); right: auto; width: 15em; }
+#leaderboard { top: calc(var(--pad) + 3.4em); left: var(--pad); right: auto; width: max-content; min-width: 15em; max-width: calc(100vw - 2 * var(--pad)); }
 
 /* The dash card: everything about your car in one place, bottom right */
 #hud-bottom { gap: 0; }
@@ -740,7 +742,7 @@ input:disabled { opacity: 0.7; }
 
 @media (max-height: 560px), (max-width: 760px) {
     #minimap { width: 8.5em; height: 8.5em; }
-    #leaderboard { width: 13em; }
+    #leaderboard { min-width: 13em; }
 }
 
 /* Host session control + pause screen: the race classification card, smaller */

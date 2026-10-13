@@ -23,12 +23,27 @@ test('solo host with AI drivers on: a full 22-car grid, bots marked, team seats 
     setupSocketManager(io, noNet);
     const a = io.connect('a');
     a.fire('join_lobby', { username: 'A', teamId: 'ferrari' });
-    a.fire('update_settings', { trackId: 'monza', maxLaps: 1, qualifying: false, aiDrivers: true, aiLevel: 'hard' });
+    a.fire('update_settings', { trackId: 'monza', maxLaps: 1, qualifying: false, aiDrivers: true, aiLevel: 'hard', aiCount: 21 });
     a.fire('start_game');
     const init = io.events('game_init').at(-1), cars = Object.values(init.players);
     assert.strictEqual(cars.length, 22);
     assert.strictEqual(cars.filter((c) => c.isBot).length, 21);
     assert.strictEqual(cars.filter((c) => c.teamId === 'ferrari').length, 2);
+    a.fire('disconnect');
+    advance(t, 100);
+});
+
+test('aiCount: the host picks how many bots join (5 bots + 1 human = 6 cars)', (t) => {
+    t.mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
+    const io = fakeIo();
+    setupSocketManager(io, noNet);
+    const a = io.connect('a');
+    a.fire('join_lobby', { username: 'A', teamId: 'ferrari' });
+    a.fire('update_settings', { trackId: 'monza', maxLaps: 1, qualifying: false, aiDrivers: true, aiCount: 5 });
+    a.fire('start_game');
+    const cars = Object.values(io.events('game_init').at(-1).players);
+    assert.strictEqual(cars.length, 6);
+    assert.strictEqual(cars.filter((c) => c.isBot).length, 5);
     a.fire('disconnect');
     advance(t, 100);
 });
@@ -39,7 +54,7 @@ test('bots keep their qualifying places on the race grid; the lobby clears them;
     setupSocketManager(io, noNet);
     const a = io.connect('a');
     a.fire('join_lobby', { username: 'A', teamId: 'ferrari' });
-    a.fire('update_settings', { trackId: 'monza', maxLaps: 1, qualiFormat: 'short', qualiScale: 0.02, aiDrivers: true, aiLevel: 'easy' });
+    a.fire('update_settings', { trackId: 'monza', maxLaps: 1, qualiFormat: 'short', qualiScale: 0.02, aiDrivers: true, aiLevel: 'easy', aiCount: 21 });
     a.fire('start_game');
     const quali = io.events('game_init').at(-1);
     const botId = Object.keys(quali.players).find((id) => quali.players[id].isBot);

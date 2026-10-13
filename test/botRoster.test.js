@@ -37,3 +37,12 @@ test('settings: aiDrivers boolean, aiLevel one of four, anything else keeps the 
     assert.deepStrictEqual(lobby.sanitizeSettings(cur, { aiDrivers: true, aiLevel: 'pro' }, []), { aiDrivers: true, aiLevel: 'pro' });
     assert.deepStrictEqual(lobby.sanitizeSettings(cur, { aiDrivers: 'yes', aiLevel: 'god' }, []), cur);
 });
+
+test('settings: aiCount a whole number of bots, 1..21', () => {
+    const cur = { aiCount: 21 };
+    assert.strictEqual(lobby.sanitizeSettings(cur, { aiCount: 5 }, []).aiCount, 5);
+    assert.strictEqual(lobby.sanitizeSettings(cur, { aiCount: 0 }, []).aiCount, 1);
+    assert.strictEqual(lobby.sanitizeSettings(cur, { aiCount: 99 }, []).aiCount, 21);
+    assert.strictEqual(lobby.sanitizeSettings(cur, { aiCount: 4.6 }, []).aiCount, 5);
+    assert.strictEqual(lobby.sanitizeSettings(cur, { aiCount: '7' }, []).aiCount, 21);
+});

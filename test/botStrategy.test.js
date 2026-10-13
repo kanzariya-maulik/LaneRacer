@@ -7,8 +7,8 @@ const { COMPOUNDS } = require('../public/js/sim/tyres.js');
 const Game = require('../src/game/Game');
 const Track = require('../src/game/Track');
 
-test('every plan for 2…50 laps: laps add up, two compounds, stints under the cliff where any plan allows it', () => {
-    for (const level of ['easy', 'medium', 'hard', 'pro']) for (let laps = 2; laps <= 50; laps++) for (let s = 0; s < 5; s++) {
+test('every plan for 2…100 laps: laps add up, two compounds, stints under the cliff where any plan allows it', () => {
+    for (const level of ['easy', 'medium', 'hard', 'pro']) for (let laps = 2; laps <= 100; laps++) for (let s = 0; s < 5; s++) {
         const plan = planRace(level, laps, true, rngOf(laps * 10 + s));
         assert.strictEqual(plan.reduce((a, x) => a + x.laps, 0), laps, `${level} ${laps}`);
         assert.ok(new Set(plan.map((x) => x.compound)).size >= 2, `${level} ${laps}: ${JSON.stringify(plan)}`);

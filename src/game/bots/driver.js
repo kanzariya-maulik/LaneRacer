@@ -171,6 +171,7 @@ function drive(p, ctx) {
     // The line's corner speeds are the car's real limit: past them it runs wide, so only straights get faster than the line
     const vLine = t.racingLine.speed[js] * (t.racingLine.phase[js] === 0 || b.err?.kind === 'late' ? factor : Math.min(factor, 1));
     const { laneT, cap } = racecraft(p, b, ctx, v, here, r, vLine);
+    if (toPit < PIT_SETUP_M) b.passSide = 0; // boxing: no moves on the way in, or it ends up alongside and can't cross to the entry
     const pitV = toPit < PIT_SETUP_M ? Math.sqrt(((t.pit.limitKmh || Drive.PIT_LIMIT_KMH) / 3.6) ** 2 + 2 * PIT_DEC * Math.max(0, toPit - PIT_APPROACH_M)) : Infinity;
     const vt = Math.min(vLine, cap, pitV);
     const laneWant = laneT + (b.err?.kind === 'apex' ? -insideSide(t, here) * 1.5 : 0);

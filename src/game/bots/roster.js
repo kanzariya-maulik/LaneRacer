@@ -4,10 +4,10 @@ const TEAMS = require('../../../public/teams.json');
 
 // pace: lap ÷ racingLine.lapS. mistake: chance per corner. reaction / release: seconds [min, max]. bog: chance of a slow getaway
 const LEVELS = {
-    easy:   { pace: 1.12,  aggression: 0.2,  mistake: 0.04,  reaction: [0.35, 0.45], release: [0.3, 0.8],  bog: 0.15 },
-    medium: { pace: 1.05,  aggression: 0.45, mistake: 0.02,  reaction: [0.28, 0.38], release: [0.15, 0.5], bog: 0.05 },
-    hard:   { pace: 1.01,  aggression: 0.7,  mistake: 0.008, reaction: [0.22, 0.3],  release: [0.05, 0.3], bog: 0 },
-    pro:    { pace: 0.995, aggression: 0.9,  mistake: 0.002, reaction: [0.18, 0.24], release: [0, 0.15],   bog: 0 },
+    easy:   { pace: 1.08,  aggression: 0.3,  mistake: 0.03,  reaction: [0.32, 0.42], release: [0.25, 0.6], bog: 0.1 },
+    medium: { pace: 1.03,  aggression: 0.55, mistake: 0.012, reaction: [0.25, 0.34], release: [0.1, 0.4],  bog: 0.03 },
+    hard:   { pace: 1.0,   aggression: 0.8,  mistake: 0.005, reaction: [0.2, 0.27],  release: [0.03, 0.2], bog: 0 },
+    pro:    { pace: 0.995, aggression: 0.95, mistake: 0.001, reaction: [0.16, 0.22], release: [0, 0.1],    bog: 0 },
 };
 const SPREAD = 0.015; // ±1.5 % pace around the level
 

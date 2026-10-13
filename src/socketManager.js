@@ -14,7 +14,7 @@ const state = {
     players: {},
     hostId: null,
     bots: [], // this session's AI drivers (never lobby players)
-    settings: { trackId: 'monza', maxLaps: 3, qualifying: true, qualiFormat: 'full', collisions: true, tyreWear: true, contactPenalties: true, ghostStart: true, timeOfDay: 'day', outLaps: 1, qualiLaps: 2, aiDrivers: false, aiLevel: 'medium', help: { mode: 'choose', steer: 100, brake: 100 } }
+    settings: { trackId: 'monza', maxLaps: 3, qualifying: true, qualiFormat: 'full', collisions: true, tyreWear: true, contactPenalties: true, ghostStart: true, timeOfDay: 'day', outLaps: 1, qualiLaps: 2, aiDrivers: false, aiLevel: 'medium', aiCount: 21, help: { mode: 'choose', steer: 100, brake: 100 } }
 };
 
 let gameInstance = null;
@@ -222,7 +222,7 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
             overflow.forEach((p) => { p.isSpectating = true; });
             if (overflow.length) io.emit('lobby_state_sync', lobbySnapshot());
 
-            state.bots = state.settings.aiDrivers ? fillGrid(racers, state.settings.aiLevel, Date.now()) : [];
+            state.bots = state.settings.aiDrivers ? fillGrid(racers, state.settings.aiLevel, Date.now(), Math.min(22, racers.length + (state.settings.aiCount ?? 21))) : [];
             const grid = racers.concat(state.bots);
             if (state.settings.qualifying) startQuali(io, grid);
             else startRace(io, grid);

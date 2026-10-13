@@ -21,6 +21,7 @@ const setQuali = document.getElementById('setting-quali');
 const setCollisions = document.getElementById('setting-collisions');
 const setAi = document.getElementById('setting-ai');
 const setAiLevel = document.getElementById('setting-ai-level');
+const setAiCount = document.getElementById('setting-ai-count');
 const setGhost = document.getElementById('setting-ghost');
 const setTyres = document.getElementById('setting-tyres');
 const setPenalties = document.getElementById('setting-penalties');
@@ -308,6 +309,7 @@ function emitSettings() {
         contactPenalties: setPenalties.value === '1',
         aiDrivers: setAi.value === '1',
         aiLevel: setAiLevel.value,
+        aiCount: parseInt(setAiCount.value, 10),
         help: { mode: setHelp.value, brake: +setHelpBrake.value, steer: +setHelpSteer.value }
     });
 }
@@ -320,6 +322,7 @@ setTyres.addEventListener('change', emitSettings);
 setPenalties.addEventListener('change', emitSettings);
 setAi.addEventListener('change', emitSettings);
 setAiLevel.addEventListener('change', emitSettings);
+setAiCount.addEventListener('change', emitSettings);
 setTime.addEventListener('change', emitSettings);
 [setHelp, setHelpBrake, setHelpSteer].forEach((el) => el.addEventListener('change', emitSettings));
 
@@ -433,6 +436,7 @@ window.updateSettingsUI = () => {
     setPenalties.value = clientState.settings.contactPenalties === false ? '0' : '1';
     setAi.value = clientState.settings.aiDrivers ? '1' : '0';
     setAiLevel.value = clientState.settings.aiLevel || 'medium';
+    setAiCount.value = clientState.settings.aiCount ?? 21;
     const help = clientState.settings.help || { mode: 'choose', steer: 100, brake: 100 };
     setHelp.value = help.mode;
     setHelpBrake.value = String(help.brake);

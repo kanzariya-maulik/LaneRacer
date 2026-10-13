@@ -20,7 +20,7 @@ function sanitizeSettings(current, incoming, trackIds) {
     if (!incoming || typeof incoming !== 'object') return current;
     const next = { ...current };
     if (trackIds.includes(incoming.trackId)) next.trackId = incoming.trackId;
-    if (Number.isFinite(incoming.maxLaps)) next.maxLaps = clamp(Math.round(incoming.maxLaps), 1, 50);
+    if (Number.isFinite(incoming.maxLaps)) next.maxLaps = clamp(Math.round(incoming.maxLaps), 1, 100);
     if (typeof incoming.qualifying === 'boolean') { next.qualifying = incoming.qualifying; if (!incoming.qualiFormat) next.qualiFormat = incoming.qualifying ? (current.qualiFormat && current.qualiFormat !== 'off' ? current.qualiFormat : 'full') : 'off'; }
     if (['full', 'short', 'oneshot', 'off'].includes(incoming.qualiFormat)) { next.qualiFormat = incoming.qualiFormat; next.qualifying = incoming.qualiFormat !== 'off'; }
     if (Number.isFinite(incoming.qualiScale)) next.qualiScale = clamp(incoming.qualiScale, 0.02, 1); // test setting: shorter clocks
@@ -34,6 +34,7 @@ function sanitizeSettings(current, incoming, trackIds) {
     if (typeof incoming.tyreWear === 'boolean') next.tyreWear = incoming.tyreWear;
     if (typeof incoming.aiDrivers === 'boolean') next.aiDrivers = incoming.aiDrivers;
     if (['easy', 'medium', 'hard', 'pro'].includes(incoming.aiLevel)) next.aiLevel = incoming.aiLevel;
+    if (Number.isFinite(incoming.aiCount)) next.aiCount = clamp(Math.round(incoming.aiCount), 1, 21); // bots on the grid (22 cars max)
     if (incoming.help !== undefined) next.help = sanitizeHelp(incoming.help, current.help || HELP_DEFAULT);
     return next;
 }

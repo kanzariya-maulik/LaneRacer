@@ -147,7 +147,7 @@
                                         </select>
                                     </label>
                                     <label>Laps
-                                        <input type="number" id="setting-laps" min="1" max="50" value="3">
+                                        <input type="number" id="setting-laps" min="1" max="100" value="3">
                                     </label>
                                     <label>Qualifying
                                         <select id="setting-quali">
@@ -164,10 +164,13 @@
                                         </select>
                                     </label>
                                     <label>AI drivers
-                                        <select id="setting-ai" title="Fill every free seat with AI drivers (up to 22 cars)">
+                                        <select id="setting-ai" title="Add AI drivers to the grid">
                                             <option value="0" selected>Off</option>
                                             <option value="1">On</option>
                                         </select>
+                                    </label>
+                                    <label>AI cars
+                                        <input type="number" id="setting-ai-count" min="1" max="21" step="1" value="21" title="How many AI drivers join (the grid holds 22 cars)">
                                     </label>
                                     <label>AI level
                                         <select id="setting-ai-level">
