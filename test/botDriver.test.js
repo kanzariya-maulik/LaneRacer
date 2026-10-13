@@ -181,3 +181,21 @@ test('review: in the pit lane a bot brakes for a slower car just ahead in the la
     const out = drive(me, ctxOf(t, [me, slow], 50));
     assert.ok(out.brake > 0 && out.throttle === 0, JSON.stringify(out));
 });
+
+// Standing start, ghost start on (the lobby default): a real launch from the grid, then a fight into turn 1
+test('standing start: bots hold their grid columns off the line, race each other into turn 1, then take the line', () => {
+    const bots = fillGrid([], 'medium', 7).slice(0, 20);
+    const g = new Game(io, bots, tracks.monza, { ...RACE, maxLaps: 2, ghostStart: true });
+    g.update(); g.release();
+    const cars = () => Object.values(g.players);
+    const order = () => cars().sort((a, b) => a.rank - b.rank).map((p) => p.id).join();
+    for (let k = 0; k < 60; k++) g.update(); // 1 s: lights out, launched
+    const early = order();
+    for (let k = 0; k < 120; k++) g.update(); // 3 s after lights out
+    const spread = cars().filter((p) => Math.abs(p.bot?.lane ?? 0) > 1).length;
+    assert.ok(spread >= 8, `${spread} of 20 still out of the line's column at 3 s (grid slots held)`);
+    for (let k = 0; k < 60 * 30; k++) g.update(); // past turn 1
+    assert.ok(cars().every((p) => !p.bot?.start), 'start phase over by turn 1');
+    assert.notStrictEqual(order(), early, 'places changed on the run to and through turn 1');
+    assert.ok(cars().every((p) => p.lap >= 1 || p.speed > 0), 'nobody stopped');
+});

@@ -65,6 +65,7 @@ function state(p) {
 }
 
 const CAR_M = 5.6, PASS_M = 3.5, DEFEND_M = 3, BLUE_M = 3.5; // metres
+const START_AGG = 0.25, START_LATE = 1.03, START_MAX_S = 25; // the run to turn 1: more willing to attack, alongside brakes a touch later; never past 25 s
 const PATH_M = 3, ROOM_M = 3.5; // in my path within PATH_M sideways; side by side, never aim closer than ROOM_M // a car this close sideways is in my path (2 m wide car + margin)
 const FOLLOW_DEC = 8, FOLLOW_GAP_M = 6, AHEAD_M = 400; // cautious braking (cornering eats into it), so look far enough to stop from top speed // m/s² of braking the follow cap allows for (well under the car's limit), metres kept clear
 
@@ -82,7 +83,7 @@ function scan(p, ctx, v) {
     };
     const me = where(p), mine = me.off, r = { ahead: null, behind: null, alongside: null, lapper: null, close: false };
     for (const o of ctx.mode === 'quali' ? [] : ctx.cars) { // qualifying cars are ghosts: no traffic to race
-        if (o === p || o.finished || o.ghost || (o.inPit && o.stop && !p.inPit)) continue; // ghosts can't be hit; in the lane, lane cars count
+        if (o === p || o.finished || (o.ghost && !b.start) || (o.inPit && o.stop && !p.inPit)) continue; // ghosts can't be hit (but at the start they're raced as if solid); in the lane, lane cars count
         const w = where(o), oi = w.i, oo = w.off;
         let f = (((w.s - me.s) % total) + total) % total;
         if (f > total / 2) f -= total;
@@ -101,14 +102,14 @@ function scan(p, ctx, v) {
 }
 
 function racecraft(p, b, ctx, v, here, r, vt) {
-    const t = ctx.track, ai = p.ai, ph = t.racingLine.phase[here];
+    const t = ctx.track, ai = p.ai, ph = t.racingLine.phase[here], agg = ai.aggression + (b.start ? START_AGG : 0); // run to turn 1: go for gaps
     if (ph === 1) { b.defend = 0; b.defended = false; } // in the corner: the next straight allows a new move
     if (r.lapper && -r.lapper.f < 1.5 * v + 10) { b.passSide = 0; return { laneT: -insideSide(t, here) * BLUE_M, cap: v * 0.97 }; } // blue flag
     let laneT = 0, cap = Infinity;
     const a = r.ahead;
     if (a) {
         const faster = vt > a.v + 0.5 || p.tow > 0 || p.drsAvailable;
-        if (!b.passSide && faster && !r.alongside && a.f < Math.max((0.5 + 0.5 * ai.aggression) * v, FOLLOW_GAP_M + 6) + CAR_M) { // held up, even from a standstill
+        if (!b.passSide && faster && !r.alongside && a.f < Math.max((0.5 + 0.5 * agg) * v, FOLLOW_GAP_M + 6) + CAR_M) { // held up, even from a standstill
             const inside = insideSide(t, here);
             b.passSide = Math.sign(a.l) === inside ? -inside : inside; // the inside, unless they're already on it
             b.passCar = a.o;
@@ -120,11 +121,12 @@ function racecraft(p, b, ctx, v, here, r, vt) {
     if (b.passSide) laneT = b.passSide * PASS_M;
     else {
         const brakingSoon = t.racingLine.phase[ahead(t, here, 150)] === 2;
-        if (!b.defended && ai.aggression >= 0.3 && r.behind && -r.behind.f < 0.5 * v + CAR_M && brakingSoon && ph === 0) {
+        if (!b.defended && agg >= 0.3 && r.behind && -r.behind.f < 0.5 * v + CAR_M && brakingSoon && ph === 0) {
             b.defend = insideSide(t, here);
             b.defended = true;
         }
         if (b.defend) laneT = b.defend * DEFEND_M;
+        else if (b.start && !b.start.t1) laneT = b.start.lane; // off the line: straight on from the grid slot, not across into single file
     }
     if (r.alongside) laneT = b.lane; // side by side: hold my lane, never turn in across them
     return { laneT, cap };
@@ -136,6 +138,11 @@ function drive(p, ctx) {
     if (ctx.frozen || p.finished) return IDLE;
     const t = ctx.track, sc = t.scale, L = lineOf(t), v = Math.abs(p.speed) / sc, ai = p.ai;
     b.idx = trackIndex(t.path, p.x, p.y, b.idx, 40 * sc);
+    if (b.start === undefined) { // first tick of a race: the grid slot's offset from the racing line (m) is the lane off the line
+        const P = t.path[b.idx], N = L.N[b.idx];
+        b.start = ctx.mode === 'race' && ctx.time < 1 ? { lane: ((p.x - P.x) * N.x + (p.y - P.y) * N.y - t.racingLine.offset[b.idx]) / sc, t1: false } : null;
+        if (b.start) b.lane = b.start.lane;
+    }
     // Stuck (nose in a wall, beached): back off for a second with the wheel the other way, then drive on
     const r = scan(p, ctx, v);
     if (b.reverse > 0) { b.reverse -= ctx.dt; return { throttle: 0, brake: 1, steer: -b.revSteer, drs: false }; } // brake at a standstill reverses
@@ -159,6 +166,10 @@ function drive(p, ctx) {
     if (ctx.mode === 'quali' && p.lapStart === null) factor *= 0.9; // out-lap
     // A mistake at a corner entry, never with someone right there; it lasts until the corner is done (or 2.5 s)
     const phNow = t.racingLine.phase[here];
+    if (b.start) { // turn 1: the column hold ends at its braking point (everyone funnels), the attack once it's done
+        if (phNow === 2) b.start.t1 = true;
+        if ((b.start.t1 && phNow === 0) || ctx.time > START_MAX_S) b.start = null;
+    }
     if (phNow === 2 && b.prevPhase !== 2 && !b.err && !r.close && ctx.rng() < ai.mistake) {
         const roll = ctx.rng();
         b.err = { kind: roll < 0.4 ? 'late' : roll < 0.7 ? 'early' : 'apex', until: ctx.time + 2.5 };
@@ -169,7 +180,8 @@ function drive(p, ctx) {
     else if (b.err?.kind === 'early') factor *= 0.92;
     const js = ahead(t, here, Math.max(5, v * SPEED_LOOK_S));
     // The line's corner speeds are the car's real limit: past them it runs wide, so only straights get faster than the line
-    const vLine = t.racingLine.speed[js] * (t.racingLine.phase[js] === 0 || b.err?.kind === 'late' ? factor : Math.min(factor, 1));
+    const late = b.start && b.passSide && r.alongside ? START_LATE : 1; // alongside into turn 1: brakes a touch later and keeps the line
+    const vLine = t.racingLine.speed[js] * late * (t.racingLine.phase[js] === 0 || b.err?.kind === 'late' ? factor : Math.min(factor, 1));
     const { laneT, cap } = racecraft(p, b, ctx, v, here, r, vLine);
     if (toPit < PIT_SETUP_M) b.passSide = 0; // boxing: no moves on the way in, or it ends up alongside and can't cross to the entry
     const pitV = toPit < PIT_SETUP_M ? Math.sqrt(((t.pit.limitKmh || Drive.PIT_LIMIT_KMH) / 3.6) ** 2 + 2 * PIT_DEC * Math.max(0, toPit - PIT_APPROACH_M)) : Infinity;
