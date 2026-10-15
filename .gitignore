@@ -13,3 +13,7 @@ logs/
 
 # Agent scratch (plan ledgers, review packages)
 .superpowers/
+
+# browser-check output
+docs/superpowers/baseline/*.png
+.chrome/

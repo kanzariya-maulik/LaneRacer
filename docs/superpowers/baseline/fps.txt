@@ -1,0 +1,4 @@
+# fps at Monza, day, solo, headless Chrome (vsync off), 1600x900, M1 Pro — develop e1d55bd (WebGLRenderer)
+before low 689
+before medium 638
+before high 621

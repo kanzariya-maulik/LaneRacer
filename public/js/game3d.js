@@ -1,11 +1,11 @@
 import * as THREE from 'three';
 import { buildCar, buildSteeringWheel, liveryTexture as carLivery, WHEEL_RADIUS } from './carModel.js';
-import { VIEW_NAMES, VIEW_FOV, EYE, EYE_TILT, nextView, viewOf, onboard, wheelAngle, shadowHalf, toThree } from './views.js';
+import { VIEW_NAMES, VIEW_FOV, EYE, EYE_TILT, nextView, viewOf, onboard, wheelAngle, toThree } from './views.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { keyboardStep, gamepadInput, liftOffBrake } from './input.js';
 import { parseAssist } from './sim/carphysics.js';
-import { LEVELS, ratioRange, resolveLevel, autoPick, adaptStep, snapLight, frameCapped } from './quality.js';
+import { LEVELS, scaleRange, pixelRatio, resolveLevel, autoPick, shouldMeasure, stepDown, depthBias, adaptStep, frameCapped } from './quality.js';
 import { placeScenery, seedOf, vergeReach, terrainHeights, terrainGround, skirtDepth, gridSampler, carveReach, onVerge, onPit, untangle, smoothPath, RENDER_STEP_M, SKIRT_M } from './scenery.js';
 import { heightAt, pathHeights } from './sim/elevation.js';
 import { themeOf, LANDS, SKIES, nightOf } from './themes.js';
@@ -52,23 +52,34 @@ const store = {
 };
 Sound.init();
 const choice = store.get('lanrace.quality') || 'auto';
-let level = resolveLevel(choice, store.get('lanrace.quality.auto'));
+// WebGPU where the browser has it, else three's WebGL2 backend. Reversed depth keeps a 1 cm near plane precise out to
+// 20 km (onboard views draw in one pass); a WebGL2 without EXT_clip_control can't reverse depth: logarithmic depth instead
+let renderer, backend, reversed;
+const FORCE_WEBGL = new URLSearchParams(location.search).has('webgl'); // ?webgl: test the WebGL2 fallback on a WebGPU browser
+async function createRenderer({ logDepth = false } = {}) {
+    const r = new THREE.WebGPURenderer({ canvas, antialias: false, powerPreference: 'high-performance', forceWebGL: FORCE_WEBGL,
+        reversedDepthBuffer: !logDepth, logarithmicDepthBuffer: logDepth });
+    await r.init();
+    return r;
+}
+renderer = await createRenderer();
+if (!renderer.reversedDepthBuffer) { renderer.dispose(); renderer = await createRenderer({ logDepth: true }); }
+backend = renderer.backend.isWebGPUBackend ? 'webgpu' : 'webgl2';
+reversed = renderer.reversedDepthBuffer;
+let level = resolveLevel(choice, store.get('lanrace.quality.auto'), backend);
 let Q = LEVELS[level];
-window.lanraceQuality = { choice, level };
-
-// Antialias is fixed for the page's lifetime: it follows the level chosen at load
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: Q.antialias, powerPreference: 'high-performance' });
+window.lanraceQuality = { choice, level, backend };
 // Reading each shader's error log forces the GPU driver to finish compiling it there and then (a 2 s stall at a session's
-// start in profiles); errors are a developer concern, the console still shows WebGL's own
+// start in profiles); errors are a developer concern, the console still shows the backend's own
 renderer.debug.checkShaderErrors = false;
-let res = { ...ratioRange(level, window.devicePixelRatio), good: 0 };
+let res = { ...scaleRange(level), good: 0 };
 res.ratio = res.start;
-renderer.setPixelRatio(res.ratio);
+renderer.setPixelRatio(pixelRatio(level, window.devicePixelRatio));
 
 const SKY = 0x9cc8ef;
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(SKY);
-const camera = new THREE.PerspectiveCamera(60, 1, 2, Q.far);
+const camera = new THREE.PerspectiveCamera(60, 1, 0.06, Q.far); // 1 cm near plane (reversed depth): onboard views in one pass
 const hemi = new THREE.HemisphereLight(0xe8f4ff, 0x4f7a2a, 1.4);
 scene.add(hemi);
 // Sky: a dome around the camera, zenith colour fading to the horizon (= the fog), set per circuit (themes.js)
@@ -121,22 +132,7 @@ Object.assign(sun.shadow.camera, { left: -360, right: 360, top: 360, bottom: -36
 sun.shadow.bias = -0.0004;
 sun.shadow.normalBias = 0;
 scene.add(sun, sun.target);
-// Onboard views: after the world, depth is cleared and only the followed car (layer 1) is drawn again with a 1 cm near plane,
-// so the halo and wheel never clip and the track keeps its depth precision. The lights must be on layer 1 to light it.
-sun.layers.enable(1); hemi.layers.enable(1);
-const fpCam = new THREE.PerspectiveCamera(60, 1, 0.06, 60);
-fpCam.layers.set(1);
-let activeView = 'chase', layered = null, steeringWheel = null;
-// Its tyres are the shared wheel batch (layer 0), which the body would overdraw: in the close pass its own wheel meshes stand in
-const ownWheels = (car, on) => car?.wheels.forEach((w) => w.traverse((o) => { if (o.isMesh) { o.visible = on; o.layers.set(on ? 1 : 0); } }));
-function setLayered(car) {
-    if (layered === car) return;
-    layered?.model?.traverse((o) => o.layers.disable(1));
-    ownWheels(layered, false);
-    car?.model?.traverse((o) => o.layers.enable(1));
-    ownWheels(car, true);
-    layered = car;
-}
+let activeView = 'chase', onboardCar = null, steeringWheel = null; // onboardCar: the car whose T-cam/cockpit is in use
 
 // Shadows, fog, draw distance and resolution limits for a level (applied when a track is built)
 let appliedLevel = null;
@@ -147,18 +143,16 @@ function applyLevel(l) {
     Q = LEVELS[l];
     window.lanraceQuality.level = l;
     renderer.shadowMap.enabled = Q.shadows > 0;
-    renderer.shadowMap.type = THREE.PCFShadowMap; // PCFSoft removed in three r186
     sun.castShadow = Q.shadows > 0;
     if (Q.shadows) sun.shadow.mapSize.set(Q.shadows, Q.shadows);
-    sun.shadow.radius = Q.softShadows ? 2.5 : 1; // High: softer shadow edges
     sun.shadow.map?.dispose();
     sun.shadow.map = null;
     scene.fog = new THREE.Fog(SKY, 3000, Q.fog);
     camera.far = Q.far;
     camera.updateProjectionMatrix();
-    const range = ratioRange(l, window.devicePixelRatio);
+    const range = scaleRange(l);
     res = { ...range, good: 0, ratio: Math.max(range.min, Math.min(res.ratio, range.max)) };
-    renderer.setPixelRatio(res.ratio);
+    renderer.setPixelRatio(pixelRatio(l, window.devicePixelRatio));
 }
 applyLevel(level);
 
@@ -490,7 +484,7 @@ function coloredMesh(pos, col, uv = null, opts = {}) {
         vertexColors: true, side: THREE.DoubleSide, roughness: 0.9, map: opts.map || null,
         transparent: opts.opacity !== undefined, opacity: opts.opacity ?? 1, depthWrite: opts.opacity === undefined,
         // Flat layers only cm apart: a depth offset per layer stops them fighting (flickering) in the distance
-        polygonOffset: !!opts.layer, polygonOffsetFactor: -(opts.layer || 0), polygonOffsetUnits: -(opts.layer || 0) * 2,
+        polygonOffset: !!opts.layer, polygonOffsetFactor: depthBias(-(opts.layer || 0), reversed), polygonOffsetUnits: depthBias(-(opts.layer || 0) * 2, reversed),
     }));
     m.receiveShadow = true;
     return m;
@@ -1237,7 +1231,7 @@ function buildRacingLine(t) {
     g.setAttribute('position', new THREE.BufferAttribute(pos.slice(), 3));
     g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 36), 3));
     const mesh = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.75, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true,
-        polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -6 }));
+        polygonOffset: true, polygonOffsetFactor: depthBias(-3, reversed), polygonOffsetUnits: depthBias(-6, reversed) }));
     mesh.renderOrder = 1;        // over the tyre marks
     mesh.frustumCulled = false;  // hidden segments collapse to the origin, so the bounds are meaningless
     world.add(mesh);
@@ -1597,7 +1591,7 @@ function blobShadow(strength = 1) {
         g.fillRect(0, 0, 64, 64);
         blobTex = new THREE.CanvasTexture(c);
     }
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(5.6 * scale, 2.3 * scale), new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, opacity: strength, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 }));
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(5.6 * scale, 2.3 * scale), new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, opacity: strength, depthWrite: false, polygonOffset: true, polygonOffsetFactor: depthBias(-2, reversed), polygonOffsetUnits: depthBias(-4, reversed) }));
     m.rotation.x = -Math.PI / 2;
     m.position.set(0.2 * scale, 0.1, 0); // just over the asphalt under the car, a touch forward of the axle midpoint
     m.renderOrder = 1;
@@ -1801,7 +1795,6 @@ function updateWheelBatch() {
                 if (k !== 1) return;
                 const band = compoundColor[clientState.gameState?.[id]?.compound] || compoundColor.M; // tyre part carries the compound
                 mesh.setColorAt(i, band);
-                if (cars[id] === layered) o.material.color.copy(band); // the close pass draws this tyre itself
             });
         }
     }
@@ -1828,7 +1821,7 @@ function followedCar() {
 
 function updateCamera(dt) {
     const car = followedCar();
-    if (!car) { activeView = 'chase'; setLayered(null); return; }
+    if (!car) { activeView = 'chase'; onboardCar = null; window.lanraceView = activeView; return; }
     const p = car.root.position;
     // Camera sits exactly behind the car; only its swing round corners is smoothed
     const target = -car.root.rotation.y; // back to server heading
@@ -1864,7 +1857,8 @@ function updateCamera(dt) {
     // The close-range pass: off for the pit camera (it's metres away, the crew can stand in front of the car)
     const layeredNow = v !== 'chase' && pitBlend <= 0.001;
     activeView = layeredNow ? v : 'chase';
-    setLayered(layeredNow ? car : null);
+    onboardCar = layeredNow ? car : null;
+    window.lanraceView = activeView;
     document.body.classList.toggle('view-cockpit', activeView === 'cockpit'); // the wheel's display replaces the dash's gear and revs
     if (layeredNow) { // the wheel shows from both onboard views (T-cam looks down into the cockpit)
         steeringWheel ||= buildSteeringWheel(document.createElement('canvas'));
@@ -1872,19 +1866,9 @@ function updateCamera(dt) {
             car.model.add(steeringWheel.root);
             steeringWheel.setGlove(teamInfo[car.teamId]?.chatColor || '#e10600');
         }
-        steeringWheel.root.traverse((o) => o.isMesh && o.layers.enable(1));
         steeringWheel.root.visible = true;
         steeringWheel.spin.rotation.x = wheelAngle(clientState.gameState?.[car.id]?.steer);
     } else if (steeringWheel) steeringWheel.root.visible = false;
-    // Moved in whole shadow-map texels so shadow edges don't shimmer as the car drives; onboard, a tighter box: sharper
-    const half = shadowHalf(activeView);
-    if (sun.shadow.camera.right !== half) {
-        Object.assign(sun.shadow.camera, { left: -half, right: half, top: half, bottom: -half });
-        sun.shadow.camera.updateProjectionMatrix();
-    }
-    const q = snapLight({ x: p.x, y: p.y, z: p.z }, SUN_OFF, (2 * half) / (Q.shadows || 1024));
-    sun.position.set(q.x + SUN_OFF.x, q.y + SUN_OFF.y, q.z + SUN_OFF.z);
-    sun.target.position.set(q.x, q.y, q.z);
 }
 
 // ---------- HUD + minimap ----------
@@ -2398,7 +2382,7 @@ function drawNetstats() {
 }
 let fpsFrames = 0, fpsSince = performance.now(), lastHud = 0, lastTower = 0;
 const fpsHist = []; let capWarned = false; // steady 30 fps = browser frame cap, told once per page
-let autoMs = 0, autoFrames = 0; // auto-pick: frame time while driving
+let autoMs = 0, autoFrames = 0, autoDone = false; // auto-pick: frame time while driving
 const stats = new URLSearchParams(location.search).has('stats') ? Object.assign(document.createElement('div'), { id: 'stats' }) : null;
 if (stats) document.body.appendChild(stats);
 if (stats) window.lanraceDebug = { renderer, scene, camera, freeCam: false }; // ?stats=1: profiling / looking around from the console
@@ -2467,29 +2451,18 @@ function frame(now) {
     updateCrews(dt);
     updateWheelBatch();
     if (!window.lanraceDebug?.freeCam) updateCamera(dt);
-    else { activeView = 'chase'; setLayered(null); }
+    else { activeView = 'chase'; onboardCar = null; }
     skyDome.position.copy(camera.position);
     skyDome.scale.setScalar(camera.far * 0.9);
     if (paused) Sound.update(silentFrame); else updateSound(dt);
     if (!compiling) { // a draw before the shaders are ready compiles them there and then (a ~1.6 s freeze)
         renderer.render(scene, camera);
-        if (activeView !== 'chase' && layered) { // onboard: the followed car again over the world, with a 1 cm near plane
-            fpCam.position.copy(camera.position);
-            fpCam.quaternion.copy(camera.quaternion);
-            if (fpCam.fov !== camera.fov || fpCam.aspect !== camera.aspect) { fpCam.fov = camera.fov; fpCam.aspect = camera.aspect; fpCam.updateProjectionMatrix(); }
-            // keep this frame's colour and shadow map (a Color background force-clears the colour even with autoClear off)
-            const bg = scene.background;
-            renderer.autoClear = false; renderer.shadowMap.autoUpdate = false; scene.background = null;
-            renderer.clearDepth();
-            renderer.render(scene, fpCam);
-            renderer.autoClear = true; renderer.shadowMap.autoUpdate = true; scene.background = bg;
-        }
     }
 
     if (now - lastHud > 66) { // HUD and minimap at 15 Hz, timing tower at 4 Hz
         updateHUD(now - lastTower > 250);
-        if (activeView !== 'chase' && steeringWheel && layered) {
-            steeringWheel.draw({ gear: hudGear, kmh: String(kmh(clientState.gameState[layered.id]?.speed ?? 0)), lit: Math.max(0, hudLit), drs: !!clientState.gameState[layered.id]?.drs });
+        if (activeView !== 'chase' && steeringWheel && onboardCar) {
+            steeringWheel.draw({ gear: hudGear, kmh: String(kmh(clientState.gameState[onboardCar.id]?.speed ?? 0)), lit: Math.max(0, hudLit), drs: !!clientState.gameState[onboardCar.id]?.drs });
         }
         if (now - lastTower > 250) lastTower = now;
         drawMinimap();
@@ -2500,12 +2473,13 @@ function frame(now) {
 
     fpsFrames++;
     const me = clientState.gameState[clientState.me];
-    if (choice === 'auto' && !store.get('lanrace.quality.auto') && me && Math.abs(me.speed) > 0) {
+    if (!autoDone && shouldMeasure(choice, store.get('lanrace.quality.auto')) && me && Math.abs(me.speed) > 0) {
         autoMs += dt * 1000;
         autoFrames++;
         if (autoMs > 5000) {
             const picked = autoPick(autoMs / autoFrames, level, window.devicePixelRatio);
             store.set('lanrace.quality.auto', picked); // used from the next race
+            autoDone = true; // once per page: a stored High is measured again only on the next load
         }
     }
     if (now - fpsSince > 1500) { // lobby, loading or a background tab: not a real measurement
@@ -2515,7 +2489,6 @@ function frame(now) {
         const fps = (fpsFrames * 1000) / (now - fpsSince);
         window.lanraceFps = fps; // network log telemetry (socket.js)
         const next = adaptStep(res, fps);
-        if (next.ratio !== res.ratio) renderer.setPixelRatio(next.ratio);
         res = next;
         fpsHist.push(fps);
         if (fpsHist.length > 6) fpsHist.shift();
@@ -2523,7 +2496,7 @@ function frame(now) {
             capWarned = true;
             window.showBanner?.('30 FPS CAP — plug in the charger or turn off Chrome Energy Saver');
         }
-        if (stats) stats.textContent = `${fps.toFixed(0)} fps · ${renderer.info.render.calls} calls · ${res.ratio.toFixed(2)}× · ${level}${choice === 'auto' ? ' (auto)' : ''}`;
+        if (stats) stats.textContent = `${fps.toFixed(0)} fps · ${renderer.info.render.drawCalls} calls · ${res.ratio.toFixed(2)}× · ${level}${choice === 'auto' ? ' (auto)' : ''} · ${backend}`;
         fpsFrames = 0;
         fpsSince = now;
     }

@@ -46,6 +46,7 @@
                                     <option value="low">Low</option>
                                     <option value="medium">Medium</option>
                                     <option value="high">High</option>
+                                    <option value="ultra">Ultra</option>
                                 </select>
                                 <small id="graphics-note"></small>
                             </label>
@@ -362,7 +363,7 @@
     </div>
 
     <script type="importmap">
-        { "imports": { "three": "/vendor/three/build/three.module.js", "three/addons/": "/vendor/three/examples/jsm/" } }
+        { "imports": { "three": "/vendor/three/build/three.webgpu.js", "three/webgpu": "/vendor/three/build/three.webgpu.js", "three/tsl": "/vendor/three/build/three.tsl.js", "three/addons/": "/vendor/three/examples/jsm/" } }
     </script>
     <script src="/socket.io/socket.io.js"></script>
     <script src="js/socket.js"></script>
