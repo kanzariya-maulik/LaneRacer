@@ -1,27 +1,48 @@
-// Graphics levels and the rules that pick and adapt them. Pure, shared by game3d.js and the node tests.
+// Graphics levels and the rules that pick and adapt them. Pure, shared by game3d.js, postfx.js and the node tests.
+// scale: internal render scale [start, min, max] (adaptStep moves it, the upscaler fills the screen); dpr: device-pixel cap.
+// effects: the post chain (postfx.js), one anti-aliasing each. cascades: CSM cascades (0 = no sun shadows).
 export const LEVELS = {
-    low:    { ratio: [0.75, 0.5, 1], antialias: false, shadows: 0,    softShadows: false, scenery: 0.3, far: 6000,  fog: 6000,  envMap: false, tyreMarks: false, anisotropy: 1 },
-    medium: { ratio: [1, 0.6, 1],    antialias: true, shadows: 1024, softShadows: false, scenery: 0.6, far: 12000, fog: 12000, envMap: true,  tyreMarks: true,  anisotropy: 4 },
-    high:   { ratio: [2, 0.75, 2],   antialias: true,  shadows: 2048, softShadows: true,  scenery: 1,   far: 20000, fog: 16000, envMap: true,  tyreMarks: true,  anisotropy: 8 },
+    low:    { scale: [0.75, 0.5, 1], dpr: 1, effects: ['fxaa', 'fsr1'], shadows: 0, cascades: 0,
+              scenery: 0.3, far: 6000, fog: 6000, envMap: false, tyreMarks: false, anisotropy: 1 },
+    medium: { scale: [1, 0.6, 1], dpr: 1, effects: ['ao', 'bloom', 'vignette', 'smaa', 'fsr1'], shadows: 1024, cascades: 2,
+              scenery: 0.6, far: 12000, fog: 12000, envMap: true, tyreMarks: true, anisotropy: 4 },
+    high:   { scale: [1, 0.75, 1], dpr: 2, effects: ['ao', 'bloom', 'motionBlur', 'vignette', 'taau'], shadows: 2048, cascades: 3,
+              scenery: 1, far: 20000, fog: 16000, envMap: true, tyreMarks: true, anisotropy: 8 },
+    ultra:  { scale: [1, 1, 1], dpr: 2, effects: ['ao', 'ssr', 'bloom', 'lensflare', 'godrays', 'motionBlur', 'vignette', 'grain', 'traa'], shadows: 4096, cascades: 4,
+              scenery: 1, far: 20000, fog: 16000, envMap: true, tyreMarks: true, anisotropy: 8 },
 };
+export const ORDER = ['low', 'medium', 'high', 'ultra'];
 
-export function ratioRange(level, dpr) {
-    const [start, min, max] = LEVELS[level].ratio;
-    const cap = level === 'high' ? Math.min(dpr, max) : max;
-    return { start: Math.min(start, cap), min: Math.min(min, cap), max: cap };
+export function scaleRange(level) {
+    const [start, min, max] = LEVELS[level].scale;
+    return { start, min, max };
 }
 
-export function resolveLevel(choice, autoResult) {
+export const pixelRatio = (level, dpr) => Math.min(dpr, LEVELS[level].dpr);
+
+export const stepDown = (level) => ORDER[Math.max(0, ORDER.indexOf(level) - 1)];
+
+// A manual choice is kept as is. Auto: the measured level, else Medium — Low on the slower WebGL2 fallback
+export function resolveLevel(choice, autoResult, backend = 'webgpu') {
     if (choice in LEVELS) return choice;
-    return autoResult in LEVELS ? autoResult : 'medium';
+    if (autoResult in LEVELS) return autoResult;
+    return backend === 'webgl2' ? 'low' : 'medium';
 }
 
-// After 5 s of driving on Medium: under ~45 fps steps down, over ~85 fps steps up
+// After 5 s of driving: under ~45 fps → Low; over ~85 fps → High; over ~140 fps while on High → Ultra
 export function autoPick(avgFrameMs, current, dpr) {
     if (avgFrameMs > 22) return 'low';
+    if (current === 'high' && avgFrameMs < 7) return 'ultra';
+    if (current === 'ultra') return 'ultra';
     if (avgFrameMs < 11.8 && dpr >= 1) return 'high';
     return current;
 }
+
+// Auto measures when nothing is stored yet, and once more from a stored High (the only way up to Ultra)
+export const shouldMeasure = (choice, stored) => choice === 'auto' && (!stored || stored === 'high');
+
+// polygonOffset pulls decals toward the camera with negative values; a reversed depth buffer needs the sign flipped
+export const depthBias = (n, reversed) => (reversed && n ? -n : n);
 
 // Once a second. Below 50 fps: probe by dropping straight to the level's minimum (with vsync, small steps can't get a
 // 30 fps frame back under 16.7 ms). If that isn't at least 3 fps faster, resolution isn't the bottleneck (a frame cap,
@@ -52,15 +73,4 @@ export function adaptStep(st, fps) {
 export function frameCapped(history) {
     const last = history.slice(-6);
     return last.length === 6 && last.every((f) => Math.abs(f - 30) <= 1);
-}
-
-// Point p moved onto the shadow map's texel grid in the light's own axes (three.js lookAt basis, up = +Y),
-// so the shadow camera can follow the car without shadow edges crawling. off = light position − target.
-export function snapLight(p, off, step) {
-    const n = Math.hypot(off.x, off.y, off.z), z = { x: off.x / n, y: off.y / n, z: off.z / n };
-    const xl = Math.hypot(z.z, z.x), x = { x: z.z / xl, y: 0, z: -z.x / xl };
-    const y = { x: z.y * x.z - z.z * x.y, y: z.z * x.x - z.x * x.z, z: z.x * x.y - z.y * x.x };
-    const dot = (a) => p.x * a.x + p.y * a.y + p.z * a.z;
-    const u = Math.round(dot(x) / step) * step, v = Math.round(dot(y) / step) * step, w = dot(z);
-    return { x: x.x * u + y.x * v + z.x * w, y: x.y * u + y.y * v + z.y * w, z: x.z * u + y.z * v + z.z * w };
 }

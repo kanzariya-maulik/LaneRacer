@@ -12,5 +12,4 @@ export const nextView = (v) => VIEWS[(VIEWS.indexOf(v) + 1) % VIEWS.length];
 export const viewOf = (stored) => (VIEWS.includes(stored) ? stored : 'chase');
 export const onboard = (v) => v === 'tcam' || v === 'cockpit';
 export const wheelAngle = (steer) => Math.max(-1, Math.min(1, steer || 0)) * (Math.PI / 2);
-export const shadowHalf = (v) => (onboard(v) ? 120 : 360); // ±20 m round the car onboard: ~3× sharper texels
 export const toThree = ([x, y, z]) => [x, z, -y];

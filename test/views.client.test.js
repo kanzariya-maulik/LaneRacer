@@ -26,14 +26,15 @@ test('cockpit eye sits inside the helmet (outward faces culled from inside), T-c
     assert.ok(V.WHEEL_POS[0] > x && V.WHEEL_POS[0] < 0.58, 'wheel ahead of the eye, behind the halo pillar (x 0.58)');
 });
 
-test('wheel angle: ±90° at full lock, clamped, right is positive; shadow box per view; car frame to three.js', () => {
+test('wheel angle: ±90° at full lock, clamped, right is positive; car frame to three.js', () => {
     assert.strictEqual(V.wheelAngle(0), 0);
     assert.strictEqual(V.wheelAngle(1), Math.PI / 2);
     assert.strictEqual(V.wheelAngle(-1), -Math.PI / 2);
     assert.strictEqual(V.wheelAngle(3), Math.PI / 2);
     assert.strictEqual(V.wheelAngle(undefined), 0);
-    assert.strictEqual(V.shadowHalf('chase'), 360);
-    assert.strictEqual(V.shadowHalf('tcam'), 120);
-    assert.strictEqual(V.shadowHalf('cockpit'), 120);
     assert.deepStrictEqual(V.toThree([1, 2, 3]), [1, 3, -2]);
+});
+
+test('shadowHalf is gone: cascaded shadows fit themselves', () => {
+    assert.strictEqual(V.shadowHalf, undefined);
 });
