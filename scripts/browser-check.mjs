@@ -1,6 +1,6 @@
 // Drives a local LanRace race in Chrome over the DevTools protocol: screenshots per view, fps, console errors.
 // Uses its own server on PORT 3299 (never the user's 3232) and kills only what it started.
-// node scripts/browser-check.mjs --track monza --level high --time day --views chase,tcam,cockpit --out <dir> [--headed] [--fps 10] [--lose] [--webgl] [--eval <js run before screenshots>]
+// node scripts/browser-check.mjs --track monza --level high --time day --views chase,tcam,cockpit --out <dir> [--headed] [--fps 10] [--lose] [--webgl] [--logdepth] [--eval <js run before screenshots>]
 import { spawn, execSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -8,7 +8,7 @@ import { setTimeout as wait } from 'node:timers/promises';
 const arg = (k, d) => { const i = process.argv.indexOf(`--${k}`); return i < 0 ? d : process.argv[i + 1] ?? true; };
 const PORT = 3299, DBG = 9299, track = arg('track', 'monza'), level = arg('level', 'high'), time = arg('time', 'day');
 const views = String(arg('views', 'chase')).split(','), out = arg('out', 'shots'), fpsSecs = Number(arg('fps', 0));
-const webgl = process.argv.includes('--webgl'), headed = process.argv.includes('--headed'), lose = process.argv.includes('--lose');
+const webgl = process.argv.includes('--webgl'), logdepth = process.argv.includes('--logdepth'), headed = process.argv.includes('--headed'), lose = process.argv.includes('--lose');
 const extra = process.env.CHROME_FLAGS ? process.env.CHROME_FLAGS.split(' ') : [];
 mkdirSync(out, { recursive: true });
 
@@ -20,6 +20,8 @@ const chrome = spawn('/Applications/Google Chrome.app/Contents/MacOS/Google Chro
     '--no-first-run', '--no-default-browser-check', `--user-data-dir=${out}/.chrome`, '--window-size=1600,900', '--disable-gpu-vsync', '--disable-frame-rate-limit', ...extra, 'about:blank'], { stdio: 'ignore' });
 const stop = () => { try { chrome.kill(); } catch {} try { server.kill(); } catch {} };
 process.on('exit', stop);
+// A frozen page never answers DevTools calls: give up after 3 minutes, report what was seen, clean up
+setTimeout(() => { console.log(JSON.stringify({ track, time, level, error: 'timeout: page stopped answering', errors, warnings: warnings.slice(0, 5) })); process.exit(1); }, 180000).unref();
 
 let ws, id = 0; const pending = new Map(), errors = [], warnings = [];
 const send = (method, params = {}) => new Promise((res) => { const i = ++id; pending.set(i, res); ws.send(JSON.stringify({ id: i, method, params })); });
@@ -43,7 +45,7 @@ try {
         if (d.method === 'Runtime.exceptionThrown') errors.push((d.params.exceptionDetails.exception?.description || d.params.exceptionDetails.text).slice(0, 300));
     };
     await send('Runtime.enable'); await send('Page.enable');
-    await send('Page.navigate', { url: `http://localhost:${PORT}/?stats=1${webgl ? '&webgl' : ''}` });
+    await send('Page.navigate', { url: `http://localhost:${PORT}/?stats=1${webgl ? '&webgl' : ''}${logdepth ? '&logdepth' : ''}` });
     await until(`document.readyState === 'complete'`);
     await until(`location.port === '${PORT}' && document.readyState === 'complete' && !!document.getElementById('graphics-select')`);
     await evalJs(`(() => { const e = document.getElementById('graphics-select'); e.value = ${JSON.stringify(level)}; e.dispatchEvent(new Event('change', { bubbles: true })); return e.value; })()`);

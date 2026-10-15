@@ -23,7 +23,7 @@ test('presets follow the spec table', () => {
 
 test('scaleRange and pixelRatio: internal scale per level, device pixels capped per level', () => {
     assert.deepStrictEqual(Q.scaleRange('low'), { start: 0.75, min: 0.5, max: 1 });
-    assert.deepStrictEqual(Q.scaleRange('high'), { start: 1, min: 0.75, max: 1 });
+    assert.deepStrictEqual(Q.scaleRange('high'), { start: 1, min: 1, max: 1 });
     assert.strictEqual(Q.pixelRatio('low', 2), 1);
     assert.strictEqual(Q.pixelRatio('high', 3), 2);
     assert.strictEqual(Q.pixelRatio('high', 1), 1);
@@ -116,4 +116,15 @@ test('frameCapped: a steady 30 fps (Energy Saver) is detected, real slowness is 
     assert.strictEqual(Q.frameCapped([30, 30, 30]), false, 'needs 6 seconds');
     assert.strictEqual(Q.frameCapped([24, 31, 27, 35, 29, 33]), false, 'jittery = GPU load, not a cap');
     assert.strictEqual(Q.frameCapped([60, 60, 60, 60, 60, 60]), false);
+});
+
+test('capLevel: a GPU reset caps later sessions at the lowered level, never raises', () => {
+    assert.strictEqual(Q.capLevel('ultra', 'high'), 'high');
+    assert.strictEqual(Q.capLevel('high', 'medium'), 'medium');
+    assert.strictEqual(Q.capLevel('low', 'medium'), 'low');
+    assert.strictEqual(Q.capLevel('medium', 'ultra'), 'medium', 'no reset: unchanged');
+});
+
+test('TRAA levels render at full scale: its depth history is copied at screen size (WebGPU rejects a smaller pass)', () => {
+    for (const [name, L] of Object.entries(Q.LEVELS)) if (L.effects.includes('traa')) assert.deepStrictEqual(L.scale, [1, 1, 1], name);
 });

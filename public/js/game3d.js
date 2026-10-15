@@ -7,7 +7,7 @@ import { CSMShadowNode } from 'three/addons/csm/CSMShadowNode.js';
 import { buildPost } from './postfx.js';
 import { keyboardStep, gamepadInput, liftOffBrake } from './input.js';
 import { parseAssist } from './sim/carphysics.js';
-import { LEVELS, scaleRange, pixelRatio, resolveLevel, autoPick, shouldMeasure, stepDown, depthBias, adaptStep, frameCapped } from './quality.js';
+import { LEVELS, capLevel, scaleRange, pixelRatio, resolveLevel, autoPick, shouldMeasure, stepDown, depthBias, adaptStep, frameCapped } from './quality.js';
 import { placeScenery, seedOf, vergeReach, terrainHeights, terrainGround, skirtDepth, gridSampler, carveReach, onVerge, onPit, untangle, smoothPath, RENDER_STEP_M, SKIRT_M } from './scenery.js';
 import { heightAt, pathHeights } from './sim/elevation.js';
 import { themeOf, LANDS, SKIES, nightOf } from './themes.js';
@@ -41,7 +41,7 @@ const TERRAIN_SINK_M = 0.6; // ground beyond the verge sits this far below the r
 const teamInfo = {};
 fetch('teams.json').then(r => r.json()).then((list) => { for (const t of list) teamInfo[t.id] = t; });
 
-let canvas = document.getElementById('game-canvas'); // replaced by a fresh one after a GPU reset
+let canvas = document.getElementById('game-canvas'); // replaced by a fresh one when a renderer is recreated
 const minimap = document.getElementById('minimap');
 const mm = minimap.getContext('2d');
 
@@ -64,8 +64,14 @@ async function createRenderer({ logDepth = false } = {}) {
     await r.init();
     return r;
 }
-renderer = await createRenderer();
-if (!renderer.reversedDepthBuffer) { renderer.dispose(); renderer = await createRenderer({ logDepth: true }); }
+// Probed on a throwaway canvas: disposing a renderer loses its canvas's context, so the game's canvas gets one renderer
+const FORCE_LOGDEPTH = new URLSearchParams(location.search).has('logdepth'); // ?logdepth: test the no-EXT_clip_control path
+const glNeedsLogDepth = () => FORCE_LOGDEPTH || !document.createElement('canvas').getContext('webgl2')?.getExtension('EXT_clip_control');
+const freshCanvas = () => { const c = canvas.cloneNode(false); canvas.replaceWith(c); canvas = c; };
+renderer = await createRenderer({ logDepth: (FORCE_WEBGL || !navigator.gpu) && glNeedsLogDepth() });
+if (!renderer.reversedDepthBuffer && !renderer.logarithmicDepthBuffer) { // WebGPU had no adapter after all: WebGL2 without clip control
+    renderer.dispose(); freshCanvas(); renderer = await createRenderer({ logDepth: true });
+}
 backend = renderer.backend.isWebGPUBackend ? 'webgpu' : 'webgl2';
 reversed = renderer.reversedDepthBuffer;
 let level = resolveLevel(choice, store.get('lanrace.quality.auto'), backend);
@@ -161,8 +167,13 @@ function applySky(sky) {
     envTex?.dispose(); envTex = null;
     scene.environment = Q.envMap ? envTexture() : null;
     // The post chain follows the level and the sky (sun glare is day-only); buildWorld always calls this after applyLevel
-    post?.dispose();
-    post = buildPost(renderer, scene, camera, isDay ? Q.effects : Q.effects.filter((e) => e !== 'lensflare'));
+    // Sun glare is day-only; AO and SSR misread logarithmic depth (WebGL2 without clip control): noise all over the grass
+    const effects = Q.effects.filter((e) => (isDay || e !== 'lensflare') && (!renderer.logarithmicDepthBuffer || (e !== 'ao' && e !== 'ssr')));
+    if (!post || post.key !== effects.join()) { // same level and light as last session: keep the chain (and its compiled shaders)
+        post?.dispose();
+        post = buildPost(renderer, scene, camera, effects);
+        post.key = effects.join();
+    }
     post.setScale(res.ratio);
 }
 const sun = new THREE.DirectionalLight(0xffffff, 2.2);
@@ -174,7 +185,8 @@ scene.add(sun, sun.target);
 let activeView = 'chase', onboardCar = null, steeringWheel = null; // onboardCar: the car whose T-cam/cockpit is in use
 
 // Shadows, fog, draw distance and resolution limits for a level (applied when a track is built)
-let appliedLevel = null, csm = null, post = null;
+let postFellBack = false;
+let appliedLevel = null, csm = null, post = null, maxLevel = 'ultra'; // maxLevel: lowered by a GPU reset for the page's lifetime
 const scaleOf = () => clientState.trackData?.scale || 6; // world units per metre (the module's `scale` is declared further down)
 function applyLevel(l) {
     if (l === appliedLevel) return; // same level next session: keep the shadow map and the learned resolution
@@ -1331,7 +1343,7 @@ function colourLine() {
 
 
 function buildWorld(t) {
-    applyLevel(resolveLevel(store.get('lanrace.quality') || 'auto', store.get('lanrace.quality.auto')));
+    applyLevel(capLevel(resolveLevel(store.get('lanrace.quality') || 'auto', store.get('lanrace.quality.auto'), backend), maxLevel));
     const theme = themeOf(t.id), land = LANDS[theme.land]; // the place: sky, light, land, trees, city (themes.js)
     night = clientState.settings.timeOfDay === 'night';
     applySky(night ? nightOf(t.id) : SKIES[theme.sky]);
@@ -1666,7 +1678,9 @@ function envTexture() {
     }
     // Without the sun disc: the sun light lights the scene already, a disc blurred into the map would add it twice
     daySky.showSunDisc.value = 0;
-    envTex = new THREE.PMREMGenerator(renderer).fromScene(s, 0, 0.1, 1000).texture;
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    envTex = pmrem.fromScene(s, 0, 0.1, 1000).texture;
+    pmrem.dispose(); // its blur targets and materials; the env texture stays
     daySky.showSunDisc.value = 1;
     return envTex;
 }
@@ -2516,11 +2530,15 @@ function frame(now) {
     skyDome.position.copy(camera.position);
     skyDome.scale.setScalar(camera.far * 0.9);
     if (paused) Sound.update(silentFrame); else updateSound(dt);
-    if (!compiling && post) { // a draw before the shaders are ready compiles them there and then (a ~1.6 s freeze)
-        try { post.render(); }
-        catch (e) { // an effect that compiles on no GPU here: fall back to the Low chain once, keep racing
-            console.warn('postfx: chain failed, Low chain instead', e);
-            post.dispose(); post = buildPost(renderer, scene, camera, LEVELS.low.effects); post.setScale(res.ratio);
+    if (!compiling && (post || postFellBack)) { // a draw before the shaders are ready compiles them there and then (a ~1.6 s freeze)
+        try { post ? post.render() : renderer.render(scene, camera); }
+        catch (e) { // a chain that fails here: the Low chain once, then no post-processing at all; the race goes on
+            console.warn(postFellBack ? 'postfx: Low chain failed too, plain render' : 'postfx: chain failed, Low chain instead', e);
+            post?.dispose();
+            post = postFellBack ? null : buildPost(renderer, scene, camera, LEVELS.low.effects);
+            post?.setScale(res.ratio);
+            if (post) post.key = 'fallback';
+            postFellBack = true;
         }
     }
 
@@ -2643,17 +2661,25 @@ async function recoverRenderer(info) {
     recovering = true;
     console.warn('renderer lost', info?.message || info);
     renderer.setAnimationLoop(null);
-    try { post?.dispose(); renderer.dispose(); } catch { /* already gone */ }
+    try { post?.dispose(); renderer.dispose()?.catch?.(() => {}); } catch { /* already gone */ }
     post = null;
-    const fresh = canvas.cloneNode(false);
-    canvas.replaceWith(fresh);
-    canvas = fresh;
-    renderer = await createRenderer({ logDepth: !reversed });
+    freshCanvas();
+    try { renderer = await createRenderer({ logDepth: !reversed }); }
+    catch (e) { // no GPU to come back to (adapter gone after a GPU process crash)
+        console.error('renderer could not be recreated', e);
+        window.showBanner?.('GRAPHICS LOST — RELOAD THE PAGE');
+        recovering = false;
+        return;
+    }
+    backend = renderer.backend.isWebGPUBackend ? 'webgpu' : 'webgl2';
+    window.lanraceQuality.backend = backend;
     renderer.onDeviceLost = recoverRenderer;
     renderer.debug.checkShaderErrors = false;
     renderer.toneMapping = THREE.AgXToneMapping;
     if (window.lanraceDebug) window.lanraceDebug.renderer = renderer;
     const lower = stepDown(level);
+    maxLevel = lower; // later sessions stay at most here (buildWorld re-resolves the level from storage)
+    autoDone = true;  // a measurement around a reset would be meaningless
     appliedLevel = null;
     applyLevel(lower);
     if (currentSky) applySky(currentSky);

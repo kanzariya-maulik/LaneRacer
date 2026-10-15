@@ -6,7 +6,7 @@ export const LEVELS = {
               scenery: 0.3, far: 6000, fog: 6000, envMap: false, tyreMarks: false, anisotropy: 1 },
     medium: { scale: [1, 0.6, 1], dpr: 1, effects: ['ao', 'bloom', 'vignette', 'smaa', 'fsr1'], shadows: 1024, cascades: 2,
               scenery: 0.6, far: 12000, fog: 12000, envMap: true, tyreMarks: true, anisotropy: 4 },
-    high:   { scale: [1, 0.75, 1], dpr: 2, effects: ['ao', 'bloom', 'motionBlur', 'vignette', 'traa'], shadows: 2048, cascades: 3,
+    high:   { scale: [1, 1, 1], dpr: 2, effects: ['ao', 'bloom', 'motionBlur', 'vignette', 'traa'], shadows: 2048, cascades: 3,
               scenery: 1, far: 20000, fog: 16000, envMap: true, tyreMarks: true, anisotropy: 8 },
     ultra:  { scale: [1, 1, 1], dpr: 2, effects: ['ao', 'ssr', 'bloom', 'lensflare', 'motionBlur', 'vignette', 'grain', 'traa'], shadows: 4096, cascades: 4,
               scenery: 1, far: 20000, fog: 16000, envMap: true, tyreMarks: true, anisotropy: 8 },
@@ -21,6 +21,9 @@ export function scaleRange(level) {
 export const pixelRatio = (level, dpr) => Math.min(dpr, LEVELS[level].dpr);
 
 export const stepDown = (level) => ORDER[Math.max(0, ORDER.indexOf(level) - 1)];
+
+// The lower of the two: after a GPU reset, later sessions stay at most at the level it lowered to
+export const capLevel = (level, max) => ORDER[Math.min(ORDER.indexOf(level), ORDER.indexOf(max))];
 
 // A manual choice is kept as is. Auto: the measured level, else Medium — Low on the slower WebGL2 fallback
 export function resolveLevel(choice, autoResult, backend = 'webgpu') {
