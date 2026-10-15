@@ -53,15 +53,15 @@ let wheels = null;
 export function buildCar(detail = 'mid', lodM = Infinity) {
     const root = new THREE.Group(), body = new THREE.LOD();
     body.name = 'bodyLOD';
-    const mat = new THREE.MeshStandardMaterial({ name: 'livery', roughness: 0.55, metalness: 0.05 });
+    const mat = new THREE.MeshPhysicalMaterial({ name: 'livery', roughness: 0.35, metalness: 0.1, clearcoat: 1, clearcoatRoughness: 0.08 });
     const near = new THREE.Mesh(bodyGeometry(detail), mat);
     near.name = 'body';
     body.addLevel(near, 0);
     if (detail !== 'low' && Number.isFinite(lodM)) { const far = new THREE.Mesh(bodyGeometry('low'), mat); far.name = 'body'; body.addLevel(far, lodM); }
     root.add(body);
     const { tyre, cover } = (wheels ||= wheelGeometries(detail === 'high' ? 48 : detail === 'mid' ? 36 : 24));
-    const tyreMat = new THREE.MeshStandardMaterial({ name: 'tyre', vertexColors: true, roughness: 0.92 });
-    const coverMat = new THREE.MeshStandardMaterial({ name: 'rim', vertexColors: true, roughness: 0.4, metalness: 0.6 });
+    const tyreMat = new THREE.MeshPhysicalMaterial({ name: 'tyre', vertexColors: true, roughness: 0.85, sheen: 0.2, sheenRoughness: 0.8 });
+    const coverMat = new THREE.MeshStandardMaterial({ name: 'rim', vertexColors: true, roughness: 0.3, metalness: 0.9 });
     for (const [name, [x, y, w]] of Object.entries(WHEELS)) {
         const g = new THREE.Group();
         g.name = name;

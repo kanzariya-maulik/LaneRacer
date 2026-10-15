@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { buildCar, buildSteeringWheel, liveryTexture as carLivery, WHEEL_RADIUS } from './carModel.js';
 import { VIEW_NAMES, VIEW_FOV, EYE, EYE_TILT, nextView, viewOf, onboard, wheelAngle, toThree } from './views.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
 import { keyboardStep, gamepadInput, liftOffBrake } from './input.js';
 import { parseAssist } from './sim/carphysics.js';
 import { LEVELS, scaleRange, pixelRatio, resolveLevel, autoPick, shouldMeasure, stepDown, depthBias, adaptStep, frameCapped } from './quality.js';
@@ -109,6 +109,16 @@ const stars = (() => {
     skyDome.add(p);
     return p;
 })();
+// Day: a physical sky (Rayleigh/Mie scattering, clouds) lit by the circuit's sun, drawn once per session into a cube
+// that is the background; night keeps the dome and its stars. The SkyMesh stays out of the main scene: next to it,
+// instanced meshes lose their per-instance colours in three r186 (trees and tyres turn white)
+const daySky = new SkyMesh();
+daySky.scale.setScalar(100);
+const skyScene = new THREE.Scene();
+skyScene.add(daySky);
+const skyCube = new THREE.CubeRenderTarget(512, { type: THREE.HalfFloatType });
+const skyCam = new THREE.CubeCamera(1, 1000, skyCube);
+renderer.toneMapping = THREE.AgXToneMapping;
 function applySky(sky) {
     const top = new THREE.Color(sky.top), hor = new THREE.Color(sky.horizon), c = new THREE.Color(), p = skyDome.geometry.attributes.position, col = skyDome.geometry.attributes.color;
     for (let i = 0; i < p.count; i++) { c.copy(hor).lerp(top, Math.min(1, Math.max(0, p.getY(i)) ** 0.6)); col.setXYZ(i, c.r, c.g, c.b); }
@@ -124,6 +134,22 @@ function applySky(sky) {
     if (scene.fog) scene.fog.near = sky.stars !== undefined ? 1500 : 3000; // night: the land fades into the dark sooner
     const el = (sky.elevation * Math.PI) / 180, az = (sky.azimuth * Math.PI) / 180, r = 1900;
     Object.assign(SUN_OFF, { x: r * Math.cos(el) * Math.sin(az), y: r * Math.sin(el), z: r * Math.cos(el) * Math.cos(az) });
+    const isDay = sky.stars === undefined;
+    skyDome.visible = !isDay;
+    if (isDay) {
+        daySky.turbidity.value = sky.turbidity; daySky.rayleigh.value = sky.rayleigh;
+        daySky.mieCoefficient.value = sky.mie; daySky.mieDirectionalG.value = sky.mieG;
+        daySky.cloudCoverage.value = sky.clouds;
+        daySky.sunPosition.value.set(SUN_OFF.x, SUN_OFF.y, SUN_OFF.z).normalize();
+        skyCam.update(renderer, skyScene);
+        scene.background = skyCube.texture;
+    }
+    renderer.toneMappingExposure = sky.exposure ?? 1;
+    // Sky light now comes from the environment map: the hemisphere light is only a small fill where there is one
+    hemi.intensity = sky.hemi * (Q.envMap ? 0.35 : 1);
+    scene.environmentIntensity = isDay ? 1 : 0.25;
+    envTex?.dispose(); envTex = null;
+    scene.environment = null; // EXPERIMENT
 }
 const sun = new THREE.DirectionalLight(0xffffff, 2.2);
 const SUN_OFF = { x: 600, y: 1800, z: 400 }; // sun position relative to the shadow target
@@ -481,7 +507,7 @@ function coloredMesh(pos, col, uv = null, opts = {}) {
     if (uv) g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
     g.computeVertexNormals();
     const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({
-        vertexColors: true, side: THREE.DoubleSide, roughness: 0.9, map: opts.map || null,
+        vertexColors: true, side: THREE.DoubleSide, roughness: 0.9, map: opts.map || null, roughnessMap: opts.roughnessMap || null,
         transparent: opts.opacity !== undefined, opacity: opts.opacity ?? 1, depthWrite: opts.opacity === undefined,
         // Flat layers only cm apart: a depth offset per layer stops them fighting (flickering) in the distance
         polygonOffset: !!opts.layer, polygonOffsetFactor: depthBias(-(opts.layer || 0), reversed), polygonOffsetUnits: depthBias(-(opts.layer || 0) * 2, reversed),
@@ -512,7 +538,7 @@ function strip(path, from, to, y, keep, colorAt, opts = {}) {
 }
 
 // Grey speckle, tiled along the track
-let asphaltTex = null;
+let asphaltTex = null, asphaltRough = null;
 function asphaltTexture() {
     if (!asphaltTex) {
         const c = document.createElement('canvas');
@@ -528,6 +554,14 @@ function asphaltTexture() {
         asphaltTex = new THREE.CanvasTexture(c);
         asphaltTex.wrapS = asphaltTex.wrapT = THREE.RepeatWrapping;
         asphaltTex.colorSpace = THREE.SRGBColorSpace;
+        // Roughness varies grain to grain (0.6–0.92): the surface catches the sun at low angles
+        const r = document.createElement('canvas');
+        r.width = r.height = 256;
+        const rg = r.getContext('2d'), img = rg.createImageData(256, 256);
+        for (let i = 0; i < 256 * 256; i++) { const v = 150 + rand() * 85; img.data.set([v, v, v, 255], i * 4); }
+        rg.putImageData(img, 0, 0);
+        asphaltRough = new THREE.CanvasTexture(r);
+        asphaltRough.wrapS = asphaltRough.wrapT = THREE.RepeatWrapping;
     }
     asphaltTex.anisotropy = Q.anisotropy;
     return asphaltTex;
@@ -1300,7 +1334,7 @@ function buildWorld(t) {
     if (world) {
         scene.remove(world);
         // Free GPU memory; shared caches (asphalt, blob, env map, liveries) are kept for the next world
-        const keep = new Set([asphaltTex, blobTex, envTex]);
+        const keep = new Set([asphaltTex, asphaltRough, blobTex, envTex]);
         world.traverse((o) => {
             if (o.geometry) o.geometry.dispose();
             if (o.isInstancedMesh) o.dispose();
@@ -1429,7 +1463,7 @@ function buildWorld(t) {
         });
         for (const dir of [1, -1]) world.add(strip(rp, signed(dir, roadTo[dir]), rreach[dir], 0.3, (k) => !clipped(dir, k) && !clipped(dir, (k + 1) % m), solid(land.verge)));
     }
-    world.add(strip(rp, signed(-1, roadTo[-1]), roadTo[1], 0.6, all, solid('#4a505a'), { map: asphaltTexture(), repeatM: 8 }));
+    world.add(strip(rp, signed(-1, roadTo[-1]), roadTo[1], 0.6, all, solid('#4a505a'), { map: asphaltTexture(), roughnessMap: asphaltRough, repeatM: 8 }));
     // White lines on the track limits (t.edgeR / edgeL: judged there); beyond them the road carries on as asphalt run-off
     // to the drawn edge (Track.js: the road 2x the real width, the lines 4/3)
     const R = t.edgeR || path.map(() => half - 0.5 * scale), L = t.edgeL || R, lineW = 0.3 * scale; // per point (+ = driver's right)
@@ -1557,7 +1591,6 @@ function dropCar(id) {
 }
 
 // The paint reflection takes ~1.5 s of GPU work to make: done now, in the lobby, not when the first car appears
-if (Q.envMap) (window.requestIdleCallback || setTimeout)(() => envTexture());
 
 function nameTag(text, color) {
     const c = document.createElement('canvas');
@@ -1598,10 +1631,21 @@ function blobShadow(strength = 1) {
     return m;
 }
 
-// Generated once: a soft studio reflection for car paint (Medium/High)
+// The session's sky as a reflection/ambient map (PMREM), built once per sky
 let envTex = null;
 function envTexture() {
-    if (!envTex) envTex = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+    if (envTex) return envTex;
+    let s = skyScene;
+    if (skyDome.visible) { // night: the dome and its stars
+        s = new THREE.Scene();
+        const dome = skyDome.clone();
+        dome.position.set(0, 0, 0); dome.scale.setScalar(50);
+        s.add(dome);
+    }
+    // Without the sun disc: the sun light lights the scene already, a disc blurred into the map would add it twice
+    daySky.showSunDisc.value = 0;
+    envTex = new THREE.PMREMGenerator(renderer).fromScene(s, 0, 0.1, 1000).texture;
+    daySky.showSunDisc.value = 1;
     return envTex;
 }
 
@@ -1623,11 +1667,6 @@ function makeCar(id) {
                 o.material.map = map;
                 o.material.color.set(0xffffff);
                 o.material.needsUpdate = true;
-            }
-            if (Q.envMap) {
-                o.material.envMap = envTexture();
-                o.material.envMapIntensity = night ? 0.12 : 0.3; // the studio reflection would glow at night
-                if (o.material.name === 'livery') { o.material.metalness = 0.1; o.material.roughness = 0.35; }
             }
         });
         for (const name of ['wheel_FL', 'wheel_FR', 'wheel_RL', 'wheel_RR']) {

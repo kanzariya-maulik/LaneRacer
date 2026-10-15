@@ -1,6 +1,6 @@
 // Drives a local LanRace race in Chrome over the DevTools protocol: screenshots per view, fps, console errors.
 // Uses its own server on PORT 3299 (never the user's 3232) and kills only what it started.
-// node scripts/browser-check.mjs --track monza --level high --time day --views chase,tcam,cockpit --out <dir> [--headed] [--fps 10] [--lose] [--webgl]
+// node scripts/browser-check.mjs --track monza --level high --time day --views chase,tcam,cockpit --out <dir> [--headed] [--fps 10] [--lose] [--webgl] [--eval <js run before screenshots>]
 import { spawn, execSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -63,6 +63,8 @@ try {
         await evalJs(`(() => { const r = window.lanraceDebug.renderer; if (r.backend.device) r.backend.device.destroy(); else r.backend.gl.getExtension('WEBGL_lose_context').loseContext(); return true; })()`);
         await wait(5000);
     }
+    const pre = arg('eval', null);
+    const evalOut = pre ? await evalJs(pre) : undefined;
     const backend = await evalJs(`window.lanraceQuality?.backend || 'webgl'`);
     let fps = null;
     if (fpsSecs) { const s = []; for (let i = 0; i < fpsSecs; i++) { await wait(1000); s.push(await evalJs('window.lanraceFps')); } fps = Math.round(s.reduce((a, b) => a + b) / s.length); }
@@ -73,7 +75,7 @@ try {
         writeFileSync(`${out}/${track}-${time}-${level}-${v}.png`, Buffer.from(shot.result.data, 'base64'));
     }
     const stats = await evalJs(`document.getElementById('stats')?.textContent || ''`);
-    console.log(JSON.stringify({ track, time, level: await evalJs('window.lanraceQuality?.level'), backend, fps, stats, errors, warnings: warnings.slice(0, 5) }));
+    console.log(JSON.stringify({ track, time, level: await evalJs('window.lanraceQuality?.level'), backend, fps, stats, evalOut, errors, warnings: warnings.slice(0, 5) }));
     process.exitCode = errors.length ? 1 : 0;
 } catch (e) {
     console.log(JSON.stringify({ track, time, level, error: String(e), errors, serverLog: serverLog.slice(-800) }));

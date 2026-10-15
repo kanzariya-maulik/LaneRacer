@@ -248,3 +248,16 @@ for (const id of Track.TRACK_IDS) {
         }
     });
 }
+
+test('every day sky has physical-sky settings and an exposure; nights have an exposure', async () => {
+    const { SKIES, NIGHTS } = await import('../public/js/themes.js');
+    for (const [name, s] of Object.entries(SKIES)) {
+        assert.ok(s.turbidity >= 1 && s.turbidity <= 20, `${name} turbidity`);
+        assert.ok(s.rayleigh > 0 && s.rayleigh <= 4, `${name} rayleigh`);
+        assert.ok(s.mie > 0 && s.mie <= 0.1 && s.mieG > 0 && s.mieG < 1, `${name} mie`);
+        assert.ok(s.clouds >= 0 && s.clouds <= 1, `${name} clouds`);
+        assert.ok(s.exposure > 0 && s.exposure <= 2, `${name} exposure`);
+    }
+    assert.ok(SKIES.overcast.clouds > SKIES.clear.clouds && SKIES.hazy.turbidity > SKIES.clear.turbidity);
+    for (const [id, n] of Object.entries(NIGHTS)) assert.ok(n.exposure > 0 && n.exposure <= 2, `${id} night exposure`);
+});

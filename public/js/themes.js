@@ -13,17 +13,17 @@ export const LANDS = {
 
 // Sky gradient (zenith, horizon = fog), sun colour and strength, sun height and bearing (degrees), sky light strength
 export const SKIES = {
-    clear:    { top: '#5f9fe0', horizon: '#c9e2f5', sun: '#ffffff', power: 2.3, elevation: 55, azimuth: 35, hemi: 1.4 },
-    hazy:     { top: '#7fb0de', horizon: '#dbe6ee', sun: '#fff6e8', power: 2.0, elevation: 45, azimuth: 60, hemi: 1.5 },
-    overcast: { top: '#9fb2c4', horizon: '#d5dbe0', sun: '#f2f2f2', power: 1.4, elevation: 60, azimuth: 20, hemi: 1.8 },
-    evening:  { top: '#3d5f9c', horizon: '#f2b27a', sun: '#ffc68a', power: 2.0, elevation: 14, azimuth: 250, hemi: 1.1 },
+    clear:    { top: '#5f9fe0', horizon: '#c9e2f5', sun: '#ffffff', power: 2.3, elevation: 55, azimuth: 35, hemi: 1.4, turbidity: 2, rayleigh: 1, mie: 0.005, mieG: 0.8, clouds: 0.25, exposure: 0.8 },
+    hazy:     { top: '#7fb0de', horizon: '#dbe6ee', sun: '#fff6e8', power: 2.0, elevation: 45, azimuth: 60, hemi: 1.5, turbidity: 6, rayleigh: 1.5, mie: 0.01, mieG: 0.8, clouds: 0.4, exposure: 0.8 },
+    overcast: { top: '#9fb2c4', horizon: '#d5dbe0', sun: '#f2f2f2', power: 1.4, elevation: 60, azimuth: 20, hemi: 1.8, turbidity: 10, rayleigh: 0.6, mie: 0.02, mieG: 0.7, clouds: 0.9, exposure: 0.9 },
+    evening:  { top: '#3d5f9c', horizon: '#f2b27a', sun: '#ffc68a', power: 2.0, elevation: 14, azimuth: 250, hemi: 1.1, turbidity: 4, rayleigh: 2, mie: 0.008, mieG: 0.85, clouds: 0.35, exposure: 0.8 },
 };
 
 // Night, per circuit, as the place really is after dark: the sky and its horizon glow from the nearest city's lights
 // (sodium orange over the big cities, near black in the Ardennes and the Styrian hills), how many stars that light pollution
 // leaves, and the race floodlights (sun: colour, power, height) that light the track; windows: share of lit windows.
 // Sakhir is the real night race (~500 light columns of white floodlight); the others get the same kind of rig to race by
-const night = (top, horizon, stars, windows, o = {}) => ({ top, horizon, stars, windows, sun: '#eef2ff', power: 1.6, elevation: 72, azimuth: 30, hemi: 0.45, ...o });
+const night = (top, horizon, stars, windows, o = {}) => ({ top, horizon, stars, windows, sun: '#eef2ff', power: 1.6, elevation: 72, azimuth: 30, hemi: 0.45, exposure: 0.9, ...o });
 export const NIGHTS = {
     monza:       night('#0b1020', '#2c2a33', 0.3, 0.5),                        // Milan's glow to the south, dark royal park
     spa:         night('#05080f', '#10141c', 0.95, 0.4, { hemi: 0.35 }),       // Ardennes forest: black, full star field
