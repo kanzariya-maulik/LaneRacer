@@ -147,9 +147,9 @@ function applySky(sky) {
     renderer.toneMappingExposure = sky.exposure ?? 1;
     // Sky light now comes from the environment map: the hemisphere light is only a small fill where there is one
     hemi.intensity = sky.hemi * (Q.envMap ? 0.35 : 1);
-    scene.environmentIntensity = isDay ? 1 : 0.25;
+    scene.environmentIntensity = isDay ? 0.2 : 0.25; // the physical sky is bright: more washes the scene milky
     envTex?.dispose(); envTex = null;
-    scene.environment = null; // EXPERIMENT
+    scene.environment = Q.envMap ? envTexture() : null;
 }
 const sun = new THREE.DirectionalLight(0xffffff, 2.2);
 const SUN_OFF = { x: 600, y: 1800, z: 400 }; // sun position relative to the shadow target
