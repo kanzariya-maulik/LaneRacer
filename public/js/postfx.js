@@ -6,7 +6,6 @@ import { ao } from 'three/addons/tsl/display/GTAONode.js';
 import { ssr } from 'three/addons/tsl/display/SSRNode.js';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { lensflare } from 'three/addons/tsl/display/LensflareNode.js';
-import { motionBlur } from 'three/addons/tsl/display/MotionBlur.js';
 import { traa } from 'three/addons/tsl/display/TRAANode.js';
 import { taau } from 'three/addons/tsl/display/TAAUNode.js';
 import { smaa } from 'three/addons/tsl/display/SMAANode.js';
@@ -18,7 +17,7 @@ export function buildPost(renderer, scene, camera, effects) {
     const own = (n) => { owned.push(n); return n; };
     const pipe = new THREE.RenderPipeline(renderer);
     const scenePass = own(pass(scene, camera));
-    const needNormal = fx.has('ao') || fx.has('ssr'), needVel = fx.has('motionBlur') || fx.has('taau') || fx.has('traa');
+    const needNormal = fx.has('ao') || fx.has('ssr'), needVel = fx.has('taau') || fx.has('traa');
     const outs = { output };
     if (needNormal) outs.normal = normalView; // the pass targets are half float: signed normals fit unpacked
     if (needVel) outs.velocity = velocity;
@@ -45,7 +44,6 @@ export function buildPost(renderer, scene, camera, effects) {
     // Threshold above the HDR sky's own brightness: only sun glints, floodlights and lamps bloom, not the whole sky
     tryFx('bloom', (c) => { glow = own(bloom(c, 0.2, 0.4, 3.0)); return c.add(glow); });
     tryFx('lensflare', (c) => (glow ? c.add(own(lensflare(glow, { threshold: 4, ghostAttenuationFactor: 25 }))) : c));
-    tryFx('motionBlur', (c) => motionBlur(own(convertToTexture(c)), vel.mul(0.5)));
     tryFx('vignette', (c) => vec4(c.rgb.mul(float(1).sub(smoothstep(0.45, 1.0, length(uv().sub(0.5)).mul(1.4)).mul(0.35))), c.a));
 
     // Temporal AA works on linear colour (tone mapping after); else the spatial AA works on the tone-mapped image

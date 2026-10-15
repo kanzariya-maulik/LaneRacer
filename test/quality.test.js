@@ -28,6 +28,7 @@ test('scaleRange and pixelRatio: internal scale per level, device pixels capped 
     assert.strictEqual(Q.pixelRatio('high', 3), 1, 'Retina at 2x with the post chain lags: High draws CSS pixels');
     assert.strictEqual(Q.pixelRatio('ultra', 3), 1.5);
     assert.ok(Object.values(Q.LEVELS).every((L) => !L.effects.includes('grain')), 'no film grain: reads as noise');
+    assert.ok(Object.values(Q.LEVELS).every((L) => !L.effects.includes('motionBlur')), 'no motion blur: smears the track you need to read');
     assert.strictEqual(Q.pixelRatio('high', 1), 1);
 });
 
