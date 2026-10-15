@@ -25,7 +25,9 @@ test('scaleRange and pixelRatio: internal scale per level, device pixels capped 
     assert.deepStrictEqual(Q.scaleRange('low'), { start: 0.75, min: 0.5, max: 1 });
     assert.deepStrictEqual(Q.scaleRange('high'), { start: 1, min: 1, max: 1 });
     assert.strictEqual(Q.pixelRatio('low', 2), 1);
-    assert.strictEqual(Q.pixelRatio('high', 3), 2);
+    assert.strictEqual(Q.pixelRatio('high', 3), 1, 'Retina at 2x with the post chain lags: High draws CSS pixels');
+    assert.strictEqual(Q.pixelRatio('ultra', 3), 1.5);
+    assert.ok(Object.values(Q.LEVELS).every((L) => !L.effects.includes('grain')), 'no film grain: reads as noise');
     assert.strictEqual(Q.pixelRatio('high', 1), 1);
 });
 

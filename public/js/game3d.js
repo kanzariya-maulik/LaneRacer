@@ -126,7 +126,7 @@ const skyScene = new THREE.Scene();
 skyScene.add(daySky);
 const skyCube = new THREE.CubeRenderTarget(512, { type: THREE.HalfFloatType });
 const skyCam = new THREE.CubeCamera(1, 1000, skyCube);
-renderer.toneMapping = THREE.AgXToneMapping;
+renderer.toneMapping = THREE.NeutralToneMapping; // keeps base colours; AgX greyed the whole scene
 let currentSky = null;
 function applySky(sky) {
     currentSky = sky;
@@ -162,7 +162,7 @@ function applySky(sky) {
     if (isDay) sun.intensity = sky.power * 3;
     renderer.toneMappingExposure = sky.exposure ?? 1;
     // Sky light now comes from the environment map: the hemisphere light is only a small fill where there is one
-    hemi.intensity = sky.hemi * (Q.envMap ? 0.35 : 1);
+    hemi.intensity = sky.hemi * (Q.envMap && isDay ? 0.35 : 1); // night: the dark dome gives no fill, keep the hemisphere
     scene.environmentIntensity = isDay ? 0.12 : 0.25; // the physical sky is bright: more washes the scene milky
     envTex?.dispose(); envTex = null;
     scene.environment = Q.envMap ? envTexture() : null;
@@ -2675,7 +2675,7 @@ async function recoverRenderer(info) {
     window.lanraceQuality.backend = backend;
     renderer.onDeviceLost = recoverRenderer;
     renderer.debug.checkShaderErrors = false;
-    renderer.toneMapping = THREE.AgXToneMapping;
+    renderer.toneMapping = THREE.NeutralToneMapping;
     if (window.lanraceDebug) window.lanraceDebug.renderer = renderer;
     const lower = stepDown(level);
     maxLevel = lower; // later sessions stay at most here (buildWorld re-resolves the level from storage)

@@ -7,7 +7,6 @@ import { ssr } from 'three/addons/tsl/display/SSRNode.js';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { lensflare } from 'three/addons/tsl/display/LensflareNode.js';
 import { motionBlur } from 'three/addons/tsl/display/MotionBlur.js';
-import { film } from 'three/addons/tsl/display/FilmNode.js';
 import { traa } from 'three/addons/tsl/display/TRAANode.js';
 import { taau } from 'three/addons/tsl/display/TAAUNode.js';
 import { smaa } from 'three/addons/tsl/display/SMAANode.js';
@@ -48,7 +47,6 @@ export function buildPost(renderer, scene, camera, effects) {
     tryFx('lensflare', (c) => (glow ? c.add(own(lensflare(glow, { threshold: 4, ghostAttenuationFactor: 25 }))) : c));
     tryFx('motionBlur', (c) => motionBlur(own(convertToTexture(c)), vel.mul(0.5)));
     tryFx('vignette', (c) => vec4(c.rgb.mul(float(1).sub(smoothstep(0.45, 1.0, length(uv().sub(0.5)).mul(1.4)).mul(0.35))), c.a));
-    tryFx('grain', (c) => film(c, float(0.08)));
 
     // Temporal AA works on linear colour (tone mapping after); else the spatial AA works on the tone-mapped image
     if (fx.has('traa') || fx.has('taau')) {
