@@ -41,7 +41,7 @@ const TERRAIN_SINK_M = 0.6; // ground beyond the verge sits this far below the r
 const teamInfo = {};
 fetch('teams.json').then(r => r.json()).then((list) => { for (const t of list) teamInfo[t.id] = t; });
 
-const canvas = document.getElementById('game-canvas');
+let canvas = document.getElementById('game-canvas'); // replaced by a fresh one after a GPU reset
 const minimap = document.getElementById('minimap');
 const mm = minimap.getContext('2d');
 
@@ -121,7 +121,9 @@ skyScene.add(daySky);
 const skyCube = new THREE.CubeRenderTarget(512, { type: THREE.HalfFloatType });
 const skyCam = new THREE.CubeCamera(1, 1000, skyCube);
 renderer.toneMapping = THREE.AgXToneMapping;
+let currentSky = null;
 function applySky(sky) {
+    currentSky = sky;
     const top = new THREE.Color(sky.top), hor = new THREE.Color(sky.horizon), c = new THREE.Color(), p = skyDome.geometry.attributes.position, col = skyDome.geometry.attributes.color;
     for (let i = 0; i < p.count; i++) { c.copy(hor).lerp(top, Math.min(1, Math.max(0, p.getY(i)) ** 0.6)); col.setXYZ(i, c.r, c.g, c.b); }
     col.needsUpdate = true;
@@ -2444,7 +2446,7 @@ const fpsHist = []; let capWarned = false; // steady 30 fps = browser frame cap,
 let autoMs = 0, autoFrames = 0, autoDone = false; // auto-pick: frame time while driving
 const stats = new URLSearchParams(location.search).has('stats') ? Object.assign(document.createElement('div'), { id: 'stats' }) : null;
 if (stats) document.body.appendChild(stats);
-if (stats) window.lanraceDebug = { renderer, scene, camera, freeCam: false }; // ?stats=1: profiling / looking around from the console
+if (stats) window.lanraceDebug = { renderer, scene, camera, freeCam: false, setScale: (s) => post?.setScale(s) }; // ?stats=1: profiling / looking around from the console
 
 // Sound + gear HUD: gearboxes for your car and every other car (cheap), audio frame in metres (track plane)
 const ownBox = new Gearbox(), remoteBoxes = new Map(), soundOthers = [];
@@ -2633,5 +2635,33 @@ window.initGameVisuals = () => {
     simStep(false); // resend what's held when a new session starts
 };
 renderer.setAnimationLoop(frame);
+
+// GPU reset (driver crash, laptop switching graphics): a new renderer on a fresh canvas, one level lower, world kept
+let recovering = false;
+async function recoverRenderer(info) {
+    if (recovering) return;
+    recovering = true;
+    console.warn('renderer lost', info?.message || info);
+    renderer.setAnimationLoop(null);
+    try { post?.dispose(); renderer.dispose(); } catch { /* already gone */ }
+    post = null;
+    const fresh = canvas.cloneNode(false);
+    canvas.replaceWith(fresh);
+    canvas = fresh;
+    renderer = await createRenderer({ logDepth: !reversed });
+    renderer.onDeviceLost = recoverRenderer;
+    renderer.debug.checkShaderErrors = false;
+    renderer.toneMapping = THREE.AgXToneMapping;
+    if (window.lanraceDebug) window.lanraceDebug.renderer = renderer;
+    const lower = stepDown(level);
+    appliedLevel = null;
+    applyLevel(lower);
+    if (currentSky) applySky(currentSky);
+    resize();
+    window.showBanner?.(`GRAPHICS RESET — LOWERED TO ${lower.toUpperCase()}`);
+    renderer.setAnimationLoop(frame);
+    recovering = false;
+}
+renderer.onDeviceLost = recoverRenderer;
 // game_init may have arrived while this module (and three.js) was still loading
 if (clientState.trackData) window.initGameVisuals();

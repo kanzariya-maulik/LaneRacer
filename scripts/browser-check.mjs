@@ -59,8 +59,8 @@ try {
     await wait(3000); // shaders warm, first frames settled
     // drive forward so the scene moves (motion blur, shadows following)
     await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'w', code: 'KeyW', windowsVirtualKeyCode: 87 });
-    if (lose) {
-        await evalJs(`(() => { const r = window.lanraceDebug.renderer; if (r.backend.device) r.backend.device.destroy(); else r.backend.gl.getExtension('WEBGL_lose_context').loseContext(); return true; })()`);
+    if (lose) { // three ignores device loss with reason 'destroyed': a real reset is simulated through onDeviceLost
+        await evalJs(`(() => { const r = window.lanraceDebug.renderer; if (r.backend.device) { r.backend.device.destroy(); r.onDeviceLost({ api: 'WebGPU', message: 'simulated GPU reset', reason: 'unknown' }); } else r.backend.gl.getExtension('WEBGL_lose_context').loseContext(); return true; })()`);
         await wait(5000);
     }
     const pre = arg('eval', null);
