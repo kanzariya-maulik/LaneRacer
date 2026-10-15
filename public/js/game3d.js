@@ -2644,12 +2644,13 @@ window.initGameVisuals = () => {
     buildWorld(clientState.trackData);
     singlePass(scene);
     freeze(world);
-    // Shaders compile in the background; the world isn't drawn until they're done (the grid countdown covers it), at most 5 s
+    // Shaders compile in the background; the world isn't drawn until they're done (the grid countdown covers it), at most
+    // 1.5 s (WebGPU warm-up can outlast the whole start sequence: a blank screen under the lights is worse than a hitch),
     // with a car in the scene for that, so its paint shaders are ready too
     compiling = !!renderer.compileAsync;
     const warm = compiling && clientState.me != null ? makeCar(clientState.me)?.root : null;
     if (warm) scene.add(warm);
-    if (compiling) Promise.race([renderer.compileAsync(scene, camera), new Promise((r) => setTimeout(r, 5000))]).catch(() => { /* compiled on first draw instead */ }).finally(() => { compiling = false; if (warm) scene.remove(warm); });
+    if (compiling) Promise.race([renderer.compileAsync(scene, camera), new Promise((r) => setTimeout(r, 1500))]).catch(() => { /* compiled on first draw instead */ }).finally(() => { compiling = false; if (warm) scene.remove(warm); });
     simStep(false); // resend what's held when a new session starts
 };
 renderer.setAnimationLoop(frame);

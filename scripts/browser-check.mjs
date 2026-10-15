@@ -1,6 +1,6 @@
 // Drives a local LanRace race in Chrome over the DevTools protocol: screenshots per view, fps, console errors.
 // Uses its own server on PORT 3299 (never the user's 3232) and kills only what it started.
-// node scripts/browser-check.mjs --track monza --level high --time day --views chase,tcam,cockpit --out <dir> [--headed] [--fps 10] [--lose] [--webgl] [--logdepth] [--eval <js run before screenshots>]
+// node scripts/browser-check.mjs --track monza --level high --time day --views chase,tcam,cockpit --out <dir> [--headed] [--fps 10] [--lose] [--webgl] [--logdepth] [--at countdown] [--eval <js run before screenshots>]
 import { spawn, execSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -57,8 +57,8 @@ try {
         return true; })()`);
     await wait(500);
     await evalJs(`document.getElementById('btn-start').click(); true`);
-    await until(`typeof clientState !== 'undefined' && clientState.status === 'RACE' && window.lanraceFps > 0`, 120000);
-    await wait(3000); // shaders warm, first frames settled
+    if (arg('at', 'race') === 'countdown') { await until(`typeof clientState !== 'undefined' && clientState.status === 'COUNTDOWN'`, 120000); await wait(1500); }
+    else { await until(`typeof clientState !== 'undefined' && clientState.status === 'RACE' && window.lanraceFps > 0`, 120000); await wait(3000); } // shaders warm, first frames settled
     // drive forward so the scene moves (motion blur, shadows following)
     await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'w', code: 'KeyW', windowsVirtualKeyCode: 87 });
     if (lose) { // three ignores device loss with reason 'destroyed': a real reset is simulated through onDeviceLost
