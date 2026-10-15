@@ -3,6 +3,7 @@ import { buildCar, buildSteeringWheel, liveryTexture as carLivery, WHEEL_RADIUS 
 import { VIEW_NAMES, VIEW_FOV, EYE, EYE_TILT, nextView, viewOf, onboard, wheelAngle, toThree } from './views.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
+import { CSMShadowNode } from 'three/addons/csm/CSMShadowNode.js';
 import { keyboardStep, gamepadInput, liftOffBrake } from './input.js';
 import { parseAssist } from './sim/carphysics.js';
 import { LEVELS, scaleRange, pixelRatio, resolveLevel, autoPick, shouldMeasure, stepDown, depthBias, adaptStep, frameCapped } from './quality.js';
@@ -134,6 +135,10 @@ function applySky(sky) {
     if (scene.fog) scene.fog.near = sky.stars !== undefined ? 1500 : 3000; // night: the land fades into the dark sooner
     const el = (sky.elevation * Math.PI) / 180, az = (sky.azimuth * Math.PI) / 180, r = 1900;
     Object.assign(SUN_OFF, { x: r * Math.cos(el) * Math.sin(az), y: r * Math.sin(el), z: r * Math.cos(el) * Math.cos(az) });
+    // The cascades take the light's direction from sun → target
+    sun.position.set(SUN_OFF.x, SUN_OFF.y, SUN_OFF.z);
+    sun.target.position.set(0, 0, 0);
+    sun.updateMatrixWorld(); sun.target.updateMatrixWorld();
     const isDay = sky.stars === undefined;
     skyDome.visible = !isDay;
     if (isDay) {
@@ -144,6 +149,8 @@ function applySky(sky) {
         skyCam.update(renderer, skyScene);
         scene.background = skyCube.texture;
     }
+    // Outdoors the sun outshines the sky fill several times over; weaker, it leaves no visible shadows (night: floodlights as set)
+    if (isDay) sun.intensity = sky.power * 3;
     renderer.toneMappingExposure = sky.exposure ?? 1;
     // Sky light now comes from the environment map: the hemisphere light is only a small fill where there is one
     hemi.intensity = sky.hemi * (Q.envMap ? 0.35 : 1);
@@ -153,7 +160,6 @@ function applySky(sky) {
 }
 const sun = new THREE.DirectionalLight(0xffffff, 2.2);
 const SUN_OFF = { x: 600, y: 1800, z: 400 }; // sun position relative to the shadow target
-Object.assign(sun.shadow.camera, { left: -360, right: 360, top: 360, bottom: -360, near: 10, far: 4000 }); // ±60 m around your car
 // a texel (~6 cm) of offset along the surface normal: no shadow acne (blotches) on the cars' curved bodywork
 sun.shadow.bias = -0.0004;
 sun.shadow.normalBias = 0;
@@ -161,7 +167,8 @@ scene.add(sun, sun.target);
 let activeView = 'chase', onboardCar = null, steeringWheel = null; // onboardCar: the car whose T-cam/cockpit is in use
 
 // Shadows, fog, draw distance and resolution limits for a level (applied when a track is built)
-let appliedLevel = null;
+let appliedLevel = null, csm = null;
+const scaleOf = () => clientState.trackData?.scale || 6; // world units per metre (the module's `scale` is declared further down)
 function applyLevel(l) {
     if (l === appliedLevel) return; // same level next session: keep the shadow map and the learned resolution
     appliedLevel = l;
@@ -170,9 +177,17 @@ function applyLevel(l) {
     window.lanraceQuality.level = l;
     renderer.shadowMap.enabled = Q.shadows > 0;
     sun.castShadow = Q.shadows > 0;
-    if (Q.shadows) sun.shadow.mapSize.set(Q.shadows, Q.shadows);
-    sun.shadow.map?.dispose();
-    sun.shadow.map = null;
+    csm?.dispose(); csm = null;
+    sun.shadow.shadowNode = null;
+    if (Q.shadows) {
+        sun.shadow.mapSize.set(Q.shadows, Q.shadows);
+        // Each cascade copies this camera; three's default depth range (0.5–500 units) would cut 300 m of track short
+        Object.assign(sun.shadow.camera, { near: 1, far: 5000 });
+        // Cascades over the first 300 m of view: crisp on the car and kerbs, still there on far grandstands and trees
+        csm = new CSMShadowNode(sun, { cascades: Q.cascades, maxFar: 300 * scaleOf(), mode: 'practical', lightMargin: 100 * scaleOf() });
+        csm.fade = true;
+        sun.shadow.shadowNode = csm;
+    }
     scene.fog = new THREE.Fog(SKY, 3000, Q.fog);
     camera.far = Q.far;
     camera.updateProjectionMatrix();
@@ -1687,7 +1702,7 @@ function makeCar(id) {
     // Your own car has no label: it would sit in the middle of the chase-cam view
     const tag = id === clientState.me ? null : nameTag(lp.username, lp.color);
     if (tag) root.add(tag);
-    root.add(blobShadow(Q.shadows ? 0.75 : 1)); // contact shadow: the car sits on the road, whatever the sun does
+    if (!Q.shadows) root.add(blobShadow(1)); // Low has no sun shadows: a contact shadow keeps the car on the road
     singlePass(root);
     return { id, root, model, wheels, teamId: lp.teamId, ghost: false, tag };
 }
