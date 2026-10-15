@@ -141,7 +141,8 @@ function applySky(sky) {
     hemi.color.copy(top).lerp(new THREE.Color(0xffffff), 0.5);
     stars.visible = !!sky.stars;
     stars.geometry.setDrawRange(0, Math.round(STARS * (sky.stars || 0)));
-    if (scene.fog) scene.fog.near = sky.stars !== undefined ? 1500 : 3000; // night: the land fades into the dark sooner
+    // Haze only near the horizon (60% of the fog distance): from 500 m it washed the track out. Night fades into the dark sooner
+    if (scene.fog) scene.fog.near = sky.stars !== undefined ? 1500 : Q.fog * 0.6;
     const el = (sky.elevation * Math.PI) / 180, az = (sky.azimuth * Math.PI) / 180, r = 1900;
     Object.assign(SUN_OFF, { x: r * Math.cos(el) * Math.sin(az), y: r * Math.sin(el), z: r * Math.cos(el) * Math.cos(az) });
     // The cascades take the light's direction from sun → target
