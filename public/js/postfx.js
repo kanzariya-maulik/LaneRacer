@@ -1,7 +1,7 @@
 // The post-processing chain for a level: its `effects` list (quality.js) turned into one three.js RenderPipeline.
 // Browser only (WebGPURenderer). An effect that fails to build is dropped with a warning; the race goes on.
 import * as THREE from 'three/webgpu';
-import { pass, mrt, output, normalView, velocity, metalness, roughness, convertToTexture, vec2, vec4, uv, float, length, smoothstep, mix, renderOutput } from 'three/tsl';
+import { pass, mrt, output, normalView, velocity, metalness, roughness, convertToTexture, vec2, vec4, uv, float, length, smoothstep, step, mix, renderOutput } from 'three/tsl';
 import { ao } from 'three/addons/tsl/display/GTAONode.js';
 import { ssr } from 'three/addons/tsl/display/SSRNode.js';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
@@ -30,8 +30,12 @@ export function buildPost(renderer, scene, camera, effects) {
     let color = scenePass.getTextureNode('output');
     const tryFx = (name, f) => { if (!fx.has(name)) return; try { color = f(color); used.push(name); } catch (e) { console.warn(`postfx: ${name} dropped`, e); } };
 
-    // Contact shadows: one pass, AO on the final colour (softened) instead of a second geometry pre-pass
-    tryFx('ao', (c) => vec4(c.rgb.mul(mix(float(1), ao(depth, normal, camera).getTextureNode().r, 0.8)), c.a));
+    // Contact shadows: one pass, AO on the final colour (softened) instead of a second geometry pre-pass.
+    // GTAO sizes itself to the screen: its resolution follows the internal scale or it misreads the depth (line artifacts)
+    let aoNode = null;
+    // Not on the sky (depth at the far plane: 0 reversed, 1 otherwise): on WebGL2 GTAO rings it with noise
+    const surface = renderer.reversedDepthBuffer ? step(1e-7, depth.r) : step(depth.r, 0.9999999);
+    tryFx('ao', (c) => { aoNode = ao(depth, normal, camera); return vec4(c.rgb.mul(mix(float(1), aoNode.getTextureNode().r, surface.mul(0.8))), c.a); });
     tryFx('ssr', (c) => {
         const mr = scenePass.getTextureNode('metalrough');
         const r = ssr(convertToTexture(c), depth, normal, { metalnessNode: mr.r, roughnessNode: mr.g, reflectNonMetals: false, camera });
@@ -52,16 +56,17 @@ export function buildPost(renderer, scene, camera, effects) {
         pipe.outputColorTransform = true;
     } else {
         pipe.outputColorTransform = false;
+        // Upscale first: FXAA/SMAA size themselves to the screen and would sample a smaller input with the wrong texel size
         color = renderOutput(color);
+        tryFx('fsr1', (c) => fsr1(c));
         tryFx('fxaa', (c) => fxaa(c));
         tryFx('smaa', (c) => smaa(c));
-        tryFx('fsr1', (c) => fsr1(c));
     }
     pipe.outputNode = color;
     return {
         effects: used,
         render: () => pipe.render(),
-        setScale: (s) => scenePass.setResolutionScale(s),
+        setScale: (s) => { scenePass.setResolutionScale(s); if (aoNode) aoNode.resolutionScale = s; },
         dispose: () => pipe.dispose(),
     };
 }
