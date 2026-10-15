@@ -157,7 +157,7 @@ function applySky(sky) {
     renderer.toneMappingExposure = sky.exposure ?? 1;
     // Sky light now comes from the environment map: the hemisphere light is only a small fill where there is one
     hemi.intensity = sky.hemi * (Q.envMap ? 0.35 : 1);
-    scene.environmentIntensity = isDay ? 0.2 : 0.25; // the physical sky is bright: more washes the scene milky
+    scene.environmentIntensity = isDay ? 0.12 : 0.25; // the physical sky is bright: more washes the scene milky
     envTex?.dispose(); envTex = null;
     scene.environment = Q.envMap ? envTexture() : null;
     // The post chain follows the level and the sky (sun glare is day-only); buildWorld always calls this after applyLevel
