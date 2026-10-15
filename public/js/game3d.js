@@ -4,6 +4,7 @@ import { VIEW_NAMES, VIEW_FOV, EYE, EYE_TILT, nextView, viewOf, onboard, wheelAn
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
 import { CSMShadowNode } from 'three/addons/csm/CSMShadowNode.js';
+import { buildPost } from './postfx.js';
 import { keyboardStep, gamepadInput, liftOffBrake } from './input.js';
 import { parseAssist } from './sim/carphysics.js';
 import { LEVELS, scaleRange, pixelRatio, resolveLevel, autoPick, shouldMeasure, stepDown, depthBias, adaptStep, frameCapped } from './quality.js';
@@ -157,6 +158,10 @@ function applySky(sky) {
     scene.environmentIntensity = isDay ? 0.2 : 0.25; // the physical sky is bright: more washes the scene milky
     envTex?.dispose(); envTex = null;
     scene.environment = Q.envMap ? envTexture() : null;
+    // The post chain follows the level and the sky (sun glare is day-only); buildWorld always calls this after applyLevel
+    post?.dispose();
+    post = buildPost(renderer, scene, camera, isDay ? Q.effects : Q.effects.filter((e) => e !== 'lensflare'));
+    post.setScale(res.ratio);
 }
 const sun = new THREE.DirectionalLight(0xffffff, 2.2);
 const SUN_OFF = { x: 600, y: 1800, z: 400 }; // sun position relative to the shadow target
@@ -167,7 +172,7 @@ scene.add(sun, sun.target);
 let activeView = 'chase', onboardCar = null, steeringWheel = null; // onboardCar: the car whose T-cam/cockpit is in use
 
 // Shadows, fog, draw distance and resolution limits for a level (applied when a track is built)
-let appliedLevel = null, csm = null;
+let appliedLevel = null, csm = null, post = null;
 const scaleOf = () => clientState.trackData?.scale || 6; // world units per metre (the module's `scale` is declared further down)
 function applyLevel(l) {
     if (l === appliedLevel) return; // same level next session: keep the shadow map and the learned resolution
@@ -2509,8 +2514,12 @@ function frame(now) {
     skyDome.position.copy(camera.position);
     skyDome.scale.setScalar(camera.far * 0.9);
     if (paused) Sound.update(silentFrame); else updateSound(dt);
-    if (!compiling) { // a draw before the shaders are ready compiles them there and then (a ~1.6 s freeze)
-        renderer.render(scene, camera);
+    if (!compiling && post) { // a draw before the shaders are ready compiles them there and then (a ~1.6 s freeze)
+        try { post.render(); }
+        catch (e) { // an effect that compiles on no GPU here: fall back to the Low chain once, keep racing
+            console.warn('postfx: chain failed, Low chain instead', e);
+            post.dispose(); post = buildPost(renderer, scene, camera, LEVELS.low.effects); post.setScale(res.ratio);
+        }
     }
 
     if (now - lastHud > 66) { // HUD and minimap at 15 Hz, timing tower at 4 Hz
@@ -2543,6 +2552,7 @@ function frame(now) {
         const fps = (fpsFrames * 1000) / (now - fpsSince);
         window.lanraceFps = fps; // network log telemetry (socket.js)
         const next = adaptStep(res, fps);
+        if (next.ratio !== res.ratio) post?.setScale(next.ratio);
         res = next;
         fpsHist.push(fps);
         if (fpsHist.length > 6) fpsHist.shift();

@@ -2,3 +2,8 @@
 before low 689
 before medium 638
 before high 621
+after low 1080
+after medium 277
+after high 243
+after ultra 182
+# after = render pipeline branch (WebGPU, sky, CSM, post chain per level); same machine and setup
