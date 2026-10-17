@@ -17,3 +17,4 @@ logs/
 # browser-check output
 docs/superpowers/baseline/*.png
 .chrome/
+data/tracks/source/textures/

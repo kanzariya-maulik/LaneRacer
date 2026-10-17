@@ -1,0 +1,196 @@
+{
+  "asphalt": {
+    "src": "polyhaven:asphalt_track",
+    "url": "https://polyhaven.com/a/asphalt_track",
+    "licence": "CC0",
+    "why": "race-track asphalt, fine aggregate",
+    "sizeM": [
+      2,
+      2
+    ],
+    "res": [
+      512,
+      1024,
+      2048
+    ],
+    "maps": {
+      "diff": "asphalt_diff_{res}.webp",
+      "nor": "asphalt_nor_{res}.webp",
+      "rough": "asphalt_rough_{res}.webp"
+    }
+  },
+  "asphalt_patch": {
+    "src": "polyhaven:clean_asphalt",
+    "url": "https://polyhaven.com/a/clean_asphalt",
+    "licence": "CC0",
+    "why": "fresh asphalt patches",
+    "sizeM": [
+      2.1,
+      2.1
+    ],
+    "res": [
+      512,
+      1024
+    ],
+    "maps": {
+      "diff": "asphalt_patch_diff_{res}.webp",
+      "nor": "asphalt_patch_nor_{res}.webp",
+      "rough": "asphalt_patch_rough_{res}.webp"
+    }
+  },
+  "asphalt_pit": {
+    "src": "polyhaven:asphalt_pit_lane",
+    "url": "https://polyhaven.com/a/asphalt_pit_lane",
+    "licence": "CC0",
+    "why": "pit lane surface",
+    "sizeM": [
+      2,
+      2
+    ],
+    "res": [
+      512,
+      1024
+    ],
+    "maps": {
+      "diff": "asphalt_pit_diff_{res}.webp",
+      "nor": "asphalt_pit_nor_{res}.webp",
+      "rough": "asphalt_pit_rough_{res}.webp"
+    }
+  },
+  "kerb_paint": {
+    "src": "polyhaven:painted_concrete_02",
+    "url": "https://polyhaven.com/a/painted_concrete_02",
+    "licence": "CC0",
+    "why": "paint on concrete for kerbs",
+    "sizeM": [
+      4,
+      4
+    ],
+    "res": [
+      512,
+      1024
+    ],
+    "maps": {
+      "diff": "kerb_paint_diff_{res}.webp",
+      "nor": "kerb_paint_nor_{res}.webp",
+      "rough": "kerb_paint_rough_{res}.webp"
+    }
+  },
+  "grass": {
+    "src": "ambientcg:Grass004",
+    "url": "https://ambientcg.com/view?id=Grass004",
+    "licence": "CC0",
+    "why": "mown turf from above",
+    "sizeM": [
+      1.4,
+      1.4
+    ],
+    "res": [
+      512,
+      1024,
+      2048
+    ],
+    "maps": {
+      "diff": "grass_diff_{res}.webp",
+      "nor": "grass_nor_{res}.webp",
+      "rough": "grass_rough_{res}.webp"
+    }
+  },
+  "grass_worn": {
+    "src": "polyhaven:grass_ground",
+    "url": "https://polyhaven.com/a/grass_ground",
+    "licence": "CC0",
+    "why": "worn grass at verge edges",
+    "sizeM": [
+      2.51,
+      2.51
+    ],
+    "res": [
+      512,
+      1024
+    ],
+    "maps": {
+      "diff": "grass_worn_diff_{res}.webp",
+      "nor": "grass_worn_nor_{res}.webp",
+      "rough": "grass_worn_rough_{res}.webp"
+    }
+  },
+  "gravel": {
+    "src": "polyhaven:dry_river_pebbles",
+    "url": "https://polyhaven.com/a/dry_river_pebbles",
+    "licence": "CC0",
+    "why": "rounded gravel for traps",
+    "sizeM": [
+      2,
+      2
+    ],
+    "res": [
+      512,
+      1024,
+      2048
+    ],
+    "maps": {
+      "diff": "gravel_diff_{res}.webp",
+      "nor": "gravel_nor_{res}.webp",
+      "rough": "gravel_rough_{res}.webp"
+    }
+  },
+  "concrete": {
+    "src": "polyhaven:concrete_wall_004",
+    "url": "https://polyhaven.com/a/concrete_wall_004",
+    "licence": "CC0",
+    "why": "barrier and wall concrete",
+    "sizeM": [
+      2,
+      2
+    ],
+    "res": [
+      512,
+      1024
+    ],
+    "maps": {
+      "diff": "concrete_diff_{res}.webp",
+      "nor": "concrete_nor_{res}.webp",
+      "rough": "concrete_rough_{res}.webp"
+    }
+  },
+  "fence": {
+    "src": "ambientcg:Fence006",
+    "url": "https://ambientcg.com/view?id=Fence006",
+    "licence": "CC0",
+    "why": "debris fence mesh with alpha",
+    "sizeM": [
+      2,
+      2
+    ],
+    "res": [
+      512,
+      1024
+    ],
+    "maps": {
+      "diff": "fence_diff_{res}.webp",
+      "nor": "fence_nor_{res}.webp",
+      "rough": "fence_rough_{res}.webp",
+      "alpha": "fence_alpha_{res}.webp"
+    }
+  },
+  "sand": {
+    "src": "polyhaven:aerial_sand",
+    "url": "https://polyhaven.com/a/aerial_sand",
+    "licence": "CC0",
+    "why": "sand",
+    "sizeM": [
+      15,
+      15
+    ],
+    "res": [
+      512,
+      1024
+    ],
+    "maps": {
+      "diff": "sand_diff_{res}.webp",
+      "nor": "sand_nor_{res}.webp",
+      "rough": "sand_rough_{res}.webp"
+    }
+  }
+}
