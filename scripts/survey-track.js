@@ -196,4 +196,4 @@ async function survey(id, overlayDir) {
 
 if (require.main === module) survey(process.argv[2], process.argv[3]).catch((e) => { console.error(e); process.exit(1); });
 
-module.exports = { SURVEYS };
+module.exports = { SURVEYS, imagery, px, py, cached };

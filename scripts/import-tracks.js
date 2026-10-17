@@ -38,7 +38,8 @@ const SOURCES = [
 ];
 const OUT_DIR = path.join(__dirname, '..', 'data', 'tracks');
 // node scripts/<importer>.js [id,id,...]: only those tracks
-const only = (list) => (process.argv[2] ? list.filter((s) => process.argv[2].split(',').includes(s.id)) : list);
+const ids = process.argv.slice(2).find((a) => !a.startsWith('--'));
+const only = (list) => (ids ? list.filter((s) => ids.split(',').includes(s.id)) : list);
 
 function convert(csvText, meta) {
     const rows = csvText.split('\n')

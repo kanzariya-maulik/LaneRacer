@@ -96,6 +96,7 @@ async function importPit(src) {
     const origin = /origin=([-\d.]+),([-\d.]+)/.exec(csv); // centreline shifted to the origin by this much
     const fit = own ? { theta: 0, tx: origin ? +origin[1] : 0, ty: origin ? +origin[2] : 0, median: 0 } : cfg.seed ? align(P, Q, cfg.seed) : search(P, Q);
     if (!(fit.median <= MAX_FIT_M)) throw new Error(`${src.id}: OSM fit ${fit.median.toFixed(2)} m > ${MAX_FIT_M} m`);
+    if (FIT_ONLY) return writeFit(src, { lat0, theta: fit.theta, tx: fit.tx, ty: fit.ty });
 
     // One way, or several joined end to end (Monaco: pit lane + pit exit)
     // A gap OSM lacks can be filled by { follow: 1 (right) / -1 (left), offsetM }: alongside the track's centreline at that
@@ -149,9 +150,21 @@ async function importPit(src) {
         osmWay: cfg.way,
         fitM: +fit.median.toFixed(2),
     };
+    track.osmFit = { lat0, theta: fit.theta, tx: fit.tx, ty: fit.ty };
     track.attribution = ATTRIBUTION;
     fs.writeFileSync(file, JSON.stringify(track));
     console.log(`${src.id}: fit ${fit.median.toFixed(2)} m, pit ${pit.length} points`);
+}
+
+// OSM (lat, lon) → TUMFTM metres: local metres at lat0, then this rotation and shift (scripts/import-build.js uses it).
+// --fit-only writes just this: the F1 positions behind fitToCars are no longer served (HTTP 401), so a full re-run would
+// move the lanes
+const FIT_ONLY = process.argv.includes('--fit-only');
+function writeFit(src, osmFit) {
+    const file = path.join(OUT_DIR, `${src.id}.json`), track = JSON.parse(fs.readFileSync(file, 'utf8'));
+    track.osmFit = osmFit;
+    fs.writeFileSync(file, JSON.stringify(track));
+    console.log(`${src.id}: osmFit written`);
 }
 
 // The road is drawn WIDTH_MULT x the real width, so beside a tight pit straight (COTA, Zandvoort) it would cover the pit
@@ -254,7 +267,7 @@ function smoothLane(pit) {
 
 async function main() {
     fs.mkdirSync(CACHE, { recursive: true });
-    for (const src of only(SOURCES)) await importPit(src);
+    for (const src of only(SOURCES)) await importPit(src).catch((e) => { if (!FIT_ONLY) throw e; console.log(`${src.id}: no fit (${e.message})`); });
 }
 
 if (require.main === module) main().catch((e) => { console.error(e); process.exit(1); });
