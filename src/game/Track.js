@@ -18,12 +18,13 @@ const CP_RADIUS_MAX_M = 120; // a checkpoint reaches past the barriers beside it
 const GARAGE_ORDER = ['redbull', 'ferrari', 'mercedes', 'alpine', 'mclaren', 'alfaromeo', 'astonmartin', 'haas', 'alphatauri', 'williams', 'redbull-suzuka'];
 const GARAGE_PITCH_M = 18;
 const BOX_GAP_M = 9;
-const PIT_CLEAR_M = 1;          // the lane's edge this far off the drawn road wherever it is full width (room for the pit wall)
-const CONNECTOR_R_M = 30;       // entry / exit curves no tighter than this
+const PIT_CLEAR_M = 0;          // the lane's edge may meet the real road edge (the apron between them is drawn as asphalt)
+const CONNECTOR_R_M = 50;       // entry / exit curves no tighter than this (real lanes leave the road gently: 30 m trapped hot entries)
 const TAPER_MAX_M = 60;         // a mouth reaches full lane width within this
 const MOUTH_STEP_M = 5, MOUTH_MAX_M = 300; // mouths tried further from the garages until a connector fits
 const PIT_STEP_M = 4;           // spacing of the rebuilt lane's points
 const PIT_SNAP_M = 0.5;         // lane points this little short of the wall room are moved out to it (see buildPit)
+const PIT_SMOOTH_PASSES = 400, PIT_SMOOTH_MAX_M = 3, PIT_KINK_DEG = 4; // smoothing the surveyed lane
 
 // cum[i] = distance along the loop to path[i]; cum[n] = full lap length
 function cumulative(pts) {
@@ -91,6 +92,8 @@ function bezier(a, b, c, d, step) {
         acc += Math.hypot(fine[k].x - fine[k - 1].x, fine[k].y - fine[k - 1].y);
         if (acc >= step) { out.push(fine[k]); acc = 0; }
     }
+    // the end itself, not a sliver after the last sample (a few cm of segment: its heading is noise, a kink)
+    if (out.length > 1 && Math.hypot(fine.at(-1).x - out.at(-1).x, fine.at(-1).y - out.at(-1).y) < step / 2) out.pop();
     if (out.at(-1) !== fine.at(-1)) out.push(fine.at(-1));
     return out;
 }
@@ -106,22 +109,51 @@ function minRadius(P) {
     return r;
 }
 
+// The real road edge on one side (+1 right, -1 left) at lap distance s
+function edgeAtS(t, s, side) {
+    const n = t.path.length, total = t.cum[n]; s = ((s % total) + total) % total;
+    let i = 0; while (t.cum[i + 1] < s) i++;
+    const e = side > 0 ? t.edgeR : t.edgeL, f = (s - t.cum[i]) / (t.cum[i + 1] - t.cum[i] || 1);
+    return e[i] + (e[(i + 1) % n] - e[i]) * f;
+}
+
+// Relax the interior toward its neighbours' midpoint (never more than maxM from where it was) until no step
+// turns more than PIT_KINK_DEG beyond the mean of the steps either side: the joints between OSM ways stop jerking, while a
+// real tight bend (Spa's lane round the inside of La Source) keeps its shape. The first and last `hold` points stay
+function smoothLane(P, scale, hold, maxM) {
+    const orig = P.map((p) => ({ ...p })), out = P.map((p) => ({ ...p })), max = maxM * scale;
+    const worst = () => {
+        const turn = []; for (let i = 1; i + 1 < out.length; i++) { const a = Math.atan2(out[i].y - out[i - 1].y, out[i].x - out[i - 1].x), b = Math.atan2(out[i + 1].y - out[i].y, out[i + 1].x - out[i].x); turn.push(Math.atan2(Math.sin(b - a), Math.cos(b - a))); }
+        let w = 0; for (let i = 1; i + 1 < turn.length; i++) w = Math.max(w, Math.abs(turn[i] - (turn[i - 1] + turn[i + 1]) / 2));
+        return (w * 180) / Math.PI;
+    };
+    for (let k = 0; k < PIT_SMOOTH_PASSES && worst() > PIT_KINK_DEG; k++) {
+        for (let i = hold; i < out.length - hold; i++) {
+            const a = out[i - 1], b = out[i + 1], o = orig[i];
+            let x = (out[i].x + (a.x + b.x) / 2) / 2, y = (out[i].y + (a.y + b.y) / 2) / 2;
+            const d = Math.hypot(x - o.x, y - o.y);
+            if (d > max) { x = o.x + ((x - o.x) * max) / d; y = o.y + ((y - o.y) * max) / d; }
+            out[i] = { x, y };
+        }
+    }
+    return out;
+}
+
 function buildPit(raw, circuit, track) {
-    const { scale, width } = raw, full = raw.pit.width, roadHalf = width / 2, room = full / 2 + PIT_CLEAR_M * scale;
+    const { scale } = raw, full = raw.pit.width, room = full / 2 + PIT_CLEAR_M * scale;
     const total = track.cum[track.path.length];
     const trackS = (p) => along(track.cum, Physics.nearestOnPath(p.x, p.y, track.path));
-    const clear = (p) => Physics.nearestOnTrack(p.x, p.y, track).dist - roadHalf; // from the drawn road edge
+    const clear = (p) => { const n = Physics.nearestOnTrack(p.x, p.y, track); return n.dist - edgeAt(track, n, p.x, p.y); }; // from the real road edge
     // scripts/import-pits.js put the lanes exactly the wall room off the road as it smoothed it; this road (fair()) leaves
     // stretches a few cm (Monaco: 43 cm) short. Those points move out to the wall room, square to the road; real dips
     // (Zandvoort's lane passing another leg, Buddh's the last apex) stay where they are and break the garage lane
-    const lane = raw.pit.path.map((p) => {
-        const n = Physics.nearestOnTrack(p.x, p.y, track), c = n.dist - roadHalf;
+    const lane = smoothLane(raw.pit.path, scale, 1, PIT_SMOOTH_MAX_M).map((p) => { // the surveyed lane's own joints smoothed first: connectors meet a smooth lane
+        const n = Physics.nearestOnTrack(p.x, p.y, track), c = n.dist - edgeAt(track, n, p.x, p.y);
         if (c >= room || c < room - PIT_SNAP_M * scale) return p;
         const k = (room - c) / n.dist;
         return { x: p.x + (p.x - n.px) * k, y: p.y + (p.y - n.py) * k };
     });
     const rawCum = cumulative(lane);
-    const dirAt = (P, i) => { const a = P[Math.max(0, i - 1)], b = P[Math.min(P.length - 1, i + 1)], l = Math.hypot(b.x - a.x, b.y - a.y) || 1; return { x: (b.x - a.x) / l, y: (b.y - a.y) / l }; };
 
     // The garage lane: the longest run of the surveyed lane at full width with room for the wall
     const ok = lane.map((p) => clear(p) >= room - 1e-9);
@@ -136,8 +168,13 @@ function buildPit(raw, circuit, track) {
 
     // A connector from the road edge at lap distance s (tangent to the road) to lane point k (tangent to the lane)
     const connector = (s, k, entry, step = PIT_STEP_M * scale) => {
-        const e = lateral(pointAt(track.path, track.cum, s), laneSide * roadHalf), ed = { x: Math.cos(e.angle), y: Math.sin(e.angle) };
-        const q = lane[k], qd = dirAt(lane, k), h = 0.4 * Math.hypot(q.x - e.x, q.y - e.y);
+        // tangent to the road there: its direction over ±4 m (a 10 m chord's own direction is off by half its turn)
+        const b0 = pointAt(track.path, track.cum, s - 4 * scale), b1 = pointAt(track.path, track.cum, s + 4 * scale), on = pointAt(track.path, track.cum, s);
+        const e = lateral({ ...on, angle: Math.atan2(b1.y - b0.y, b1.x - b0.x) }, laneSide * edgeAtS(track, s, laneSide)), ed = { x: Math.cos(e.angle), y: Math.sin(e.angle) };
+        // along the lane segment it joins (entry: the one after k, exit: the one before), so the joint has no kink
+        const nb = entry ? lane[Math.min(lane.length - 1, k + 1)] : lane[Math.max(0, k - 1)], q = lane[k];
+        const ql = Math.hypot(nb.x - q.x, nb.y - q.y) || 1, qd = entry ? { x: (nb.x - q.x) / ql, y: (nb.y - q.y) / ql } : { x: (q.x - nb.x) / ql, y: (q.y - nb.y) / ql };
+        const h = 0.4 * Math.hypot(q.x - e.x, q.y - e.y);
         return entry ? bezier(e, { x: e.x + ed.x * h, y: e.y + ed.y * h }, { x: q.x - qd.x * h, y: q.y - qd.y * h }, q, step)
             : bezier(q, { x: q.x + qd.x * h, y: q.y + qd.y * h }, { x: e.x - ed.x * h, y: e.y - ed.y * h }, e, step);
     };
@@ -171,7 +208,9 @@ function buildPit(raw, circuit, track) {
         throw new Error(`${raw.id}: no pit ${entry ? 'entry' : 'exit'} connector fits`);
     };
     const en = mouth(a, true), ex = mouth(b, false);
-    const pts = [...en.C, ...lane.slice(en.k + 1, ex.k), ...ex.C].map(({ x, y }) => ({ x, y }));
+    // A light last pass (≤ 1 m) evens the curvature where a connector meets the lane; the two points at each tip stay, so
+    // each mouth keeps its place on the road edge and its tangent
+    const pts = smoothLane([...en.C, ...lane.slice(en.k + 1, ex.k), ...ex.C].map(({ x, y }) => ({ x, y })), scale, 2, 1);
     const cum = cumulative(pts), len = cum[pts.length - 1];
     // Full width where the wall fits beside it, narrowing in step with the gap to the road edge toward each mouth
     const widthAt = pts.map((p) => { const c = clear(p); return c >= room - 1e-9 ? full : Math.max(0, (full * c) / room); });
@@ -189,7 +228,8 @@ function buildPit(raw, circuit, track) {
     const wall = [];
     for (let i = w0; i <= w1; i++) { const w = lateral(pointAt(pts, cum, cum[i], false), trackSide * full / 2); wall.push({ x: w.x, y: w.y }); }
 
-    // Limiter: circuits.json metres along the surveyed lane, onto the rebuilt one, inside the walled stretch
+    // Limiter: circuits.json metres along the surveyed lane, onto the rebuilt one, inside the walled stretch (the pit assist
+    // brakes for it before it starts)
     const limStart = Math.max(cum[w0], onPit(circuit.limiterStartM ?? 0));
     const limEnd = Math.min(cum[w1], circuit.limiterEndM != null ? onPit(circuit.limiterEndM) : cum[w1]);
 
@@ -201,7 +241,13 @@ function buildPit(raw, circuit, track) {
         const boxes = [-1, 1].map((d) => { const bs = s + (d * BOX_GAP_M * scale) / 2; return { ...lateral(pointAt(pts, cum, bs, false), (-trackSide * full / 2) / 2), s: bs }; });
         return { teamId, s, x: c.x, y: c.y, angle: c.angle, boxes };
     });
-    return { path: pts, width: full, widthAt, cum, len, entryS, exitS, span, startOnPit, trackSide, limStart, limEnd, wall, garages,
+    // Each mouth: where it leaves (rejoins) the road, on which side, and the lane's angle to the road 20 m in
+    const mouthOf = (s, at) => {
+        const q = pointAt(pts, cum, at, false), r = pointAt(track.path, track.cum, trackS(q));
+        return { s, side: laneSide, angleDeg: +((Math.abs(Math.atan2(Math.sin(q.angle - r.angle), Math.cos(q.angle - r.angle))) * 180) / Math.PI).toFixed(1) };
+    };
+    const mouths = { entry: mouthOf(en.s, 20 * scale), exit: mouthOf(ex.s, len - 20 * scale) };
+    return { path: pts, width: full, widthAt, cum, len, entryS, exitS, span, startOnPit, trackSide, limStart, limEnd, wall, garages, mouths,
         garageSpan: [centre - reach, centre + reach], fitM: raw.pit.fitM, limitKmh: circuit.pitLimitKmh || null };
 }
 

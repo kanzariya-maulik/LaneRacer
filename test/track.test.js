@@ -55,12 +55,11 @@ for (const id of Track.TRACK_IDS) {
         }
     });
 
-    test(`${id}: pit lane only meets the road at its two mouths, at full width with room for the wall`, () => {
-        const pit = t.pit, half = t.width / 2;
+    test(`${id}: pit lane only meets the road at its two mouths, full width clear of the real road edge`, () => {
+        const pit = t.pit;
         pit.path.forEach((q, i) => {
-            const d = Physics.nearestOnTrack(q.x, q.y, t).dist;
-            assert.ok(d - pit.widthAt[i] / 2 >= half - 0.01 * t.scale, `lane asphalt on the road at ${(pit.cum[i] / t.scale).toFixed(0)} m`);
-            if (pit.widthAt[i] >= pit.width - 1e-6) assert.ok(d - pit.width / 2 >= half + 1 * t.scale - 1e-6, `no room for the pit wall at ${(pit.cum[i] / t.scale).toFixed(0)} m`);
+            const n = Physics.nearestOnTrack(q.x, q.y, t), half = Track.edgeAt(t, n, q.x, q.y); // the real edge on that side
+            assert.ok(n.dist - pit.widthAt[i] / 2 >= half - 0.01 * t.scale, `lane asphalt on the road at ${(pit.cum[i] / t.scale).toFixed(0)} m`);
         });
         const full = (i) => pit.widthAt[i] >= pit.width - 1e-6;
         const first = pit.widthAt.findIndex((_, i) => full(i)), last = pit.widthAt.length - 1 - [...pit.widthAt].reverse().findIndex((_, i) => full(pit.widthAt.length - 1 - i));
@@ -90,7 +89,7 @@ for (const id of Track.TRACK_IDS) {
         const pit = t.pit, sOf = (w) => { const k = Physics.nearestOnPath(w.x, w.y, pit.path, false); return pit.cum[k.i] + k.t * (pit.cum[k.i + 1] - pit.cum[k.i]); };
         const full = pit.widthAt.map((w) => w >= pit.width - 1e-6), first = full.indexOf(true), last = full.lastIndexOf(true);
         assert.ok(sOf(pit.wall[0]) <= pit.cum[first] + 5 * t.scale && sOf(pit.wall.at(-1)) >= pit.cum[last] - 5 * t.scale);
-        for (const w of pit.wall) assert.ok(Physics.nearestOnTrack(w.x, w.y, t).dist >= t.width / 2, 'wall on the road');
+        for (const w of pit.wall) { const n = Physics.nearestOnTrack(w.x, w.y, t); assert.ok(n.dist >= Track.edgeAt(t, n, w.x, w.y) - 0.01 * t.scale, 'wall on the road'); }
     });
 
     test(`${id}: safe corner speeds`, () => {
