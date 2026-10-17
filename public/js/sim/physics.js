@@ -3,6 +3,7 @@
 const CAR_HALF_LENGTH_M = 2.74;
 const CAR_CENTER_OFFSET_M = 0.18;
 const CAR_HALF_WIDTH_M = 1.0;
+import { C } from './carphysics.js';
 const RESTITUTION = 0.3;
 const HINT_SPAN = 10; // segments (~100 m) either side of a car's last road point
 const HINT_FAR = 180;  // world units (3 pit-lane widths of 10 m at scale 6): a windowed answer farther off than this is a stale hint
@@ -104,6 +105,19 @@ class Physics {
             return { nx: -ey * k, ny: ex * k };
         }
         return null;
+    }
+
+    // Barrier response: n points from the barrier back toward the car. Speed loss scales with how square-on the hit is:
+    // head-on keeps WALL_KEEP, a graze keeps almost all
+    static bounce(p, nx, ny) {
+        const vn = -(p.vx * nx + p.vy * ny); // speed into the barrier
+        const v = Math.hypot(p.vx, p.vy);
+        if (vn > 0) { p.vx += vn * nx; p.vy += vn * ny; }
+        const impact = v > 0 ? Math.max(0, vn) / v : 0;
+        const keep = 1 - (1 - C.WALL_KEEP) * impact;
+        p.vx *= keep;
+        p.vy *= keep;
+        p.speed = p.vx * Math.cos(p.angle) + p.vy * Math.sin(p.angle);
     }
 
     // How far the car's box reaches from its origin along unit normal n (rectangle support distance, box offset forward)

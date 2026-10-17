@@ -32,18 +32,8 @@ export const pitAlong = (pit, n) => pit.cum[n.i] + n.t * (pit.cum[n.i + 1] - pit
 // Half the lane's width at a nearestOnPath result (0 at the mouths: the lane tapers into the road edge)
 export const pitHalf = (pit, n) => (pit.widthAt[n.i] + (pit.widthAt[Math.min(n.i + 1, pit.widthAt.length - 1)] - pit.widthAt[n.i]) * n.t) / 2;
 
-// Barrier response: n points from the barrier back toward the car
-export function bounce(p, nx, ny) {
-    const vn = -(p.vx * nx + p.vy * ny); // speed into the barrier
-    const v = Math.hypot(p.vx, p.vy);
-    if (vn > 0) { p.vx += vn * nx; p.vy += vn * ny; }
-    // Speed loss scales with how square-on the hit is: head-on keeps WALL_KEEP, a graze keeps almost all
-    const impact = v > 0 ? Math.max(0, vn) / v : 0;
-    const keep = 1 - (1 - C.WALL_KEEP) * impact;
-    p.vx *= keep;
-    p.vy *= keep;
-    p.speed = p.vx * Math.cos(p.angle) + p.vy * Math.sin(p.angle);
-}
+// Barrier response (physics.js): n points from the barrier back toward the car
+export const bounce = (p, nx, ny) => Physics.bounce(p, nx, ny);
 
 // In the pit lane = on pit asphalt and off the track's (where they overlap, it's track); limiter caps speed
 export function updatePitState(p, t, near, nearPit) {
