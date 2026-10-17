@@ -78,7 +78,7 @@ test('brake at standstill reverses, capped at 20 km/h', () => {
 
 test('grass slows the car at least 0.25 g', () => {
     const c = mk(30);
-    for (let i = 0; i < 60; i++) step(c, { throttle: 0, brake: 0, steer: 0 }, DT, S, true);
+    for (let i = 0; i < 60; i++) step(c, { throttle: 0, brake: 0, steer: 0 }, DT, S, { mu: C.GRASS_MU, drag: C.GRASS_DRAG, driveG: C.GRASS_DRIVE_G });
     assert.ok((30 - c.speed / S) / C.G >= 0.25);
 });
 

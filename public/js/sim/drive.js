@@ -5,6 +5,7 @@ import Physics from './physics.js';
 import { brakeAssist } from './assist.js';
 import { gripOf, wearLoad } from './tyres.js';
 import { slopeAt, roadAt } from './elevation.js';
+import { GRIP } from './surface.js';
 
 export const WALL_OFFSET = 80;     // world units past the track edge, unless the track sets wallOffset; Track.js uses the same
 export const PIT_RUNOFF_M = 2;     // barrier this far outside the pit lane edge
@@ -223,7 +224,7 @@ export function driveCar(p, input, t, dt) {
     p.usedThrottle = used.throttle; // what the car got after the help (engine sound follows the help's lift)
     p.dragMul = (p.drs ? DRS_DRAG : 1) * (1 - (p.tow || 0));
     const speed0 = p.speed || 0;
-    step(p, used, dt, scale, grass, p.assist);
+    step(p, used, dt, scale, grass ? GRIP.grass : null, p.assist);
     // Guided reverse: a walking-pace shuffle, never sped up past it (a car arriving faster is braked down by the guide)
     if (p.stop && p.speed < Math.min(speed0, -GUIDE_REVERSE_MS * scale)) {
         const k = Math.min(speed0, -GUIDE_REVERSE_MS * scale) / p.speed;

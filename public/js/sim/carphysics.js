@@ -21,6 +21,9 @@ const C = {
     GRASS_MU: 0.9,
     GRASS_DRAG: 0.25,      // 1/s: grass slows the car by this × speed (stuck-free, unlike a flat drag)
     GRASS_DRIVE_G: 0.3,    // drive force on grass, in g (wheelspin)
+    GRAVEL_MU: 0.55,       // gravel trap: little grip, slows hard (2 g from 200 km/h), still crawls out at ~4 m/s
+    GRAVEL_DRAG: 0.35,     // 1/s
+    GRAVEL_DRIVE_G: 0.15,
     ASSIST_STEER: 0.6,     // steering help: extra lock, full below ASSIST_FULL_KMH, none above ASSIST_OFF_KMH
     ASSIST_FULL_KMH: 150,
     ASSIST_OFF_KMH: 250,
@@ -44,8 +47,9 @@ function parseAssist(assist) {
     return { steer: 1, brake: 1 }; // 'full', null and anything unknown
 }
 
-function step(car, input, dt, scale, offTrack = false, assist = 'off') {
-    const mu = offTrack ? C.GRASS_MU : C.MU * (car.tyreGrip ?? 1); // tyres.js: compound and wear
+// ground: the surface's grip (surface.js GRIP: grass, gravel), or null on asphalt
+function step(car, input, dt, scale, ground = null, assist = 'off') {
+    const mu = ground ? ground.mu : C.MU * (car.tyreGrip ?? 1); // tyres.js: compound and wear
     const { steer: assistSteer, brake: assistBrake } = parseAssist(assist);
     // k is the speed-dependent blend (1 = full assist below ASSIST_FULL_KMH, 0 = none above ASSIST_OFF_KMH)
 
@@ -53,7 +57,7 @@ function step(car, input, dt, scale, offTrack = false, assist = 'off') {
     let fx = Math.cos(car.angle), fy = Math.sin(car.angle);
     let vf = vx * fx + vy * fy;
     const v = Math.hypot(vx, vy);
-    const roll = C.ROLL_G * C.G + (offTrack ? C.GRASS_DRAG * v : 0);
+    const roll = C.ROLL_G * C.G + (ground ? ground.drag * v : 0);
     const speedBlend = Math.max(0, Math.min(1, (C.ASSIST_OFF_KMH - v * 3.6) / (C.ASSIST_OFF_KMH - C.ASSIST_FULL_KMH)));
     // k for steer assist, kb for brake assist — each scaled by the player's chosen strength
     const k = assistSteer * speedBlend;
@@ -65,7 +69,7 @@ function step(car, input, dt, scale, offTrack = false, assist = 'off') {
     // Longitudinal tyre force: traction/power-limited drive, grip-limited brakes, slow reverse
     let ft = 0;
     if (vf >= -0.5) {
-        ft += input.throttle * Math.min(C.POWER / Math.max(vf, 1), C.TRACTION * grip, offTrack ? C.GRASS_DRIVE_G * C.G * C.MASS : Infinity);
+        ft += input.throttle * Math.min(C.POWER / Math.max(vf, 1), C.TRACTION * grip, ground ? ground.driveG * C.G * C.MASS : Infinity);
         if (vf > 0.5) ft -= input.brake * (1 - C.BRAKE_STEER_GIVE * Math.abs(input.steer)) * grip;
         else if (input.brake > 0 && input.throttle === 0) ft -= input.brake * C.REVERSE_FORCE;
     } else if (input.throttle > 0) {
