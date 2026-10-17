@@ -6,7 +6,7 @@ const RL = require('../../src/game/RacingLine');
 const Game = require('../../src/game/Game');
 const Physics = require('../../src/game/Physics');
 const { C, parseAssist } = require('../../src/game/CarPhysics');
-const { KERB_M } = require('../../public/js/sim/drive.js');
+const { surfaceUnder } = require('../../public/js/sim/drive.js');
 
 const quietIo = { emit() {}, volatile: { emit() {} } };
 let tracks = null;
@@ -57,7 +57,7 @@ function driveLap(track, assist, { driver = 'limit', aim = 1.0, offsetM = 0, wor
         g.update();
         time += g.dt;
         const near = Physics.nearestOnTrack(p.x, p.y, t, p.roadI);
-        if (!p.inPit && near.dist > t.width / 2 + KERB_M * sc) off++;
+        if (!p.inPit && !['road', 'kerb', 'asphalt', 'paint'].includes(surfaceUnder(t, near, p.x, p.y))) off++; // off the asphalt
         if (v0 / sc > 15 && p.speed < v0 * 0.7 && !p.finished) walls++; // finishing parks the car, not a wall
     }
     return { time: !p.finished ? Infinity : flying ? p.lastLap : time, off, walls, finished: p.finished };

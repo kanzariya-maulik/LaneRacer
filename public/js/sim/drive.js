@@ -5,14 +5,39 @@ import Physics from './physics.js';
 import { brakeAssist } from './assist.js';
 import { gripOf, wearLoad } from './tyres.js';
 import { slopeAt, roadAt } from './elevation.js';
-import { GRIP } from './surface.js';
+import { GRIP, rasterize, surfaceAt } from './surface.js';
+import { wallIndex, collideWalls } from './walls.js';
 
-export const WALL_OFFSET = 80;     // world units past the track edge, unless the track sets wallOffset; Track.js uses the same
-export const PIT_RUNOFF_M = 2;     // barrier this far outside the pit lane edge
-export const KERB_M = 1.5;         // kerbs past the track edge drive like asphalt
+export const PIT_RUNOFF_M = 2;     // the pit lane's run-off: this far outside its edge (build.js puts its barrier there)
 export const PIT_LIMIT_KMH = 80;    // unless the circuit sets its own (circuits.json pitLimitKmh: Zandvoort 60)
 export const DRS_DRAG = 0.70;      // drag with the flap open (~+43 km/h top speed)
 const BRIDGE_ROAD = 6;             // points either side of a bridge wall's own road that it applies to
+
+// The track as built, ready for the sim: its surface grid and barrier index, made once per track object (the server's,
+// or the copy the client got in game_init: the same data, so the same grid and walls)
+const prepared = new WeakMap();
+export function prepareTrack(t) {
+    let r = prepared.get(t);
+    if (r) return r;
+    const xs = [], ys = [];
+    for (const w of t.walls) for (const q of w.pts) { xs.push(q.x); ys.push(q.y); }
+    for (const q of t.path) { xs.push(q.x); ys.push(q.y); }
+    const bounds = { minX: Math.min(...xs), minY: Math.min(...ys), maxX: Math.max(...xs), maxY: Math.max(...ys) };
+    r = { grid: rasterize(t.build.surfaces, bounds, t.scale), walls: wallIndex(t.walls, t.scale) };
+    prepared.set(t, r);
+    return r;
+}
+
+// What's under (x, y): the road out to the white line on that side, the kerb past it, then the circuit's surfaces
+export function surfaceUnder(t, near, x, y) {
+    const n = t.path.length, a = t.path[near.i], b = t.path[(near.i + 1) % n];
+    const right = -(b.y - a.y) * (x - near.px) + (b.x - a.x) * (y - near.py) > 0; // + lateral = the driver's right
+    const at = (A) => A[near.i] + (A[(near.i + 1) % n] - A[near.i]) * near.t;
+    const edge = at(right ? t.edgeR : t.edgeL);
+    if (near.dist <= edge) return 'road';
+    if (near.dist <= edge + at(right ? t.kerbR : t.kerbL)) return 'kerb';
+    return surfaceAt(prepareTrack(t).grid, x, y);
+}
 
 // Is (x, y) within reach of the pit lane (its bounding box, grown by the barrier distance)? Cached per pit lane
 const pitBoxes = new WeakMap(), FAR_PIT = { dist: Infinity, px: 0, py: 0, i: 0, t: 0 };
@@ -39,7 +64,7 @@ export const bounce = (p, nx, ny) => Physics.bounce(p, nx, ny);
 export function updatePitState(p, t, near, nearPit) {
     const pit = t.pit;
     p.pitS = pitAlong(pit, nearPit);
-    p.inPit = nearPit.dist <= pitHalf(pit, nearPit) && near.dist > t.width / 2;
+    p.inPit = nearPit.dist <= pitHalf(pit, nearPit) && surfaceUnder(t, near, p.x, p.y) !== 'road';
     p.limiter = p.inPit && p.pitS >= pit.limStart && p.pitS <= pit.limEnd;
     if (p.limiter) {
         const max = ((pit.limitKmh || PIT_LIMIT_KMH) / 3.6) * t.scale, v = Math.hypot(p.vx, p.vy);
@@ -203,7 +228,8 @@ export function driveCar(p, input, t, dt) {
     // The pit lane only matters near it: elsewhere a far-away answer without searching it (3 of these a tick)
     const nearPit = (x, y) => (!pit ? null : nearPitBox(pit, x, y) ? Physics.nearestOnPathHint(x, y, pit.path, p.pitI) : FAR_PIT);
     const before = Physics.nearestOnTrack(p.x, p.y, t, p.roadI), beforePit = nearPit(p.x, p.y);
-    const grass = before.dist > t.width / 2 + KERB_M * scale && !(beforePit && beforePit.dist <= pitHalf(pit, beforePit));
+    // the pit lane's corridor is asphalt at its full width, mouths included (the apron between the lane and the road)
+    const ground = beforePit && beforePit.dist <= pit.width / 2 ? null : GRIP[surfaceUnder(t, before, p.x, p.y)];
     // The road this car is on (followed from last tick, so it keeps its level at a bridge), and how that road climbs
     const road = slopeAt(t, p.x, p.y, p.angle, p.roadI); // hills: gravity, crests and compressions (flat without track z)
     p.grade = road.grade; p.vcurv = road.vcurv;
@@ -214,7 +240,7 @@ export function driveCar(p, input, t, dt) {
     p.usedThrottle = used.throttle; // what the car got after the help (engine sound follows the help's lift)
     p.dragMul = (p.drs ? DRS_DRAG : 1) * (1 - (p.tow || 0));
     const speed0 = p.speed || 0;
-    step(p, used, dt, scale, grass ? GRIP.grass : null, p.assist);
+    step(p, used, dt, scale, ground, p.assist);
     // Guided reverse: a walking-pace shuffle, never sped up past it (a car arriving faster is braked down by the guide)
     if (p.stop && p.speed < Math.min(speed0, -GUIDE_REVERSE_MS * scale)) {
         const k = Math.min(speed0, -GUIDE_REVERSE_MS * scale) / p.speed;
@@ -223,7 +249,7 @@ export function driveCar(p, input, t, dt) {
     // Tyres wear with distance, harder the more grip is in use (tyres.js); grip follows
     if (p.compound) {
         const metres = Math.hypot(p.x - x0, p.y - y0) / scale;
-        p.wear = Math.min(1, (p.wear || 0) + metres * (p.wearPerM || 0) * wearLoad(p.latUse || 0, used.brake || 0, grass ? 0 : (p.slip || 0)));
+        p.wear = Math.min(1, (p.wear || 0) + metres * (p.wearPerM || 0) * wearLoad(p.latUse || 0, used.brake || 0, ground ? 0 : (p.slip || 0)));
         p.tyreGrip = gripOf(p.compound, p.wear) * (p.gripEvo ?? 1); // qualifying: the track rubbers in (Game.quali.evo)
     }
 
@@ -248,46 +274,10 @@ export function driveCar(p, input, t, dt) {
         }
     }
 
-    // Barriers between two legs of the track running side by side (Track.js buildMedians: Monaco's Fairmont hairpin)
-    for (const m of t.medians || []) {
-        const cross = Physics.crossWall(x0, y0, p.x, p.y, m);
-        if (cross) { p.x = x0 + cross.nx * 0.5; p.y = y0 + cross.ny * 0.5; bounce(p, cross.nx, cross.ny); }
-        const ov = Physics.wallOverlap(p, m, scale);
-        if (ov) { p.x += ov.nx * ov.depth; p.y += ov.ny * ov.depth; bounce(p, ov.nx, ov.ny); }
-    }
-
-    // Barrier: outside both the track's run-off and the pit lane's
-    const wallDist = t.width / 2 + (t.wallOffset ?? WALL_OFFSET);
-    // The pit barrier stands off the full lane width even where the asphalt tapers into a mouth: a car turning in late
-    // (Monaco: barrier 1.5 m off the road) crosses that corridor, not the narrow asphalt
-    const pitDist = pit && pit.width / 2 + PIT_RUNOFF_M * scale;
+    // Barriers where they stand (the build data, the medians between two legs: Track.js walls)
+    collideWalls(p, x0, y0, prepareTrack(t).walls, scale);
     const after = Physics.nearestOnTrack(p.x, p.y, t, p.roadI), afterPit = nearPit(p.x, p.y);
     if (afterPit && afterPit !== FAR_PIT) p.pitI = afterPit.i;
-    // No barrier where the track opens between two nearby legs (Track.js openWalls: the infield of a hairpin)
-    const open = (n) => {
-        if (!t.openWall) return false;
-        const a = t.path[n.i], b = t.path[(n.i + 1) % t.path.length];
-        return !!t.openWall[-(b.y - a.y) * (p.x - n.px) + (b.x - a.x) * (p.y - n.py) > 0 ? 0 : 1][n.i];
-    };
-    const overTrack = open(after) ? -Infinity : after.dist - wallDist, overPit = afterPit ? afterPit.dist - pitDist : Infinity;
-    if (overTrack > 0 && overPit > 0) {
-        const [near, lim] = overPit < overTrack ? [afterPit, pitDist] : [after, wallDist];
-        const nx = (p.x - near.px) / near.dist, ny = (p.y - near.py) / near.dist;
-        p.x = near.px + nx * (lim - 1);
-        p.y = near.py + ny * (lim - 1);
-        bounce(p, -nx, -ny);
-    }
-    // Barrier stops the car body: pull the centre in by how far the rectangle reaches toward it
-    const edge = Physics.nearestOnTrack(p.x, p.y, t, p.roadI), edgePit = nearPit(p.x, p.y);
-    const reach = (n) => n.dist > 1e-9 ? Physics.carReach(p, (p.x - n.px) / n.dist, (p.y - n.py) / n.dist, scale) : 0;
-    const inTrack = edge.dist + reach(edge) <= wallDist || open(edge);
-    const inPitLane = edgePit && edgePit.dist + reach(edgePit) <= pitDist;
-    if (!inTrack && !inPitLane && edge.dist <= wallDist && !(edgePit && edgePit.dist <= pitDist)) {
-        const nx = (p.x - edge.px) / edge.dist, ny = (p.y - edge.py) / edge.dist;
-        const lim = wallDist - reach(edge);
-        p.x = edge.px + nx * lim; p.y = edge.py + ny * lim;
-        bounce(p, -nx, -ny);
-    }
 
     if (pit) updatePitState(p, t, after, afterPit);
 

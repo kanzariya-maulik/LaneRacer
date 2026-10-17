@@ -110,14 +110,14 @@ test('wall hit at speed: car ends inside the wall line, finite, slowed', () => {
     const g = new Game(io, [lp('a')], monza, RACE, () => {});
     g.release();
     const a = g.players.a;
-    const wall = monza.width / 2 + 80;
-    // Put the car just past the wall, heading straight out at 300 km/h
+    // Put the car 5 m inside the barrier, heading straight at it at 300 km/h
     const n = Physics.nearestOnTrack(a.x, a.y, monza);
     const k = monza.pit.trackSide; // away from the pit lane, which sits on the other side of the straight
+    const wall = (k > 0 ? monza.barrierR : monza.barrierL)[n.i];
     const dirX = -Math.sin(a.angle) * k, dirY = Math.cos(a.angle) * k;
-    a.x = n.px + dirX * (wall + 5); a.y = n.py + dirY * (wall + 5);
+    a.x = n.px + dirX * (wall - 5 * monza.scale); a.y = n.py + dirY * (wall - 5 * monza.scale);
     a.vx = dirX * (300 / 3.6) * monza.scale; a.vy = dirY * (300 / 3.6) * monza.scale;
-    g.update();
+    for (let k = 0; k < 10; k++) g.update(); // 5 m at 83 m/s: the wall within 4 ticks
     const after = Physics.nearestOnTrack(a.x, a.y, monza);
     assert.ok(after.dist <= wall, `${after.dist} > ${wall}`);
     assert.ok([a.x, a.y, a.vx, a.vy].every(Number.isFinite));
