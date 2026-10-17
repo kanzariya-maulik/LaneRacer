@@ -12,7 +12,7 @@ for (const id of Track.TRACK_IDS) {
         const t = tracks[id], out = S.placeScenery(t, 1, S.seedOf(id));
         const P = t.path, n = P.length, clearOf = (x, y) => { // past the barrier beside (x, y)
             const q = Physics.nearestOnTrack(x, y, t), a = P[q.i], b = P[(q.i + 1) % n];
-            return S.clearAt(t, q.i, -(b.y - a.y) * (x - q.px) + (b.x - a.x) * (y - q.py) > 0 ? 1 : -1);
+            return S.clearAt(t, q.i, -(b.y - a.y) * (x - q.px) + (b.x - a.x) * (y - q.py) > 0 ? 1 : -1, q.t);
         };
         for (const o of [...out.grandstands, ...out.trees, ...out.billboards, ...out.buildings, ...out.posts, ...out.floodlights, ...out.boards, ...(out.landmark ? [out.landmark] : [])]) {
             assert.ok(Physics.nearestOnTrack(o.x, o.y, t).dist > clearOf(o.x, o.y), `${id}: object on or near the track at ${o.x},${o.y}`);

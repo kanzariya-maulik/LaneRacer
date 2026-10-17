@@ -167,18 +167,20 @@ test('grazing the wall at a shallow angle keeps most of the speed; head-on does 
         const g = new Game(io, [lp('a')], monza, RACE, () => {});
         g.release();
         const a = g.players.a;
-        const wall = monza.width / 2 + 80;
         const n = Physics.nearestOnTrack(a.x, a.y, monza);
         const k = monza.pit.trackSide; // away from the centreline, on the side without the pit lane
+        const wall = (k > 0 ? monza.barrierR : monza.barrierL)[n.i];
         const out = { x: -Math.sin(a.angle) * k, y: Math.cos(a.angle) * k };
         const along = { x: Math.cos(a.angle), y: Math.sin(a.angle) };
         const r = (deg * Math.PI) / 180, v = (300 / 3.6) * monza.scale;
-        a.x = n.px + out.x * (wall + 2); a.y = n.py + out.y * (wall + 2);
+        a.x = n.px + out.x * (wall - 2 * monza.scale); a.y = n.py + out.y * (wall - 2 * monza.scale); // 2 m inside the barrier
         a.vx = (along.x * Math.cos(r) + out.x * Math.sin(r)) * v;
         a.vy = (along.y * Math.cos(r) + out.y * Math.sin(r)) * v;
         a.angle = Math.atan2(a.vy, a.vx);
-        g.update();
-        assert.ok(check(Math.hypot(a.vx, a.vy) / v), `${deg}°: kept ${Math.hypot(a.vx, a.vy) / v}`);
+        // the speed kept through the first contact (a 5° graze meets the barrier ~23 m on, within 16 ticks)
+        let prev = v, kept = null;
+        for (let t = 0; t < 30 && kept === null; t++) { g.update(); const now = Math.hypot(a.vx, a.vy); if (now < prev * 0.98) kept = now / v; prev = now; }
+        assert.ok(kept !== null && check(kept), `${deg}°: kept ${kept}`);
     }
 });
 

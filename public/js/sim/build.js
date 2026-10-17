@@ -10,7 +10,7 @@ const heading = (P, i) => { const n = P.length, a = P[(i - 1 + n) % n], b = P[(i
 
 // Lap distance of point i in metres past the start line
 const lapM = (t, i) => { const total = t.cum[t.path.length]; return ((((t.cum[i] - t.startS) % total) + total) % total) / t.scale; };
-const toM = (t, p) => [+(p.x / t.scale).toFixed(2), +(-p.y / t.scale).toFixed(2)]; // world → TUMFTM metres
+export const toM = (t, p) => [+(p.x / t.scale).toFixed(2), +(-p.y / t.scale).toFixed(2)]; // world → TUMFTM metres
 
 // Runs of kept items round a loop (a run that wraps the end carries on from the start)
 function runs(E, keep) {
@@ -26,29 +26,46 @@ function runs(E, keep) {
     return out;
 }
 
-// The area cars may use today: within the barrier distance (the real edge on that side + 13.3 m) of the track, or of
-// the pit lane (its half width + 2 m). Signed distance on a 1 m grid of points: < 0 inside. Two legs closer than two
-// barrier distances share one area (no island of barrier between them, as Track.js openWalls did)
-function reachField(t, wallM) {
-    const P = t.path, n = P.length, sc = t.scale, cell = 1 * sc, maxLim = (Math.max(...t.edgeR, ...t.edgeL) / sc + wallM + 2) * sc;
-    const xs = P.map((p) => p.x), ys = P.map((p) => p.y), x0 = Math.min(...xs) - maxLim - 2 * cell, y0 = Math.min(...ys) - maxLim - 2 * cell;
+// The area cars may use: within limR / limL (world units from the centreline, per point and side) of the track, of the
+// pit lane (its half width + 2 m), or inside any of `polys` (run-off areas: world { x, y } polygons). Signed distance on a
+// 1 m grid of points, < 0 inside. Two legs closer than their limits share one area (no island of barrier between them)
+function reachField(t, limR, limL, polys = []) {
+    const P = t.path, n = P.length, sc = t.scale, cell = 1 * sc, maxLim = Math.max(...limR, ...limL) + 2 * sc;
+    const xs = [...P.map((p) => p.x), ...polys.flat().map((p) => p.x)], ys = [...P.map((p) => p.y), ...polys.flat().map((p) => p.y)];
+    const x0 = Math.min(...xs) - maxLim - 2 * cell, y0 = Math.min(...ys) - maxLim - 2 * cell;
     const w = Math.ceil((Math.max(...xs) + maxLim + 2 * cell - x0) / cell) + 1, h = Math.ceil((Math.max(...ys) + maxLim + 2 * cell - y0) / cell) + 1;
     const f = new Float32Array(w * h).fill(Infinity);
-    // a capsule round segment a-b: lim(u) on the side the point lies, from the edges at both ends
-    const capsule = (a, b, limL, limR) => {
-        const ex = b.x - a.x, ey = b.y - a.y, l2 = ex * ex + ey * ey || 1, R = Math.max(limL[0], limL[1], limR[0], limR[1]);
+    // a capsule round segment a-b: lim(u) on the side the point lies, from the limits at both ends
+    const capsule = (a, b, limL2, limR2) => {
+        const ex = b.x - a.x, ey = b.y - a.y, l2 = ex * ex + ey * ey || 1, R = Math.max(limL2[0], limL2[1], limR2[0], limR2[1]);
         const i0 = Math.max(0, Math.floor((Math.min(a.x, b.x) - R - x0) / cell)), i1 = Math.min(w - 1, Math.ceil((Math.max(a.x, b.x) + R - x0) / cell));
         const j0 = Math.max(0, Math.floor((Math.min(a.y, b.y) - R - y0) / cell)), j1 = Math.min(h - 1, Math.ceil((Math.max(a.y, b.y) + R - y0) / cell));
         for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
             const x = x0 + i * cell, y = y0 + j * cell, u = Math.max(0, Math.min(1, ((x - a.x) * ex + (y - a.y) * ey) / l2));
-            const right = -ey * (x - a.x) + ex * (y - a.y) > 0, L = right ? limR : limL; // +lateral = driver's right (y down)
+            const right = -ey * (x - a.x) + ex * (y - a.y) > 0, L = right ? limR2 : limL2; // +lateral = driver's right (y down)
             const v = Math.hypot(x - a.x - u * ex, y - a.y - u * ey) - (L[0] + (L[1] - L[0]) * u);
             if (v < f[j * w + i]) f[j * w + i] = v;
         }
     };
-    const lim = (e) => e + wallM * sc;
-    for (let i = 0; i < n; i++) { const k = (i + 1) % n; capsule(P[i], P[k], [lim(t.edgeL[i]), lim(t.edgeL[k])], [lim(t.edgeR[i]), lim(t.edgeR[k])]); }
+    for (let i = 0; i < n; i++) { const k = (i + 1) % n; capsule(P[i], P[k], [limL[i], limL[k]], [limR[i], limR[k]]); }
     if (t.pit) { const Q = t.pit.path, r = t.pit.width / 2 + PIT_RUNOFF_M * sc; for (let i = 0; i + 1 < Q.length; i++) capsule(Q[i], Q[i + 1], [r, r], [r, r]); }
+    // polygons: minus the distance to their edge inside, plus outside (only near them: the rest is far outside anyway)
+    for (const poly of polys) {
+        const px = poly.map((p) => p.x), py = poly.map((p) => p.y), m = poly.length;
+        const i0 = Math.max(0, Math.floor((Math.min(...px) - x0) / cell) - 2), i1 = Math.min(w - 1, Math.ceil((Math.max(...px) - x0) / cell) + 2);
+        const j0 = Math.max(0, Math.floor((Math.min(...py) - y0) / cell) - 2), j1 = Math.min(h - 1, Math.ceil((Math.max(...py) - y0) / cell) + 2);
+        for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+            const x = x0 + i * cell, y = y0 + j * cell;
+            let d = Infinity, inside = false;
+            for (let k = 0, q = m - 1; k < m; q = k++) {
+                const a = poly[q], b = poly[k], ex = b.x - a.x, ey = b.y - a.y, l2 = ex * ex + ey * ey || 1, u = Math.max(0, Math.min(1, ((x - a.x) * ex + (y - a.y) * ey) / l2));
+                d = Math.min(d, Math.hypot(x - a.x - u * ex, y - a.y - u * ey));
+                if ((a.y > y) !== (b.y > y) && x < a.x + ((y - a.y) * ex) / (ey || 1e-12)) inside = !inside;
+            }
+            const v = inside ? -d : d;
+            if (v < f[j * w + i]) f[j * w + i] = v;
+        }
+    }
     return { f, w, h, x0, y0, cell };
 }
 
@@ -107,15 +124,24 @@ function simplify(P, tol) {
 }
 
 // wallM: metres past the edge (default 13.3; Monaco's circuits.json barrierM 1.5 until its real data)
-export function defaultBuild(t, wallM = WALL_OFFSET_M) {
-    const P = t.path, n = P.length, sc = t.scale;
-    const barriers = outline(reachField(t, wallM)).map((loop) => ({ kind: 'concrete', h: 1, fence: 3, pts: simplify(loop, 0.1 * sc).map((p) => toM(t, p)), src: 'generated' }));
-    // Kerbs where the corner is tight (± 2 points so they don't flicker on and off), both sides, flat red/white
+// The barriers as the outline of the area cars may use (reachField): closed loops of world points, simplified to 10 cm
+export const outlineBarriers = (t, limR, limL, polys) => outline(reachField(t, limR, limL, polys)).map((loop) => simplify(loop, 0.1 * t.scale));
+
+// The generated kerbs: where the corner is tight (± 2 points so they don't flicker on and off), both sides, flat red/white
+export function generatedKerbs(t) {
+    const P = t.path, n = P.length;
     const turn = P.map((_, i) => { let d = heading(P, (i + 1) % n) - heading(P, i); d = Math.atan2(Math.sin(d), Math.cos(d)); return Math.abs(d) > KERB_TURN; });
     const curvy = turn.map((_, i) => [-2, -1, 0, 1, 2].some((d) => turn[(i + d + n) % n]));
     const kerbs = [];
     for (const r of runs(P.map((_, i) => i), curvy)) for (const s of ['R', 'L'])
         kerbs.push({ side: s, fromM: +lapM(t, r[0]).toFixed(1), toM: +lapM(t, (r.at(-1) + 1) % n).toFixed(1), style: 'flat', colors: ['red', 'white'], w: 1.5, src: 'generated' });
+    return kerbs;
+}
+
+export function defaultBuild(t, wallM = WALL_OFFSET_M) {
+    const sc = t.scale, limR = t.edgeR.map((e) => e + wallM * sc), limL = t.edgeL.map((e) => e + wallM * sc);
+    const barriers = outlineBarriers(t, limR, limL).map((loop) => ({ kind: 'concrete', h: 1, fence: 3, pts: loop.map((p) => toM(t, p)), src: 'generated' }));
+    const kerbs = generatedKerbs(t);
     return { id: t.id, asphalt: { tone: 0.6, resurfaced: null, patches: [] }, surfaces: [], kerbs, barriers, features: [], sources: [`generated: today's barrier rule (real edge + ${+wallM.toFixed(1)} m), as the outline of the area it allows`], unconfirmed: ['all'] };
 }
 

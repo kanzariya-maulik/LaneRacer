@@ -7,6 +7,13 @@ const CELL_M = 20, REACH_M = 4; // grid cell; a car's box reaches under 3 m from
 // walls: [{ kind, pts: [{ x, y }], level?: { i } }] (world units). Each cell lists [wall, segment] pairs in wall order
 export function wallIndex(walls, scale) {
     const cell = CELL_M * scale, cells = new Map();
+    // ends that meet another barrier's end: the barrier carries on there (build.js splits loops where the kind changes)
+    const ends = new Map(), key = (q) => `${q.x},${q.y}`;
+    for (const w of walls) for (const q of [w.pts[0], w.pts.at(-1)]) ends.set(key(q), (ends.get(key(q)) || 0) + 1);
+    const joined = walls.map((w) => {
+        const closed = key(w.pts[0]) === key(w.pts.at(-1));
+        return { start: closed || ends.get(key(w.pts[0])) > 1, end: closed || ends.get(key(w.pts.at(-1))) > 1 };
+    });
     walls.forEach((w, k) => {
         for (let i = 0; i + 1 < w.pts.length; i++) {
             const a = w.pts[i], b = w.pts[i + 1];
@@ -18,7 +25,7 @@ export function wallIndex(walls, scale) {
                 }
         }
     });
-    return { walls, cell, cells, scale };
+    return { walls, cell, cells, scale, joined };
 }
 
 // Segments in the cells a box touches: Map wall → sorted segment indices (each once)
@@ -44,13 +51,14 @@ export function collideWalls(p, x0, y0, index, scale, accept = null) {
     let hit = false;
     for (const [w, segs] of near(index, x0, y0, p.x, p.y, REACH_M * scale)) {
         if (accept && !accept(w)) continue;
+        const j = index.joined[index.walls.indexOf(w)];
         for (const i of segs) {
             const cross = Physics.crossWall(x0, y0, p.x, p.y, [w.pts[i], w.pts[i + 1]]);
             if (cross) { p.x = x0 + cross.nx * 0.5; p.y = y0 + cross.ny * 0.5; Physics.bounce(p, cross.nx, cross.ny); hit = true; break; }
         }
         let best = null;
         for (const i of segs) {
-            const ov = Physics.wallOverlap(p, [w.pts[i], w.pts[i + 1]], scale);
+            const ov = Physics.segOverlap(p, w.pts, i, scale, j.start, j.end);
             if (ov && (!best || ov.depth > best.depth)) best = ov;
         }
         if (best) { p.x += best.nx * best.depth; p.y += best.ny * best.depth; Physics.bounce(p, best.nx, best.ny); hit = true; }

@@ -1,0 +1,61 @@
+{
+ "about": "Monza as built for 2026. Research: docs/superpowers/research/2026-10-17-track-surface/circuits-a.md §1 (FIA race director notes 2024-2026, press, OSM). Lap metres past the start line; apexes measured off the track: T1 907 R, T2 954 L, Curva Grande 1100-1700 R, T4 2122 L, T5 2171 R, Lesmo 1 2510-2560 R, Lesmo 2 2860 R, T8 3929 L, T9 4059 R, T10 4119 L, Alboreto 5128-5198 R; pit entry 5536, pit exit 471.",
+ "asphalt": {
+  "tone": 0.25, "resurfaced": 2024,
+  "patchesM": [
+   { "fromM": 880, "toM": 930, "src": "FIA 2025: bitumen asphalt repair at T1" },
+   { "fromM": 945, "toM": 985, "src": "FIA 2026: new asphalt patch at T2" },
+   { "fromM": 2095, "toM": 2140, "src": "FIA 2025: bitumen asphalt repair at T4" }
+  ]
+ },
+ "kinds": {
+  "osm:231026022": "asphalt",
+  "osm:231026218": "asphalt"
+ },
+ "bands": [
+  { "side": "L", "fromM": 5120, "toM": 5420, "fromEdgeM": 1.5, "toEdgeM": 4.5, "kind": "gravel", "src": "grandprix.com 2014: Parabolica (Alboreto) asphalt run-off with a strip of gravel left right beside the track edge" },
+  { "side": "L", "fromM": 5395, "toM": 5470, "fromEdgeM": 4.5, "toEdgeM": 18, "kind": "paint", "paint": ["#1f8a3b", "#f2f2f2", "#d62828"], "src": "FIA photo 2025: green/white/red band on the Alboreto exit run-off" },
+  { "side": "R", "fromM": 955, "toM": 1010, "fromEdgeM": 1.5, "toEdgeM": 4, "kind": "gravel", "src": "2024 (the-race.com, planetf1): narrow gravel strips behind the chicane kerbs (T2 exit)" },
+  { "side": "L", "fromM": 2100, "toM": 2145, "fromEdgeM": 1.5, "toEdgeM": 4.5, "kind": "gravel", "src": "2024 (Ricciardo onboard): flat kerb, a thin concrete strip, then gravel (T4 inside)" },
+  { "side": "R", "fromM": 2150, "toM": 2195, "fromEdgeM": 1.5, "toEdgeM": 4.5, "kind": "gravel", "src": "2024: gravel behind the T5 kerb" }
+ ],
+ "barrierKinds": [
+  { "side": "L", "fromM": 5480, "toM": 850, "kind": "concrete", "h": 1, "fence": 4, "src": "FIA 2026: new wall and debris fence on the left of the main straight" },
+  { "side": "R", "fromM": 5480, "toM": 850, "kind": "concrete", "h": 1, "fence": 4, "src": "pit wall side, concrete with debris fence [K]" },
+  { "fromM": 850, "toM": 1050, "kind": "tyres", "h": 1, "fence": 3.5, "src": "FIA: Rettifilo escape road ends at Armco and tyre bundles [K]" },
+  { "fromM": 1050, "toM": 1950, "kind": "armco", "h": 1, "fence": 3.5, "src": "Curva Grande: Armco (2-3 rails) and fence [K]" },
+  { "fromM": 1950, "toM": 2300, "kind": "tyres", "h": 1, "fence": 3.5, "src": "Roggia: tyre wall and Armco [K]" },
+  { "fromM": 2300, "toM": 3050, "kind": "tyres", "h": 1, "fence": 3.5, "src": "Lesmo 1 and 2: tyre wall and Armco, trees close [K]" },
+  { "fromM": 3050, "toM": 3800, "kind": "armco", "h": 1, "fence": 3.5, "src": "Serraglio: Armco [K]" },
+  { "fromM": 3800, "toM": 4300, "kind": "tyres", "h": 1, "fence": 3.5, "src": "Ascari: Armco and tyres [K]" },
+  { "fromM": 4300, "toM": 5050, "kind": "armco", "h": 1, "fence": 3.5, "src": "back straight: Armco [K]" },
+  { "side": "L", "fromM": 5050, "toM": 5480, "kind": "concrete", "h": 1, "fence": 4, "src": "Alboreto outside: concrete and fence (~3-4 m) [K/OSM]" },
+  { "side": "R", "fromM": 5050, "toM": 5480, "kind": "armco", "h": 1, "fence": 3.5, "src": "Alboreto inside: Armco and tyres [K]" }
+ ],
+ "kerbStyles": [
+  { "fromM": 860, "toM": 1020, "colors": ["green", "white", "red"], "src": "FIA diagram: red-white-green kerbs at the chicanes (tricolour)" },
+  { "fromM": 2080, "toM": 2220, "colors": ["green", "white", "red"], "src": "FIA diagram: red-white-green kerbs at Roggia" }
+ ],
+ "kerbs": [
+  { "side": "L", "fromM": 807, "toM": 890, "style": "negative", "colors": ["red", "white"], "w": 1, "src": "FIA 2026: new negative (recessed) kerb from the 100 m board before T1, left" },
+  { "side": "R", "fromM": 2022, "toM": 2105, "style": "negative", "colors": ["red", "white"], "w": 1, "src": "FIA 2026: new negative kerb before T4, right" },
+  { "side": "R", "fromM": 3829, "toM": 3912, "style": "negative", "colors": ["red", "white"], "w": 1, "src": "FIA 2026: new negative kerb before T8, right" }
+ ],
+ "features": [
+  { "type": "gore", "mouth": "entry", "color": "#1e5bd8", "src": "FIA photo: blue-painted gore triangle at the pit entry (SC1)" },
+  { "type": "bollard", "mouth": "entry", "color": "#facc15", "src": "FIA photo: yellow bollard at the pit entry" },
+  { "type": "line", "mouth": "exit", "toM": 600, "color": "#f2f2f2", "src": "FIA 2026: pit exit white line shortened to end at SC2 (position unconfirmed)" },
+  { "type": "blocks", "atM": 940, "side": "R", "rows": 4, "src": "FIA: four rows of polystyrene blocks on the Rettifilo escape road" }
+ ],
+ "sources": [
+  "docs/superpowers/research/2026-10-17-track-surface/circuits-a.md §1 (FIA F1 race director notes 2025, 2026; the-race.com, planetf1 2024; grandprix.com 2014)",
+  "OSM ways 231026022 (Rettifilo escape road) and 231026218 (Alboreto run-off) are tagged sand; both are paved run-off (FIA photos, imagery)"
+ ],
+ "unconfirmed": [
+  "[K] barrier kinds per section (general knowledge, not FIA-confirmed)",
+  "gravel strip widths (1.5-4.5 m past the white line) and the tricolour band's extent",
+  "patch extents at T1, T2, T4 (lap ranges estimated)",
+  "pit exit white line end (SC2) position",
+  "white edge line width 0.15 m (FIA minimum 0.10 m)"
+ ]
+}

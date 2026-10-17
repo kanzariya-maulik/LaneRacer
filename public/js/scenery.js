@@ -88,8 +88,12 @@ export function untangle(path, E) {
     return E;
 }
 
-// How far from the centreline anything may stand beside point i (side +1 right, -1 left): 3 m behind the barrier there
-export const clearAt = (t, i, side) => (side > 0 ? t.barrierR[i] : t.barrierL[i]) + 3 * t.scale;
+// How far from the centreline anything may stand at fraction f along segment i (side +1 right, -1 left): 3 m behind the
+// barrier there, interpolated between the segment's ends (at a point between two segments both give the same answer)
+export const clearAt = (t, i, side, f = 0) => {
+    const B = side > 0 ? t.barrierR : t.barrierL, n = B.length;
+    return B[i] + (B[(i + 1) % n] - B[i]) * f + 3 * t.scale;
+};
 
 // Spatial index of the centreline, so the ~100,000 nearest-road questions behind the terrain read a handful of segments
 // each instead of all ~600: a fine grid (40 m cells: which segments pass through) near the track, and a coarse map
@@ -375,10 +379,12 @@ export function placeScenery(t, density, seed, theme = themeOf(t.id)) {
     const P = t.path, n = P.length, sc = t.scale, rand = rng(seed);
     // behind the barrier beside it, with a little margin over the tested clearance
     const ok = (x, y) => {
-        const { d, j } = nearestSeg(t, x, y);
-        return d > clearAt(t, j, sideOf(P, j, x, y)) + 0.5 * sc && !(t.pit && distTo(t.pit.path, x, y, false) <= t.pit.width / 2 + 7 * sc);
+        const { d, j, k } = nearestSeg(t, x, y);
+        return d > clearAt(t, j, sideOf(P, j, x, y), k) + 0.5 * sc && !(t.pit && distTo(t.pit.path, x, y, false) <= t.pit.width / 2 + 7 * sc);
     };
-    const clear = (i, side) => clearAt(t, i, side) + 0.5 * sc; // out from point i before anything fits
+    // out from point i before anything fits: past the barrier wherever it stands furthest out round there (it can step out
+    // between two points: an escape road)
+    const clear = (i, side) => Math.max(clearAt(t, (i - 1 + n) % n, side), clearAt(t, i, side), clearAt(t, (i + 1) % n, side)) + 0.5 * sc;
 
     // Slow corners: runs of points under SLOW_MS, extended to the exit; side = outside of the turn
     const slowCorners = [];

@@ -126,17 +126,28 @@ class Physics {
         return scale * (CAR_HALF_LENGTH_M * Math.abs(along) + CAR_HALF_WIDTH_M * Math.abs(-fy * nx + fx * ny) + CAR_CENTER_OFFSET_M * along);
     }
 
+    // Car rectangle against segment i of a wall polyline: how deep it pokes through and the way out (n from wall to car),
+    // or null. Past either end of the segment the neighbouring segment answers: only the polyline's own two ends act as
+    // points (a joint judged from both sides pushed the car out diagonally, 35° off square on a graze)
+    // joinedStart / joinedEnd: the polyline carries on in another one there (a barrier split where its kind changes)
+    static segOverlap(car, wall, i, scale, joinedStart = false, joinedEnd = false) {
+        const a = wall[i], b = wall[i + 1], ex = b.x - a.x, ey = b.y - a.y, l2 = ex * ex + ey * ey;
+        if (!l2) return null;
+        const raw = ((car.x - a.x) * ex + (car.y - a.y) * ey) / l2;
+        if ((raw < 0 && (i > 0 || joinedStart)) || (raw > 1 && (i + 2 < wall.length || joinedEnd))) return null;
+        const t = Math.max(0, Math.min(1, raw));
+        const dx = car.x - (a.x + t * ex), dy = car.y - (a.y + t * ey), d = Math.hypot(dx, dy);
+        if (d < 1e-9) return null;
+        const nx = dx / d, ny = dy / d, depth = this.carReach(car, -nx, -ny, scale) - d; // box reach toward the wall
+        return depth > 0 ? { nx, ny, depth } : null;
+    }
+
     // Car rectangle against a wall polyline: deepest poke-through and the way out (n from wall to car)
     static wallOverlap(car, wall, scale) {
         let best = null;
         for (let i = 0; i + 1 < wall.length; i++) {
-            const a = wall[i], b = wall[i + 1], ex = b.x - a.x, ey = b.y - a.y, l2 = ex * ex + ey * ey;
-            if (!l2) continue;
-            const t = Math.max(0, Math.min(1, ((car.x - a.x) * ex + (car.y - a.y) * ey) / l2));
-            const dx = car.x - (a.x + t * ex), dy = car.y - (a.y + t * ey), d = Math.hypot(dx, dy);
-            if (d < 1e-9) continue;
-            const nx = dx / d, ny = dy / d, depth = this.carReach(car, -nx, -ny, scale) - d; // box reach toward the wall
-            if (depth > 0 && (!best || depth > best.depth)) best = { nx, ny, depth };
+            const o = this.segOverlap(car, wall, i, scale);
+            if (o && (!best || o.depth > best.depth)) best = o;
         }
         return best;
     }
