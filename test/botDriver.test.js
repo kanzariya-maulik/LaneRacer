@@ -199,3 +199,34 @@ test('standing start: bots hold their grid columns off the line, race each other
     assert.notStrictEqual(order(), early, 'places changed on the run to and through turn 1');
     assert.ok(cars().every((p) => p.lap >= 1 || p.speed > 0), 'nobody stopped');
 });
+
+for (const v0 of [10, 0]) test(`a bot in the Ascari gravel at ${v0} m/s gets back on the road`, async () => {
+    const D = await import('../public/js/sim/drive.js');
+    const t = Track.load('monza'), P = t.path, n = P.length, sc = t.scale; // own copy: the gravel added below stays here
+    // Ascari: the slowest point 3.6–4.4 km into the lap; a gravel trap on its right from the kerb out 40 m, 150 m long
+    const lapM = (i) => ((((t.cum[i] - t.startS) % t.cum[n]) + t.cum[n]) % t.cum[n]) / sc;
+    let apex = -1;
+    for (let i = 0; i < n; i++) if (lapM(i) > 3600 && lapM(i) < 4400 && (apex < 0 || t.safeSpeed[i] < t.safeSpeed[apex])) apex = i;
+    const norm = (i) => { const a = P[(i - 1 + n) % n], b = P[(i + 1) % n], l = Math.hypot(b.x - a.x, b.y - a.y); return [-(b.y - a.y) / l, (b.x - a.x) / l]; };
+    const out = [], inn = [];
+    for (let i = apex - 8; i <= apex + 8; i++) { const k = (i + n) % n, [nx, ny] = norm(k), e = t.edgeR[k] + t.kerbR[k] + 0.5 * sc; inn.push({ x: P[k].x + nx * e, y: P[k].y + ny * e }); out.push({ x: P[k].x + nx * (e + 40 * sc), y: P[k].y + ny * (e + 40 * sc) }); }
+    t.build.surfaces.push({ kind: 'gravel', poly: [...inn, ...out.reverse()], src: 'test' });
+    const bot = fillGrid([], 'medium', 11)[0];
+    bot.ai.mistake = 0;
+    const g = new Game(io, [bot], t, { ...RACE, rng: () => 0.5 }, () => {});
+    g.release();
+    const p = g.players[bot.id], [nx, ny] = norm(apex), b = P[(apex + 1) % n], ang = Math.atan2(b.y - P[apex].y, b.x - P[apex].x), off = t.edgeR[apex] + t.kerbR[apex] + 5 * sc; // 5 m into the gravel (the generated barrier stands 13 m out)
+    Object.assign(p, { x: P[apex].x + nx * off, y: P[apex].y + ny * off, angle: ang, vx: Math.cos(ang) * v0 * sc, vy: Math.sin(ang) * v0 * sc, speed: v0 * sc, roadI: apex });
+    assert.strictEqual(D.surfaceUnder(t, require('../src/game/Physics').nearestOnTrack(p.x, p.y, t), p.x, p.y), 'gravel', 'starts in the gravel');
+    let back = -1, prev = v0, hits = 0;
+    for (let k = 0; k < 60 * 15 && back < 0; k++) {
+        g.update();
+        const v = Math.abs(p.speed) / sc;
+        if (prev > 10 && v < prev * 0.75) hits++;
+        prev = v;
+        const nr = require('../src/game/Physics').nearestOnTrack(p.x, p.y, t);
+        if (D.surfaceUnder(t, nr, p.x, p.y) === 'road') back = k;
+    }
+    assert.ok(back >= 0, 'still off the road after 15 s');
+    assert.strictEqual(hits, 0, 'hit a wall getting out');
+});

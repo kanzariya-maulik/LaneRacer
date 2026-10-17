@@ -25,8 +25,8 @@ for (const id of ['monza', 'monaco', 'spa']) {
     });
 }
 
-test('High help still makes every corner 2 m either side of the racing line (Spa) and on worn tyres (Monaco)', () => {
-    for (const offsetM of [-2, 2]) {
+test('High help still makes every corner 1 m either side of the racing line (Spa) and on worn tyres (Monaco)', () => {
+    for (const offsetM of [-1, 1]) { // half a car off the line: at real width, 2 m is over the kerb
         const r = driveLap('spa', '100,100', { driver: 'flat', offsetM });
         assert.ok(r.finished && r.off === 0 && r.walls === 0, `${offsetM} m off the line: off ${r.off}, walls ${r.walls}`);
     }

@@ -506,17 +506,16 @@ test('track limits: one violation per excursion, re-armed back on track', () => 
     assert.strictEqual(p.limits, 2);
 });
 
-test('track limits are the real white line: the asphalt run-off beyond it is out, though still road', () => {
+test('track limits are the real white line: fully past it on a straight is wide, the lap stops counting', () => {
     const { events, io: sio } = spy();
     const g = new Game(sio, [lp('a')], monza, RACE, () => {});
     g.release();
-    // where the run-off is widest: the car fully past the right-hand white line, still on the drawn road
-    const p = g.players.a, i = monza.edgeR.reduce((b, e, k) => (e < monza.edgeR[b] ? k : b), 0), q = monza.path[i];
+    // on the main straight (point 5): the car fully past the right-hand white line
+    const p = g.players.a, i = 5, q = monza.path[i];
     const h = Math.atan2(monza.path[i + 1].y - q.y, monza.path[i + 1].x - q.x), off = monza.edgeR[i] + (Physics.CAR_HALF_WIDTH_M + 0.3) * monza.scale;
-    assert.ok(off < monza.width / 2, 'run-off wide enough here');
     p.x = q.x - Math.sin(h) * off; p.y = q.y + Math.cos(h) * off;
     g.checkLimits(p, Physics.nearestOnTrack(p.x, p.y, monza));
-    // the widest run-off is on a straight: out of the line, but only "wide" (no strike), the lap stops counting
+    // a straight: out of the line, but only "wide" (no strike), the lap stops counting
     assert.strictEqual(p.limits, 0);
     assert.strictEqual(p.lapValid, false);
     assert.ok(events.some(([ev, d]) => ev === 'track_limits' && d.kind === 'wide'));

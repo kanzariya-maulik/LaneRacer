@@ -9,7 +9,7 @@ const Physics = require('../Physics');
 
 const IDLE = Object.freeze({ throttle: 0, brake: 0, steer: 0, drs: false });
 const SPEED_LOOK_S = 0.25;                             // speed target read this far ahead (throttle/brake response)
-const EDGE_M = 1.5;                                    // lane moves stay this far inside the white lines
+const EDGE_M = 1.0;                                    // lane moves stay this far inside the white lines (real width)
 const LANE_RATE_MS = 3;                                // sideways moves at most this fast
 const PIT_APPROACH_M = 40, PIT_SETUP_M = 300, PIT_DEC = 10; // box called: over to the pit side and down to the limit from PIT_SETUP_M, the pit assist steers in for the last PIT_APPROACH_M
 // Tuned by lap tests (test/botDriver.test.js): steering aim (s of travel, m bounds), steering gain (the grip cap makes the
@@ -143,11 +143,12 @@ function drive(p, ctx) {
         b.start = ctx.mode === 'race' && ctx.time < 1 ? { lane: ((p.x - P.x) * N.x + (p.y - P.y) * N.y - t.racingLine.offset[b.idx]) / sc, t1: false } : null;
         if (b.start) b.lane = b.start.lane;
     }
-    // Stuck (nose in a wall, beached): back off for a second with the wheel the other way, then drive on
+    // Stuck (nose in a wall, beached): back off for a second with the wheel the other way, then drive on. Under 1 m/s: a
+    // car crawling out of gravel passes 1 m/s within a second (0.15 g), a car against a wall doesn't
     const r = scan(p, ctx, v);
     if (b.reverse > 0) { b.reverse -= ctx.dt; return { throttle: 0, brake: 1, steer: -b.revSteer, drs: false }; } // brake at a standstill reverses
     const clearBehind = !r.behind || -r.behind.f > 15, queued = r.ahead && r.ahead.f < 20; // held up isn't stuck; never back into someone
-    b.slowS = v < 1.5 && ctx.time > (ai.reaction || 0) + 3 && clearBehind && !queued ? (b.slowS || 0) + ctx.dt : 0;
+    b.slowS = v < 1.0 && ctx.time > (ai.reaction || 0) + 3 && clearBehind && !queued ? (b.slowS || 0) + ctx.dt : 0;
     if (b.slowS > 1.5) { b.slowS = 0; b.reverse = 1; b.revSteer = Math.sign(p.input?.steer || 1); }
     const pitting = ctx.mode === 'race' ? p.boxCall === 'this' : b.wantPit; // race: the game says this lap or next
     const toPit = pitting && t.pit && p.box ? ctx.toEntryM(p) : Infinity;
@@ -197,7 +198,7 @@ function drive(p, ctx) {
     const steer = steerTo(p, t.path[j].x + L.N[j].x * o, t.path[j].y + L.N[j].y * o, sc, v);
     const err = vt - v;
     const throttle = err > 0 ? Math.min(1, 0.35 + err * 0.5) : 0, brake = err < -0.5 ? Math.min(1, -err * 0.3) : 0;
-    const lift = Math.abs(steer) > 0.95 ? 0.2 : 1; // at full lock it can't make the turn: lift like a driver would
+    const lift = Math.abs(steer) > 0.95 && v > 8 ? 0.2 : 1; // at full lock at speed it can't make the turn: lift like a driver would (crawling out of gravel it needs the power)
     return { throttle: (bogging ? Math.min(throttle, 0.6) : throttle) * lift, brake, steer, drs: !!p.drsAvailable && brake === 0 };
 }
 
