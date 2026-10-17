@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { step, C, parseAssist } = require('../src/game/CarPhysics');
+const GRASS = { mu: C.GRASS_MU, drag: C.GRASS_DRAG, driveG: C.GRASS_DRIVE_G };
 
 const DT = 1 / 60, S = 6;
 const mk = (v = 0) => ({ x: 0, y: 0, angle: 0, vx: v * S, vy: 0, speed: v * S, steer: 0 });
@@ -78,7 +79,7 @@ test('brake at standstill reverses, capped at 20 km/h', () => {
 
 test('grass slows the car at least 0.25 g', () => {
     const c = mk(30);
-    for (let i = 0; i < 60; i++) step(c, { throttle: 0, brake: 0, steer: 0 }, DT, S, { mu: C.GRASS_MU, drag: C.GRASS_DRAG, driveG: C.GRASS_DRIVE_G });
+    for (let i = 0; i < 60; i++) step(c, { throttle: 0, brake: 0, steer: 0 }, DT, S, GRASS);
     assert.ok((30 - c.speed / S) / C.G >= 0.25);
 });
 
@@ -109,7 +110,7 @@ test('braking into a corner (S + full lock at 130 km/h) still turns tighter than
 
 test('on grass at 60 km/h full lock gets back within a 24 m radius', () => {
     const c = mk(60 / 3.6), d0 = vDir(c);
-    for (let i = 0; i < 30; i++) step(c, { throttle: 1, brake: 0, steer: 1 }, DT, S, true);
+    for (let i = 0; i < 30; i++) step(c, { throttle: 1, brake: 0, steer: 1 }, DT, S, GRASS);
     const r = (Math.hypot(c.vx, c.vy) / S) / ((vDir(c) - d0) / 0.5);
     assert.ok(r <= 24, `radius ${r} m`);
 });
@@ -126,16 +127,16 @@ test('high-speed steering is progressive: a light tap at 290 km/h is well below 
 
 test('grass: a 30 m cut at 150 km/h on full throttle loses more than 20 km/h', () => {
     const c = mk(150 / 3.6);
-    while (c.x / S < 30) step(c, FULL, DT, S, true);
+    while (c.x / S < 30) step(c, FULL, DT, S, GRASS);
     assert.ok(150 - kmh(c) > 20, `lost ${(150 - kmh(c)).toFixed(1)} km/h`);
 });
 
 test('grass: full throttle levels off below 110 km/h, and a stopped car can still drive away', () => {
     const fast = mk(150 / 3.6);
-    for (let i = 0; i < 120; i++) step(fast, FULL, DT, S, true);
+    for (let i = 0; i < 120; i++) step(fast, FULL, DT, S, GRASS);
     assert.ok(kmh(fast) < 110, `${kmh(fast).toFixed(0)} km/h after 2 s`);
     const stopped = mk(0);
-    for (let i = 0; i < 300; i++) step(stopped, FULL, DT, S, true);
+    for (let i = 0; i < 300; i++) step(stopped, FULL, DT, S, GRASS);
     assert.ok(kmh(stopped) > 20, `${kmh(stopped).toFixed(0)} km/h after 5 s from rest`);
 });
 
