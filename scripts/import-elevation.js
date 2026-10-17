@@ -6,7 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
-const { SCALE, WIDTH_MULT, SOURCES, only } = require('./import-tracks');
+const { SCALE, SOURCES, only } = require('./import-tracks');
 const { readTiff } = require('./dem');
 
 const OUT_DIR = path.join(__dirname, '..', 'data', 'tracks');
@@ -80,7 +80,7 @@ async function fitF1(src) {
     const C = [0];
     for (let i = 1; i <= n; i++) C.push(C[i - 1] + Math.hypot(P[i % n].x - P[i - 1].x, P[i % n].y - P[i - 1].y));
     const L = C[n];
-    const realHalf = track.width / SCALE / WIDTH_MULT / 2, MAX_OFF_M = realHalf + OFF_MARGIN_M; // import-tracks widened the real track
+    const realHalf = track.width / SCALE / 2, MAX_OFF_M = realHalf + OFF_MARGIN_M;
     const pit = track.pit && track.pit.path.map((q) => ({ x: q.x / SCALE, y: q.y / SCALE }));
     const at = (m) => {
         m = ((m % L) + L) % L;

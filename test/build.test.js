@@ -12,10 +12,7 @@ const SURFACES = ['road', 'kerb', 'asphalt', 'paint', 'astroturf', 'grass', 'gra
 const STYLES = ['flat', 'serrated', 'sausage', 'negative', 'double'];
 const BARRIERS = ['concrete', 'armco', 'tyres', 'tecpro', 'wall'];
 const tracks = Track.loadAll();
-const buildOf = (id) => {
-    const f = path.join(DATA, `${id}.build.json`);
-    return fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : B.defaultBuild(tracks[id]);
-};
+const buildOf = (id) => tracks[id].build; // world units: the file, or generated
 
 // Barriers drawn into a 1 m grid; a 4-connected fill from the start line must never reach the grid's border
 function leaks(t, walls) {
@@ -49,13 +46,13 @@ for (const id of Track.TRACK_IDS) {
     });
 
     test(`${id}: walls contain the track`, () => {
-        const t = tracks[id], b = B.toWorld(buildOf(id), t.scale);
+        const t = tracks[id], b = buildOf(id);
         const leak = leaks(t, [...b.barriers, ...(t.pit ? [{ pts: t.pit.wall }] : [])]);
         assert.strictEqual(leak, null, `${id}: the fill reaches the edge near ${JSON.stringify(leak)} m`);
     });
 
     test(`${id}: no barrier on the road`, () => {
-        const t = tracks[id], raw = JSON.parse(fs.readFileSync(path.join(DATA, `${id}.json`), 'utf8')), b = B.toWorld(buildOf(id), t.scale);
+        const t = tracks[id], raw = JSON.parse(fs.readFileSync(path.join(DATA, `${id}.json`), 'utf8')), b = buildOf(id);
         for (const w of b.barriers) for (const p of w.pts) {
             const n = Physics.nearestOnTrack(p.x, p.y, t), half = Math.max(...raw.edges[n.i]) * t.scale; // the real road there
             assert.ok(n.dist > half, `${id}: barrier at ${p.x / t.scale},${-p.y / t.scale} m on the road`);

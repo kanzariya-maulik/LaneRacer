@@ -29,8 +29,8 @@ function runs(E, keep) {
 // The area cars may use today: within the barrier distance (the real edge on that side + 13.3 m) of the track, or of
 // the pit lane (its half width + 2 m). Signed distance on a 1 m grid of points: < 0 inside. Two legs closer than two
 // barrier distances share one area (no island of barrier between them, as Track.js openWalls did)
-function reachField(t) {
-    const P = t.path, n = P.length, sc = t.scale, cell = 1 * sc, maxLim = (Math.max(...t.edgeR, ...t.edgeL) / sc + WALL_OFFSET_M + 2) * sc;
+function reachField(t, wallM) {
+    const P = t.path, n = P.length, sc = t.scale, cell = 1 * sc, maxLim = (Math.max(...t.edgeR, ...t.edgeL) / sc + wallM + 2) * sc;
     const xs = P.map((p) => p.x), ys = P.map((p) => p.y), x0 = Math.min(...xs) - maxLim - 2 * cell, y0 = Math.min(...ys) - maxLim - 2 * cell;
     const w = Math.ceil((Math.max(...xs) + maxLim + 2 * cell - x0) / cell) + 1, h = Math.ceil((Math.max(...ys) + maxLim + 2 * cell - y0) / cell) + 1;
     const f = new Float32Array(w * h).fill(Infinity);
@@ -46,7 +46,7 @@ function reachField(t) {
             if (v < f[j * w + i]) f[j * w + i] = v;
         }
     };
-    const lim = (e) => e + WALL_OFFSET_M * sc;
+    const lim = (e) => e + wallM * sc;
     for (let i = 0; i < n; i++) { const k = (i + 1) % n; capsule(P[i], P[k], [lim(t.edgeL[i]), lim(t.edgeL[k])], [lim(t.edgeR[i]), lim(t.edgeR[k])]); }
     if (t.pit) { const Q = t.pit.path, r = t.pit.width / 2 + PIT_RUNOFF_M * sc; for (let i = 0; i + 1 < Q.length; i++) capsule(Q[i], Q[i + 1], [r, r], [r, r]); }
     return { f, w, h, x0, y0, cell };
@@ -106,16 +106,17 @@ function simplify(P, tol) {
     return P.filter((_, i) => keep[i]);
 }
 
-export function defaultBuild(t) {
+// wallM: metres past the edge (default 13.3; Monaco's circuits.json barrierM 1.5 until its real data)
+export function defaultBuild(t, wallM = WALL_OFFSET_M) {
     const P = t.path, n = P.length, sc = t.scale;
-    const barriers = outline(reachField(t)).map((loop) => ({ kind: 'concrete', h: 1, fence: 3, pts: simplify(loop, 0.1 * sc).map((p) => toM(t, p)), src: 'generated' }));
+    const barriers = outline(reachField(t, wallM)).map((loop) => ({ kind: 'concrete', h: 1, fence: 3, pts: simplify(loop, 0.1 * sc).map((p) => toM(t, p)), src: 'generated' }));
     // Kerbs where the corner is tight (± 2 points so they don't flicker on and off), both sides, flat red/white
     const turn = P.map((_, i) => { let d = heading(P, (i + 1) % n) - heading(P, i); d = Math.atan2(Math.sin(d), Math.cos(d)); return Math.abs(d) > KERB_TURN; });
     const curvy = turn.map((_, i) => [-2, -1, 0, 1, 2].some((d) => turn[(i + d + n) % n]));
     const kerbs = [];
     for (const r of runs(P.map((_, i) => i), curvy)) for (const s of ['R', 'L'])
         kerbs.push({ side: s, fromM: +lapM(t, r[0]).toFixed(1), toM: +lapM(t, (r.at(-1) + 1) % n).toFixed(1), style: 'flat', colors: ['red', 'white'], w: 1.5, src: 'generated' });
-    return { id: t.id, asphalt: { tone: 0.6, resurfaced: null, patches: [] }, surfaces: [], kerbs, barriers, features: [], sources: ['generated: today\'s barrier rule (real edge + 13.3 m), as the outline of the area it allows'], unconfirmed: ['all'] };
+    return { id: t.id, asphalt: { tone: 0.6, resurfaced: null, patches: [] }, surfaces: [], kerbs, barriers, features: [], sources: [`generated: today's barrier rule (real edge + ${+wallM.toFixed(1)} m), as the outline of the area it allows`], unconfirmed: ['all'] };
 }
 
 // Metres (TUMFTM, y north) → world units (y down the screen), every [x, y] as { x, y }

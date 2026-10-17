@@ -7,7 +7,6 @@ const { osmCentreline } = require('./osm-centreline');
 const path = require('path');
 
 const SCALE = 6;        // game units per metre — car model, physics and HUD assume this
-const WIDTH_MULT = 2;   // real widths feel too tight for a full grid side by side (src/game/Track.js: the same)
 const STEP = 2;         // dataset is ~5 m/point; keep every 2nd → ~10 m
 
 const BASE = 'https://raw.githubusercontent.com/TUMFTM/racetrack-database/master/tracks/';
@@ -47,7 +46,7 @@ function convert(csvText, meta) {
         .filter(l => l && !l.startsWith('#'))
         .map(l => l.split(',').map(Number));
     const widths = rows.map(r => r[2] + r[3]).sort((a, b) => a - b);
-    const width = Math.round(widths[Math.floor(widths.length / 2)] * WIDTH_MULT * SCALE);
+    const width = Math.round(widths[Math.floor(widths.length / 2)] * SCALE) // the real median width;
     // CSV y points north; game y points down the screen, so flip it
     const kept = rows.filter((_, i) => i % (meta.step || STEP) === 0); // step 1: every 5 m point (Monaco's hairpins)
     const pts = kept.map(([x, y]) => ({ x: +(x * SCALE).toFixed(1), y: +(-y * SCALE).toFixed(1) }));
@@ -79,4 +78,4 @@ async function main() {
 
 if (require.main === module) main().catch((e) => { console.error(e); process.exit(1); });
 
-module.exports = { convert, SCALE, WIDTH_MULT, BASE, SOURCES, only };
+module.exports = { convert, SCALE, BASE, SOURCES, only };

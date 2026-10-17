@@ -1,7 +1,6 @@
 // Deterministic trackside scenery from the circuit's own shape. Pure, shared by game3d.js and the node tests.
 import { pathHeights } from './sim/elevation.js';
 import { themeOf } from './themes.js';
-export const WALL_OFFSET = 80;          // world units past the track edge (public/js/sim/drive.js)
 const PIT_RUNOFF_M = 2;                 // drive.js: the pit lane's barrier this far outside its edge
 const SLOW_MS = 150 / 3.6;              // corners slower than this get gravel, tyre walls, a grandstand
 const TEXTS = ['LAN RACE', 'FULL SEND', 'DRS ZONE', 'BOX BOX', 'LIGHTS OUT', 'PUSH PUSH'];
@@ -89,7 +88,8 @@ export function untangle(path, E) {
     return E;
 }
 
-export const safeDist = (t) => t.width / 2 + (t.wallOffset ?? WALL_OFFSET) + 3 * t.scale;
+// How far from the centreline anything may stand beside point i (side +1 right, -1 left): 3 m behind the barrier there
+export const clearAt = (t, i, side) => (side > 0 ? t.barrierR[i] : t.barrierL[i]) + 3 * t.scale;
 
 // Spatial index of the centreline, so the ~100,000 nearest-road questions behind the terrain read a handful of segments
 // each instead of all ~600: a fine grid (40 m cells: which segments pass through) near the track, and a coarse map
@@ -190,9 +190,10 @@ export function onPit(t, x, y, extra = 0) {
 // another part of the track is nearer (inside of a hairpin, Suzuka's bridge), so it never lies over other asphalt, at
 // the pit lane, and short of a road at another height by room for a grass bank (BANK) so neither road floats over a cliff
 export function vergeReach(t, dir) {
-    const P = t.path, half = t.width / 2, max = half + (t.wallOffset ?? WALL_OFFSET);
+    const P = t.path, edge = dir > 0 ? t.edgeR : t.edgeL, wall = dir > 0 ? t.barrierR : t.barrierL;
     const step = 2 * t.scale, n = P.length;
     const r = P.map((p, i) => {
+        const half = edge[i], max = wall[i];
         const h = heading(P, i), at = (o) => {
             const q = offset(p, h, dir * o);
             if (nearestSeg(t, q.x, q.y).d < o * 0.95) return false;
@@ -224,8 +225,9 @@ export function vergeReach(t, dir) {
             if (along <= b.under / 2 + 10 * t.scale) r[i] = Math.min(r[i], wall);
         }
     }
-    // A quad joins neighbouring points: one short point between long ones would still leave a quad slanting across
-    return r.map((_, i) => Math.min(r[(i - 2 + n) % n], r[(i - 1 + n) % n], r[i], r[(i + 1) % n], r[(i + 2) % n]));
+    // A quad joins neighbouring points: one short point between long ones would still leave a quad slanting across.
+    // Never inside the point's own edge, though (the edges vary point to point: a quad would fold back over the road)
+    return r.map((_, i) => Math.max(edge[i], Math.min(r[(i - 2 + n) % n], r[(i - 1 + n) % n], r[i], r[(i + 1) % n], r[(i + 2) % n])));
 }
 
 // How far the verge edge's skirt hangs (m) per path point on one side: the grass skirt, or where the ground beside a
@@ -371,8 +373,12 @@ const meanStep = (t) => (t.cum ? t.cum[t.path.length] / t.path.length : 10 * t.s
 
 export function placeScenery(t, density, seed, theme = themeOf(t.id)) {
     const P = t.path, n = P.length, sc = t.scale, rand = rng(seed);
-    const clear = safeDist(t) + 0.5 * sc; // a little margin over the tested clearance
-    const ok = (x, y) => distTo(P, x, y) > clear && !(t.pit && distTo(t.pit.path, x, y, false) <= t.pit.width / 2 + 7 * sc);
+    // behind the barrier beside it, with a little margin over the tested clearance
+    const ok = (x, y) => {
+        const { d, j } = nearestSeg(t, x, y);
+        return d > clearAt(t, j, sideOf(P, j, x, y)) + 0.5 * sc && !(t.pit && distTo(t.pit.path, x, y, false) <= t.pit.width / 2 + 7 * sc);
+    };
+    const clear = (i, side) => clearAt(t, i, side) + 0.5 * sc; // out from point i before anything fits
 
     // Slow corners: runs of points under SLOW_MS, extended to the exit; side = outside of the turn
     const slowCorners = [];
@@ -399,9 +405,10 @@ export function placeScenery(t, density, seed, theme = themeOf(t.id)) {
         }
     };
     const startIdx = t.cum ? t.cum.findIndex((c) => c >= (t.startS || 0)) : 0;
-    stand(Math.max(0, startIdx), t.pit ? t.pit.trackSide : 1, clear + 8 * sc);
+    const si = Math.max(0, startIdx), ss = t.pit ? t.pit.trackSide : 1;
+    stand(si, ss, clear(si, ss) + 8 * sc);
     [...slowCorners].sort((a, b) => t.safeSpeed[a.apex % n] - t.safeSpeed[b.apex % n]).slice(0, 3)
-        .forEach((c) => stand(c.apex % n, c.side, clear + 10 * sc));
+        .forEach((c) => stand(c.apex % n, c.side, clear(c.apex % n, c.side) + 10 * sc));
 
     // Trees: beyond the barrier, denser further out; kinds and count from the circuit's theme
     const trees = [], kinds = Object.entries(theme.trees);
@@ -409,7 +416,7 @@ export function placeScenery(t, density, seed, theme = themeOf(t.id)) {
     const want = Math.round(n * 0.6 * density * theme.density * (10 * sc / meanStep(t)));
     for (let k = 0; k < want * 3 && trees.length < want; k++) {
         const i = Math.floor(rand() * n), side = rand() < 0.5 ? -1 : 1;
-        const q = offset(P[i], heading(P, i), side * (clear + (15 + 105 * Math.sqrt(rand())) * sc));
+        const q = offset(P[i], heading(P, i), side * (clear(i, side) + (15 + 105 * Math.sqrt(rand())) * sc));
         if (ok(q.x, q.y)) trees.push({ x: q.x, y: q.y, size: rand() < 0.7 ? 1 : 2, kind: kindAt(rand()) });
     }
 
@@ -423,20 +430,20 @@ export function placeScenery(t, density, seed, theme = themeOf(t.id)) {
     if (theme.city === 2) { // streets lined with buildings, right behind the barriers (Monaco)
         for (let i = 0; i < n; i += 2) for (const side of [-1, 1]) for (const row of [0, 1, 2]) {
             const w = 14 + rand() * 16, d = 12 + rand() * 10;
-            block(i, side, clear + (6 + d / 2 + row * 26 + rand() * 6) * sc, w, d, 12 + rand() * (row ? 40 : 22));
+            block(i, side, clear(i, side) + (6 + d / 2 + row * 26 + rand() * 6) * sc, w, d, 12 + rand() * (row ? 40 : 22));
         }
     } else if (theme.city === 1) { // a skyline past the trees
         const want2 = Math.round(80 * density);
         for (let k = 0; k < want2 * 4 && buildings.length < want2; k++) {
             const i = Math.floor(rand() * n), side = rand() < 0.5 ? -1 : 1;
-            block(i, side, clear + (260 + rand() * 700) * sc, 20 + rand() * 30, 20 + rand() * 25, 15 + rand() * rand() * 90);
+            block(i, side, clear(i, side) + (260 + rand() * 700) * sc, 20 + rand() * 30, 20 + rand() * 25, 15 + rand() * rand() * 90);
         }
     }
 
     // Marshal posts behind the barrier every ~300 m, alternating sides
     const posts = [];
     for (let s = 150 * sc, k = 0; t.cum && s < t.cum[n]; s += 300 * sc, k++) {
-        const i = Math.max(0, t.cum.findIndex((c) => c >= s)) % n, side = k % 2 ? 1 : -1, h = heading(P, i), q = offset(P[i], h, side * (clear + 1 * sc));
+        const i = Math.max(0, t.cum.findIndex((c) => c >= s)) % n, side = k % 2 ? 1 : -1, h = heading(P, i), q = offset(P[i], h, side * (clear(i, side) + 1 * sc));
         if (ok(q.x, q.y)) posts.push({ x: q.x, y: q.y, angle: h });
     }
 
@@ -446,7 +453,7 @@ export function placeScenery(t, density, seed, theme = themeOf(t.id)) {
         if (t.tunnels?.some(([a, b]) => s >= a && s <= b)) continue; // Monaco's tunnel has its own lamps
         const i = Math.max(0, t.cum.findIndex((c) => c >= s)) % n, side = k % 2 ? 1 : -1, h = heading(P, i);
         for (const out of [3, 8, 14]) { // just behind the barrier, or a little further back where that's taken
-            const q = offset(P[i], h, side * (clear + out * sc));
+            const q = offset(P[i], h, side * (clear(i, side) + out * sc));
             if (ok(q.x, q.y)) { floodlights.push({ x: q.x, y: q.y, angle: h, side }); break; }
         }
     }
@@ -458,7 +465,7 @@ export function placeScenery(t, density, seed, theme = themeOf(t.id)) {
         for (const m of [300, 200, 100]) {
             const s = (((entry - m * sc) % t.cum[n]) + t.cum[n]) % t.cum[n], i = Math.max(0, t.cum.findIndex((x) => x >= s)) % n;
             if (t.safeSpeed[i] < 90) continue; // only on the straight before it
-            const h = heading(P, i), q = offset(P[i], h, c.side * (clear + 0.5 * sc));
+            const h = heading(P, i), q = offset(P[i], h, c.side * (clear(i, c.side) + 0.5 * sc));
             if (ok(q.x, q.y)) boards.push({ x: q.x, y: q.y, angle: h, side: c.side, text: String(m) });
         }
     }
@@ -468,7 +475,7 @@ export function placeScenery(t, density, seed, theme = themeOf(t.id)) {
     if (theme.landmark) {
         const i = Math.max(0, startIdx), side = t.pit ? -t.pit.trackSide : 1, h = heading(P, i);
         for (let out = 120; out < 600 && !landmark; out += 20) {
-            const q = offset(P[i], h, side * (clear + out * sc));
+            const q = offset(P[i], h, side * (clear(i, side) + out * sc));
             if (fits(q, h, 70, 70)) landmark = { x: q.x, y: q.y, angle: h, kind: theme.landmark };
         }
     }
@@ -479,7 +486,7 @@ export function placeScenery(t, density, seed, theme = themeOf(t.id)) {
     for (let i = 0, k = 0; i < n; i += every, k++) {
         if (t.safeSpeed[i] < 100) continue;
         const side = k % 2 ? 1 : -1, h = heading(P, i);
-        const q = offset(P[i], h, side * (clear + 1 * sc));
+        const q = offset(P[i], h, side * (clear(i, side) + 1 * sc));
         if (ok(q.x, q.y)) billboards.push({ x: q.x, y: q.y, angle: h, side, text: TEXTS[k % TEXTS.length] });
     }
 

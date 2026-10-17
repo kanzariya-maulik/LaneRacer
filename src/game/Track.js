@@ -10,10 +10,10 @@ const DATA_DIR = path.join(__dirname, '..', '..', 'data', 'tracks');
 const CHECKPOINT_COUNT = 16;
 const GRID_SLOTS = 22; // 11 teams x 2 drivers
 const GRID_GAP_M = 8;  // metres between consecutive (staggered) grid slots
-const WIDTH_MULT = 2;   // scripts/import-tracks.js: the road is drawn this much wider than the real track
-const LIMIT_MULT = 4 / 3; // the white lines (track limits) this much wider than the real ones: widened with the road,
-                          // keeping the run-off past them the share of the road it was on the 1.5x-wide tracks
-const WALL_OFFSET = 80; // matches public/js/sim/drive.js
+const BuildData = require('../../public/js/sim/build.js'); // shared with the browser
+const Walls = require('../../public/js/sim/walls.js');
+const BARRIER_FAR_M = 400; // barrierR / barrierL: no wall within this, square to the road, counts as this far
+const CP_RADIUS_MAX_M = 120; // a checkpoint reaches past the barriers beside it (escape roads), but no further than this
 // 2022 constructors' order, then the Suzuka special in its own garage
 const GARAGE_ORDER = ['redbull', 'ferrari', 'mercedes', 'alpine', 'mclaren', 'alfaromeo', 'astonmartin', 'haas', 'alphatauri', 'williams', 'redbull-suzuka'];
 const GARAGE_PITCH_M = 18;
@@ -259,34 +259,12 @@ function buildBridges(t) {
     return bridges;
 }
 
-// Where no barrier stands, per point and side ([right, left], 1 = open): the barrier is the line a fixed distance from the
-// nearest track, so between two legs of track not far apart (inside a hairpin: La Source) it fenced off a thin island of
-// grass, stubs of barrier standing in the infield. Open where another leg (more than OPEN_APART_M along the lap) is within
-// two barrier distances of the barrier line: the grass between the legs stays open, as at the real circuits (cutting it
-// still breaks the lap's checkpoints and track limits). Not near a bridge (its levels keep their own walls)
-const OPEN_APART_M = 60;
+const OPEN_APART_M = 60; // buildMedians: legs this far apart along the lap
 const lapGap = (t, a, b) => { const total = t.cum[t.path.length], d = Math.abs(t.cum[a] - t.cum[b]); return Math.min(d, total - d); };
 const nearBridge = (t, i) => (t.bridges || []).some((b) => [b.lower.s, b.upper.s].some((s) => {
     const total = t.cum[t.path.length], d = Math.abs(t.cum[i] - s);
     return Math.min(d, total - d) < b.under / 2 + 40 * t.scale;
 }));
-function openWalls(t) {
-    const P = t.path, n = P.length, wall = t.width / 2 + t.wallOffset, apart = OPEN_APART_M * t.scale;
-    const out = [new Array(n).fill(0), new Array(n).fill(0)];
-    for (let i = 0; i < n; i++) {
-        if (nearBridge(t, i)) continue;
-        for (const [k, side] of [[0, 1], [1, -1]]) {
-            const f = lateral(pointAt(P, t.cum, t.cum[i]), side * wall);
-            for (let j = 0; j < n && !out[k][i]; j++) {
-                if (lapGap(t, i, j) <= apart) continue;
-                const a = P[j], b = P[(j + 1) % n], ex = b.x - a.x, ey = b.y - a.y, l2 = ex * ex + ey * ey;
-                const u = l2 ? Math.max(0, Math.min(1, ((f.x - a.x) * ex + (f.y - a.y) * ey) / l2)) : 0;
-                if (Math.hypot(f.x - a.x - u * ex, f.y - a.y - u * ey) < 2 * wall) out[k][i] = 1;
-            }
-        }
-    }
-    return out;
-}
 
 // Where two legs of the track, far apart along the lap, run closer than their two roads and a strip of run-off (the
 // way into Monaco's Fairmont hairpin and the way out, 14 m apart), their asphalt would run together into one: a barrier
@@ -297,7 +275,7 @@ function openWalls(t) {
 const MEDIAN_RUNOFF_M = 1.5;
 function buildMedians(t) {
     const P = t.path, n = P.length, apart = OPEN_APART_M * t.scale;
-    const close = t.width + 2 * Math.min(t.wallOffset, MEDIAN_RUNOFF_M * t.scale);
+    const close = t.width + 2 * MEDIAN_RUNOFF_M * t.scale;
     const mid = P.map((p, i) => {
         if (nearBridge(t, i)) return null;
         let best = null;
@@ -336,8 +314,6 @@ function build(raw, circuit = {}) {
     };
     const startS = onLap(circuit.startLineM || 0);
     const fromStart = (m) => (((onLap((circuit.startLineM || 0) + m) - startS) % total) + total) % total; // metres past the start line
-    // Barrier distance past the drawn edge: WALL_OFFSET, or the circuit's own (Monaco: walls right beside the street)
-    const wallOffset = circuit.barrierM != null ? circuit.barrierM * scale : WALL_OFFSET;
     const start = pointAt(pts, cum, startS);
 
     // Checkpoints: the start line and both sector lines are checkpoints, the rest evenly spaced per sector
@@ -354,16 +330,15 @@ function build(raw, circuit = {}) {
         sectorCps.push(checkpoints.length);
         for (let j = 0; j < count; j++) {
             const p = pointAt(pts, cum, startS + bounds[k] + (j * len) / count);
-            checkpoints.push({ x: p.x, y: p.y, radius: width / 2 + wallOffset, s: bounds[k] + (j * len) / count }); // s: lap distance
+            checkpoints.push({ x: p.x, y: p.y, radius: 0, s: bounds[k] + (j * len) / count }); // s: lap distance; radius once the walls are known
         }
     }
 
     // Staggered two-column grid behind the start line, or behind a separate grid line where the circuit has one
     // (gridLineM metres past the timing line: Monza, Suzuka); -1 = driver's left (y points down the screen)
     const gridS = startS + fromStart(circuit.gridLineM || 0);
-    const limit = (width / WIDTH_MULT / 2) * LIMIT_MULT; // the median white line (where per-point edges are missing)
-    // White lines per point: the real edges from TUMFTM, right and left of the driver, widened, kept on the drawn road
-    const edge = (k) => pts.map((_, i) => Math.min(raw.edges ? raw.edges[i][k] * LIMIT_MULT * scale : limit, width / 2 - 0.5 * scale));
+    // White lines per point: the real edges (the survey's), right and left of the driver: the track limits
+    const edge = (k) => pts.map((_, i) => (raw.edges ? raw.edges[i][k] * scale : width / 2)); // no survey: half the width
     const edgeR = edge(0), edgeL = edge(1);
     const edgeOf = (s, side) => { // at lap distance s; side +1 right, -1 left
         const total = cum[pts.length]; s = ((s % total) + total) % total;
@@ -387,11 +362,29 @@ function build(raw, circuit = {}) {
     // the car physics (public/js/sim/elevation.js)
     const shape = raw.z ? Elevation.profile(raw.z, cum, scale) : { grade: null, vcurv: null };
     const tunnels = (raw.tunnels || []).map(([a, b]) => [onLap(a), onLap(b)]); // lap distances from point 0 (Monaco)
-    const track = { id: raw.id, name: raw.name, scale, width, wallOffset, tunnels, limit, edgeR, edgeL, gridLine, path: pts, z: raw.z || null, grade: shape.grade, vcurv: shape.vcurv, cum, start, startS, drsZones, checkpoints, sectorCps, startPositions, safeSpeed: Assist.safeSpeeds(pts, scale, shape.vcurv), pit: null };
+    const track = { id: raw.id, name: raw.name, scale, width, tunnels, edgeR, edgeL, gridLine, path: pts, z: raw.z || null, grade: shape.grade, vcurv: shape.vcurv, cum, start, startS, drsZones, checkpoints, sectorCps, startPositions, safeSpeed: Assist.safeSpeeds(pts, scale, shape.vcurv), pit: null };
     if (raw.pit) track.pit = buildPit(raw, circuit, track);
     track.bridges = buildBridges(track);
-    track.openWall = openWalls(track);
     track.medians = buildMedians(track);
+    // As built (data/tracks/<id>.build.json, else today's barrier rule generated): world units, sent with the track
+    const file = path.join(DATA_DIR, `${raw.id}.build.json`);
+    track.build = BuildData.toWorld(fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : BuildData.defaultBuild(track, circuit.barrierM), scale);
+    track.walls = [...track.build.barriers, ...track.medians.map((m) => ({ kind: 'concrete', h: 1, fence: 3, pts: m.map(({ x, y }) => ({ x, y })), src: 'median' }))];
+    // Per point: how far the barrier stands square to the road each side, and the kerb's width there (0: none)
+    const index = Walls.wallIndex(track.walls, scale), n = pts.length, far = BARRIER_FAR_M * scale;
+    const normal = (i) => { const a = pts[(i - 1 + n) % n], b = pts[(i + 1) % n], l = Math.hypot(b.x - a.x, b.y - a.y) || 1; return [-(b.y - a.y) / l, (b.x - a.x) / l]; }; // + = right
+    track.barrierR = pts.map((p, i) => { const [nx, ny] = normal(i); return Math.min(far, Walls.rayToWall(index, p.x, p.y, nx, ny, far)); });
+    track.barrierL = pts.map((p, i) => { const [nx, ny] = normal(i); return Math.min(far, Walls.rayToWall(index, p.x, p.y, -nx, -ny, far)); });
+    const lap = pts.map((_, i) => ((((cum[i] - startS) % total) + total) % total) / scale); // metres past the start line
+    const kerb = (side) => lap.map((m) => {
+        const k = track.build.kerbs.find((q) => q.side === side && (q.fromM <= q.toM ? m >= q.fromM && m < q.toM : m >= q.fromM || m < q.toM));
+        return k ? k.w * scale : 0;
+    });
+    track.kerbR = kerb('R'); track.kerbL = kerb('L');
+    for (const cp of checkpoints) {
+        const i = Physics.nearestOnTrack(cp.x, cp.y, track).i;
+        cp.radius = Math.min(CP_RADIUS_MAX_M * scale, Math.max(track.barrierR[i], track.barrierL[i]) + 10 * scale);
+    }
     const { limit: lineLimit, ...line } = RacingLine.compute(track);
     track.racingLine = line;  // visual guide, sent to clients in game_init
     track.lineLimit = lineLimit;  // braking help's corner speeds (shared sim, sent with the track)

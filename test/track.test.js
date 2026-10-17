@@ -37,7 +37,10 @@ for (const id of Track.TRACK_IDS) {
         assert.ok(t.checkpoints.length >= 15 && t.checkpoints.length <= 19, `${t.checkpoints.length} checkpoints`);
         assert.strictEqual(t.checkpoints[0].x, t.start.x);
         assert.strictEqual(t.checkpoints[0].y, t.start.y);
-        for (const cp of t.checkpoints) assert.strictEqual(cp.radius, t.width / 2 + t.wallOffset); // out to the barrier
+        for (const cp of t.checkpoints) { // out past the barriers there, at most 120 m
+            const n = Physics.nearestOnTrack(cp.x, cp.y, t), far = Math.max(t.barrierR[n.i], t.barrierL[n.i]);
+            assert.ok(cp.radius >= Math.min(far, 110 * t.scale) && cp.radius <= 120 * t.scale, `radius ${cp.radius / t.scale} m, barrier ${far / t.scale} m`);
+        }
         const [a, b, c] = t.sectorCps;
         assert.strictEqual(a, 0);
         assert.ok(b >= 3 && c - b >= 3 && t.checkpoints.length - c >= 3, `sector cps ${t.sectorCps}`);
@@ -151,6 +154,20 @@ for (const id of Track.TRACK_IDS) {
                 assert.ok(s > pit.limStart && s < pit.limEnd, `${g.teamId} box outside the limiter zone`);
             }
         }
+    });
+
+    test(`${id}: real width: the survey's edges are the track limits, barriers beyond them, kerbs per point`, () => {
+        const raw = JSON.parse(require('fs').readFileSync(require('path').join(__dirname, '..', 'data', 'tracks', `${id}.json`), 'utf8'));
+        t.path.forEach((_, i) => {
+            assert.strictEqual(t.edgeR[i], raw.edges[i][0] * t.scale);
+            assert.strictEqual(t.edgeL[i], raw.edges[i][1] * t.scale);
+            assert.ok(t.barrierR[i] > t.edgeR[i] && t.barrierL[i] > t.edgeL[i], `barrier inside the road at point ${i}`);
+            assert.ok(t.kerbR[i] >= 0 && t.kerbL[i] >= 0);
+        });
+        assert.ok(t.walls.length > 0 && t.build && t.build.barriers.length > 0);
+        assert.ok(t.kerbR.some((k) => k > 0), 'some kerbs');
+        const median = raw.edges.map(([r, l]) => r + l).sort((a, b) => a - b)[raw.edges.length >> 1];
+        assert.ok(Math.abs(t.width / t.scale - median) <= 0.5, `width ${t.width / t.scale} m vs real median ${median} m`);
     });
 
     test(`${id}: 22 grid slots on the asphalt and not overlapping`, () => {

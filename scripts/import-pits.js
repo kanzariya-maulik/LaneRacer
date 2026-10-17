@@ -2,7 +2,7 @@
 // Pit lanes © OpenStreetMap contributors (ODbL), aligned onto the TUMFTM centrelines by robust ICP.
 const fs = require('fs');
 const path = require('path');
-const { SCALE, WIDTH_MULT, BASE, SOURCES, only } = require('./import-tracks');
+const { SCALE, BASE, SOURCES, only } = require('./import-tracks');
 const { fair } = require('../src/game/Track');
 const { densify, resample, align, nearestIndex } = require('./geo');
 const { fitF1 } = require('./import-elevation');
@@ -141,7 +141,7 @@ async function importPit(src) {
     pit = resample(pit, STEP_M);
     const file = path.join(OUT_DIR, `${src.id}.json`);
     const track = JSON.parse(fs.readFileSync(file, 'utf8'));
-    pit = await fitToCars(src, pit, P, track.width / SCALE / WIDTH_MULT / 2);
+    pit = await fitToCars(src, pit, P, track.width / SCALE / 2);
     pit = smoothLane(pit);
     pit = clearOfRoad(pit, P, track.width / SCALE / 2); // last: room for the pit wall beside the drawn (widened) road
     track.pit = {
@@ -167,7 +167,7 @@ function writeFit(src, osmFit) {
     console.log(`${src.id}: osmFit written`);
 }
 
-// The road is drawn WIDTH_MULT x the real width, so beside a tight pit straight (COTA, Zandvoort) it would cover the pit
+// The road (once drawn 2x the real width) beside a tight pit straight (COTA, Zandvoort) it would cover the pit
 // lane's inner edge and leave no room for the pit wall. Where the lane runs beside the track (not where it merges), move it
 // out to drawn edge + wall clearance + half its width, tapering at ≤ 2.5 % so the lane stays smooth. P: TUMFTM centreline
 // (m), smoothed as the game draws it (Track.js fair)
