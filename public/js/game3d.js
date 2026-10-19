@@ -7,7 +7,7 @@ import { CSMShadowNode } from 'three/addons/csm/CSMShadowNode.js';
 import { buildPost } from './postfx.js';
 import { keyboardStep, gamepadInput, liftOffBrake } from './input.js';
 import { parseAssist } from './sim/carphysics.js';
-import { LEVELS, capLevel, scaleRange, pixelRatio, resolveLevel, autoPick, shouldMeasure, stepDown, depthBias, adaptStep, frameCapped } from './quality.js';
+import { LEVELS, capLevel, scaleRange, pixelRatio, resolveLevel, autoPick, shouldMeasure, stepDown, depthBias, adaptStep, frameCapped, refreshHz } from './quality.js';
 import { placeScenery, seedOf, vergeReach, terrainHeights, terrainGround, skirtDepth, gridSampler, carveReach, onVerge, onPit, untangle, smoothPath, RENDER_STEP_M, SKIRT_M } from './scenery.js';
 import { heightAt, pathHeights } from './sim/elevation.js';
 import { buildTrackGeometry } from './trackMesh.js';
@@ -2424,7 +2424,7 @@ function drawMinimap() {
 // ---------- loop ----------
 let last = performance.now();
 // F3 / ?stats=1: network and frame-time overlay, refreshed at 4 Hz
-const frameMs = [], netstatsEl = document.getElementById('netstats');
+const frameMs = [], lobbyMs = [], netstatsEl = document.getElementById('netstats');
 let netstatsOn = new URLSearchParams(location.search).has('stats'), lastNetstats = 0;
 netstatsEl.classList.toggle('hidden', !netstatsOn);
 function drawNetstats() {
@@ -2442,7 +2442,7 @@ const fpsHist = []; let capWarned = false; // steady 30 fps = browser frame cap,
 let autoMs = 0, autoFrames = 0, autoDone = false; // auto-pick: frame time while driving
 const stats = new URLSearchParams(location.search).has('stats') ? Object.assign(document.createElement('div'), { id: 'stats' }) : null;
 if (stats) document.body.appendChild(stats);
-if (stats) window.lanraceDebug = { renderer, scene, camera, freeCam: false, setScale: (s) => post?.setScale(s), rubber: { level: rubberLevelU, layer: () => skid, tex: () => skidTex, rubberLevel } }; // ?stats=1: profiling / looking around from the console
+if (stats) window.lanraceDebug = { renderer, scene, camera, freeCam: false, setScale: (s) => post?.setScale(s), setEffects: (fx) => { post?.dispose(); post = buildPost(renderer, scene, camera, fx); post.key = fx.join(); post.setScale(res.ratio); }, rubber: { level: rubberLevelU, layer: () => skid, tex: () => skidTex, rubberLevel } }; // ?stats=1: profiling / looking around from the console
 
 // Sound + gear HUD: gearboxes for your car and every other car (cheap), audio frame in metres (track plane)
 const ownBox = new Gearbox(), remoteBoxes = new Map(), soundOthers = [];
@@ -2499,7 +2499,12 @@ function frame(now) {
     last = now;
     frameMs.push(dt * 1000);
     if (frameMs.length > 120) frameMs.shift();
-    if (clientState.status === 'LOBBY') { Sound.update(silentFrame); return; } // engines and wind fade out in the lobby
+    if (clientState.status === 'LOBBY') { // engines and wind fade out in the lobby; nothing drawn: frames come at the display's rate
+        lobbyMs.push(dt * 1000);
+        if (lobbyMs.length > 120) lobbyMs.shift();
+        Sound.update(silentFrame);
+        return;
+    }
     const paused = !!clientState.paused; // host pause: nothing is driven, cars hold where they are
     if (!paused) pollInput(dt);
     if (!world || !clientState.gameState) { Sound.update(silentFrame); return; }
@@ -2542,7 +2547,7 @@ function frame(now) {
         autoMs += dt * 1000;
         autoFrames++;
         if (autoMs > 5000) {
-            const picked = autoPick(autoMs / autoFrames, level, window.devicePixelRatio);
+            const picked = autoPick(autoMs / autoFrames, level, window.devicePixelRatio, refreshHz(lobbyMs));
             store.set('lanrace.quality.auto', picked); // used from the next race
             autoDone = true; // once per page: a stored High is measured again only on the next load
         }

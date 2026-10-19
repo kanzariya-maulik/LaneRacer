@@ -30,11 +30,13 @@ export function buildPost(renderer, scene, camera, effects) {
     const tryFx = (name, f) => { if (!fx.has(name)) return; try { color = f(color); used.push(name); } catch (e) { console.warn(`postfx: ${name} dropped`, e); } };
 
     // Contact shadows: one pass, AO on the final colour (softened) instead of a second geometry pre-pass.
-    // GTAO sizes itself to the screen: its resolution follows the internal scale or it misreads the depth (line artifacts)
+    // GTAO sizes itself to the screen: its resolution follows the internal scale or it misreads the depth (line artifacts),
+    // at half of it (AO is soft shading: no visible difference, 1.3 ms a frame back at High — 120 Hz needs 8.3 ms frames)
+    const AO_RES = 0.5;
     let aoNode = null;
     // Not on the sky (depth at the far plane: 0 reversed, 1 otherwise): on WebGL2 GTAO rings it with noise
     const surface = renderer.reversedDepthBuffer ? step(1e-7, depth.r) : step(depth.r, 0.9999999);
-    tryFx('ao', (c) => { aoNode = own(ao(depth, normal, camera)); return vec4(c.rgb.mul(mix(float(1), aoNode.getTextureNode().r, surface.mul(0.8))), c.a); });
+    tryFx('ao', (c) => { aoNode = own(ao(depth, normal, camera)); aoNode.resolutionScale = AO_RES; return vec4(c.rgb.mul(mix(float(1), aoNode.getTextureNode().r, surface.mul(0.8))), c.a); });
     tryFx('ssr', (c) => {
         const mr = scenePass.getTextureNode('metalrough');
         const r = own(ssr(own(convertToTexture(c)), depth, normal, { metalnessNode: mr.r, roughnessNode: mr.g, reflectNonMetals: false, camera }));
@@ -63,7 +65,7 @@ export function buildPost(renderer, scene, camera, effects) {
     return {
         effects: used,
         render: () => pipe.render(),
-        setScale: (s) => { scenePass.setResolutionScale(s); if (aoNode) aoNode.resolutionScale = s; },
+        setScale: (s) => { scenePass.setResolutionScale(s); if (aoNode) aoNode.resolutionScale = s * AO_RES; },
         // RenderPipeline.dispose() frees only its quad material (r186): the passes' render targets are freed here
         dispose: () => { pipe.dispose(); for (const n of owned) n.dispose?.(); },
     };

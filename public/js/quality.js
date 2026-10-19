@@ -32,17 +32,27 @@ export function resolveLevel(choice, autoResult, backend = 'webgpu') {
     return backend === 'webgl2' ? 'low' : 'medium';
 }
 
-// After 5 s of driving: under ~45 fps → Low; over ~85 fps → High; over ~140 fps while on High → Ultra
-export function autoPick(avgFrameMs, current, dpr) {
+// After 5 s of driving: under ~45 fps → Low; over ~85 fps → High; on High, fast enough that Ultra (~1.4x the work, its
+// slow frames ~1.5x more) still fits the display's frame time → Ultra: 7 ms at 60 Hz, 3.5 ms at 120 Hz (ProMotion)
+export function autoPick(avgFrameMs, current, dpr, hz = 60) {
     if (avgFrameMs > 22) return 'low';
-    if (current === 'high' && avgFrameMs < 7) return 'ultra';
-    if (current === 'ultra') return 'ultra';
+    if (current === 'high' && avgFrameMs < (7 * 60) / hz) return 'ultra';
+    if (current === 'ultra') return avgFrameMs <= 0.6 * (1000 / hz) ? 'ultra' : 'high'; // its slow frames still fit
     if (avgFrameMs < 11.8 && dpr >= 1) return 'high';
     return current;
 }
 
-// Auto measures when nothing is stored yet, and once more from a stored High (the only way up to Ultra)
-export const shouldMeasure = (choice, stored) => choice === 'auto' && (!stored || stored === 'high');
+// The display's refresh rate from frame intervals (ms) taken while nothing is drawn (the lobby): the median, snapped to the
+// usual rates; 60 when unknown, 240 at most (no vsync)
+const RATES = [60, 75, 90, 100, 120, 144, 165, 240];
+export function refreshHz(intervals) {
+    if (!intervals.length) return 60;
+    const m = [...intervals].sort((a, b) => a - b)[intervals.length >> 1], hz = 1000 / m;
+    return RATES.reduce((best, r) => (Math.abs(r - hz) < Math.abs(best - hz) ? r : best), 60);
+}
+
+// Auto measures when nothing is stored yet, and again from a stored High (the way up to Ultra) or Ultra (back down if it misses frames)
+export const shouldMeasure = (choice, stored) => choice === 'auto' && (!stored || stored === 'high' || stored === 'ultra');
 
 // polygonOffset pulls decals toward the camera with negative values; a reversed depth buffer needs the sign flipped
 export const depthBias = (n, reversed) => (reversed && n ? -n : n);

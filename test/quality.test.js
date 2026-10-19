@@ -62,11 +62,11 @@ test('autoPick: slow → Low, fast → High, very fast on High → Ultra, Ultra 
     assert.strictEqual(Q.autoPick(25, 'ultra', 1), 'low');
 });
 
-test('shouldMeasure: auto with nothing stored, or a stored High that may be Ultra; never a manual choice', () => {
+test('shouldMeasure: auto with nothing stored, or a stored High (may be Ultra) or Ultra (may miss frames); never a manual choice', () => {
     assert.strictEqual(Q.shouldMeasure('auto', null), true);
     assert.strictEqual(Q.shouldMeasure('auto', 'high'), true);
     assert.strictEqual(Q.shouldMeasure('auto', 'medium'), false);
-    assert.strictEqual(Q.shouldMeasure('auto', 'ultra'), false);
+    assert.strictEqual(Q.shouldMeasure('auto', 'ultra'), true);
     assert.strictEqual(Q.shouldMeasure('high', null), false);
 });
 
@@ -135,4 +135,27 @@ test('capLevel: a GPU reset caps later sessions at the lowered level, never rais
 
 test('TRAA levels render at full scale: its depth history is copied at screen size (WebGPU rejects a smaller pass)', () => {
     for (const [name, L] of Object.entries(Q.LEVELS)) if (L.effects.includes('traa')) assert.deepStrictEqual(L.scale, [1, 1, 1], name);
+});
+
+test('autoPick: Ultra only when High leaves room for the display\'s own refresh (120 Hz: half the 60 Hz threshold)', () => {
+    assert.strictEqual(Q.autoPick(4.7, 'high', 2, 120), 'high', '4.7 ms High on a 120 Hz screen: Ultra would miss frames');
+    assert.strictEqual(Q.autoPick(3.2, 'high', 2, 120), 'ultra');
+    assert.strictEqual(Q.autoPick(4.7, 'high', 2, 60), 'ultra', '60 Hz as before');
+    assert.strictEqual(Q.autoPick(4.7, 'high', 2), 'ultra', 'no refresh known: 60 Hz');
+});
+
+test('refreshHz: the display rate from frame intervals (median, snapped), 60 when unknown', () => {
+    assert.strictEqual(Q.refreshHz(new Array(60).fill(8.33)), 120);
+    assert.strictEqual(Q.refreshHz([...new Array(55).fill(16.7), 50, 70, 80, 90, 100]), 60, 'a few slow frames do not count');
+    assert.strictEqual(Q.refreshHz(new Array(60).fill(6.94)), 144);
+    assert.strictEqual(Q.refreshHz([]), 60);
+    assert.strictEqual(Q.refreshHz(new Array(60).fill(1)), 240, 'uncapped (no vsync): capped at 240');
+});
+
+test('autoPick on Ultra: back to High when Ultra takes over 60 % of the display\'s frame time (its slow frames would miss)', () => {
+    assert.strictEqual(Q.autoPick(6.4, 'ultra', 2, 120), 'high', '6.4 ms on a 120 Hz screen');
+    assert.strictEqual(Q.autoPick(4.5, 'ultra', 2, 120), 'ultra');
+    assert.strictEqual(Q.autoPick(9, 'ultra', 2, 60), 'ultra');
+    assert.strictEqual(Q.autoPick(14, 'ultra', 2, 60), 'high');
+    assert.strictEqual(Q.shouldMeasure('auto', 'ultra'), true, 'a stored Ultra is checked again');
 });

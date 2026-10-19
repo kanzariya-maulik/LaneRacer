@@ -1,6 +1,6 @@
 // Drives a local LanRace race in Chrome over the DevTools protocol: screenshots per view, fps, console errors.
 // Uses its own server on PORT 3299 (never the user's 3232) and kills only what it started.
-// node scripts/browser-check.mjs --track monza --level high --time day --views chase,tcam,cockpit --out <dir> [--headed] [--fps 10] [--lose] [--webgl] [--logdepth] [--at countdown] [--eval <js run before screenshots>] [--spots <json: [{ name, pos: [x, y, z], look: [x, y, z] }]>]
+// node scripts/browser-check.mjs --track monza --level high --time day --views chase,tcam,cockpit --out <dir> [--headed] [--fps 10] [--lose] [--webgl] [--logdepth] [--at countdown] [--eval <js run before screenshots>] [--spots <json: [{ name, pos: [x, y, z], look: [x, y, z] }]>] [--bots <n>] [--cpuprofile <file>] [--vsync]
 import { spawn, execSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -17,7 +17,7 @@ const server = spawn('node', ['server.js'], { env: { ...process.env, PORT: Strin
 let serverLog = ''; server.stdout.on('data', (d) => (serverLog += d)); server.stderr.on('data', (d) => (serverLog += d));
 const chrome = spawn('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', [
     ...(headed ? [] : ['--headless=new']), `--remote-debugging-port=${DBG}`, '--mute-audio', '--enable-unsafe-webgpu',
-    '--no-first-run', '--no-default-browser-check', `--user-data-dir=${out}/.chrome`, '--window-size=1600,900', '--disable-gpu-vsync', '--disable-frame-rate-limit', ...extra, 'about:blank'], { stdio: 'ignore' });
+    '--no-first-run', '--no-default-browser-check', `--user-data-dir=${out}/.chrome`, '--window-size=1600,900', ...(process.argv.includes('--vsync') ? [] : ['--disable-gpu-vsync', '--disable-frame-rate-limit']), ...extra, 'about:blank'], { stdio: 'ignore' });
 const stop = () => { try { chrome.kill(); } catch {} try { server.kill(); } catch {} };
 process.on('exit', stop);
 // A frozen page never answers DevTools calls: give up after 3 minutes, report what was seen, clean up
@@ -53,7 +53,7 @@ try {
     await evalJs(`document.getElementById('username').value = 'Check'; document.getElementById('btn-join').click(); true`);
     await until(`!document.getElementById('host-settings').classList.contains('hidden')`);
     await evalJs(`(() => { const set = (id, v) => { const e = document.getElementById(id); e.value = v; e.dispatchEvent(new Event('change', { bubbles: true })); e.dispatchEvent(new Event('input', { bubbles: true })); };
-        set('setting-track', ${JSON.stringify(track)}); set('setting-time', ${JSON.stringify(time)}); set('setting-quali', 'off'); set('setting-laps', '1');
+        set('setting-track', ${JSON.stringify(track)}); set('setting-time', ${JSON.stringify(time)}); set('setting-quali', 'off'); set('setting-laps', '1'); if (${JSON.stringify(arg('bots', null))}) { set('setting-ai', '1'); set('setting-ai-count', ${JSON.stringify(arg('bots', '0'))}); }
         return true; })()`);
     await wait(500);
     await evalJs(`document.getElementById('btn-start').click(); true`);
@@ -67,6 +67,12 @@ try {
     }
     const pre = arg('eval', null);
     const evalOut = pre ? await evalJs(pre) : undefined;
+    const profFile = arg('cpuprofile', null); // a CPU profile of the next 10 s (Chrome DevTools format)
+    if (profFile) {
+        await send('Profiler.enable'); await send('Profiler.setSamplingInterval', { interval: 200 }); await send('Profiler.start');
+        await wait(10000);
+        writeFileSync(profFile, JSON.stringify((await send('Profiler.stop')).result.profile));
+    }
     const backend = await evalJs(`window.lanraceQuality?.backend || 'webgl'`);
     let fps = null;
     if (fpsSecs) { const s = []; for (let i = 0; i < fpsSecs; i++) { await wait(1000); s.push(await evalJs('window.lanraceFps')); } fps = Math.round(s.reduce((a, b) => a + b) / s.length); }
