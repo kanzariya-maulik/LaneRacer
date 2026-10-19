@@ -4,7 +4,7 @@ node_modules
 refs/
 
 # Regenerable Blender build output (npm run build:car)
-scripts/build/
+scripts/build
 
 .DS_Store
 
