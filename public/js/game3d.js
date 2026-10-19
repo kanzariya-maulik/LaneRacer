@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { buildCar, buildSteeringWheel, liveryTexture as carLivery, WHEEL_RADIUS } from './carModel.js';
 import { WHEELS } from './carShape.js';
 import { loadTeamCar, cloneForCar, detailFor, loadParts } from './carModels.js';
-import { VIEW_NAMES, VIEW_FOV, EYE_TILT, nextView, viewOf, onboard, wheelAngle, toThree, eyeFor, wheelPosFor } from './views.js';
+import { VIEW_NAMES, VIEW_FOV, EYE_TILT, CHASE, nextView, viewOf, onboard, wheelAngle, toThree, eyeFor, wheelPosFor } from './views.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
 import { CSMShadowNode } from 'three/addons/csm/CSMShadowNode.js';
@@ -38,7 +38,6 @@ import { distToPath, pitLayout, tMarks, wallStands, pickerOpen, cardText, crew17
 const WHEEL_RADIUS_M = WHEEL_RADIUS; // carShape.js
 const ROAD_DRAW_Y = 0.6;           // the asphalt is drawn this far (world units) over the road height: cars stand on it
 const WHEELBASE_M = 3.6, TRACK_WIDTH_M = 1.6; // contact patches for the body's pitch and roll on the road (sim C.WHEELBASE)
-const CHASE_BACK_M = 10, CHASE_UP_M = 4, LOOK_AHEAD_M = 6;
 const CAM_TURN_SMOOTH = 8; // 1/s; time-based so lag doesn't grow at low frame rates
 const KERB_TURN = 0.05;       // rad per path segment (~10 m) → radius under ~200 m gets kerbs
 const TAG_FULL_M = 40, TAG_GONE_M = 120; // name labels fade out between these camera distances
@@ -1978,13 +1977,13 @@ function updateCamera(dt) {
     const d = target - camHeading;
     camHeading += Math.atan2(Math.sin(d), Math.cos(d)) * (1 - Math.exp(-CAM_TURN_SMOOTH * dt));
     const h = camHeading;
-    const v = onboard(view) && car.model ? view : 'chase'; // box fallback car: chase
+    const v = onboard(view) && !car.model ? 'chase' : view; // box fallback car: chase
     if (camera.fov !== VIEW_FOV[v]) { camera.fov = VIEW_FOV[v]; camera.updateProjectionMatrix(); }
-    if (v === 'chase') {
+    if (!onboard(v)) {
         // Height: the road behind the car (so the camera rises before a crest, not into it), never below the car's own level
-        const bx = p.x - Math.cos(h) * CHASE_BACK_M * scale, bz = p.z - Math.sin(h) * CHASE_BACK_M * scale;
-        camera.position.set(bx, Math.max(p.y, roadY(bx, bz, h)) + CHASE_UP_M * scale, bz);
-        look.set(p.x + Math.cos(h) * LOOK_AHEAD_M * scale, p.y + 1 * scale, p.z + Math.sin(h) * LOOK_AHEAD_M * scale);
+        const c = CHASE[v], bx = p.x - Math.cos(h) * c.back * scale, bz = p.z - Math.sin(h) * c.back * scale;
+        camera.position.set(bx, Math.max(p.y, roadY(bx, bz, h)) + c.up * scale, bz);
+        look.set(p.x + Math.cos(h) * c.ahead * scale, p.y + c.lookUp * scale, p.z + Math.sin(h) * c.ahead * scale);
     } else {
         // Bolted to the car: its heading, pitch and roll, no smoothing (TV onboards and the F1 games look like this)
         car.root.updateMatrixWorld();
@@ -2002,12 +2001,12 @@ function updateCamera(dt) {
         camera.position.lerp(pitCam.set(c.x + ca, pitY(box.x, box.y) + PIT_CAM_UP_M * scale, c.y + sa), pitBlend);
         look.lerp(p, pitBlend);
     }
-    if (v === 'chase' || pitBlend > 0.001) camera.lookAt(look); // onboard keeps the car's roll
+    if (!onboard(v) || pitBlend > 0.001) camera.lookAt(look); // onboard keeps the car's roll
     // The close-range pass: off for the pit camera (it's metres away, the crew can stand in front of the car)
-    const layeredNow = v !== 'chase' && pitBlend <= 0.001;
+    const layeredNow = onboard(v) && pitBlend <= 0.001;
     activeView = layeredNow ? v : 'chase';
     onboardCar = layeredNow ? car : null;
-    window.lanraceView = activeView;
+    window.lanraceView = layeredNow || !onboard(v) ? v : 'chase'; // the camera in use (chase far too), for tests
     document.body.classList.toggle('view-cockpit', activeView === 'cockpit'); // the wheel's display replaces the dash's gear and revs
     if (layeredNow) { // the wheel shows from both onboard views (T-cam looks down into the cockpit)
         steeringWheel ||= buildSteeringWheel(document.createElement('canvas'));

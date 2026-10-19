@@ -3,17 +3,26 @@ const assert = require('node:assert');
 let V;
 before(async () => { V = await import('../public/js/views.js'); });
 
-test('views cycle chase → T-cam → cockpit → chase; junk and unknown start in chase', () => {
-    assert.deepStrictEqual(V.VIEWS, ['chase', 'tcam', 'cockpit']);
-    assert.strictEqual(V.nextView('chase'), 'tcam');
+test('views cycle chase → chase far → T-cam → cockpit → chase; junk and unknown start in chase', () => {
+    assert.deepStrictEqual(V.VIEWS, ['chase', 'far', 'tcam', 'cockpit']);
+    assert.strictEqual(V.nextView('chase'), 'far');
+    assert.strictEqual(V.nextView('far'), 'tcam');
     assert.strictEqual(V.nextView('tcam'), 'cockpit');
     assert.strictEqual(V.nextView('cockpit'), 'chase');
     assert.strictEqual(V.nextView('helicopter'), 'chase');
     assert.strictEqual(V.viewOf('cockpit'), 'cockpit');
     for (const junk of ['helicopter', null, undefined, '', 3]) assert.strictEqual(V.viewOf(junk), 'chase');
     assert.strictEqual(V.onboard('chase'), false);
+    assert.strictEqual(V.onboard('far'), false);
     assert.ok(V.onboard('tcam') && V.onboard('cockpit'));
-    assert.deepStrictEqual(V.VIEW_FOV, { chase: 60, tcam: 75, cockpit: 75 });
+    assert.deepStrictEqual(V.VIEW_FOV, { chase: 60, far: 60, tcam: 75, cockpit: 75 });
+});
+
+test('chase cameras as the F1 games: low and close behind the car, chase far a little further and higher', () => {
+    const { chase, far } = V.CHASE;
+    assert.ok(chase.back >= 4 && chase.back <= 5.5 && chase.up >= 1.1 && chase.up <= 1.5, 'close: just over the rear wing');
+    assert.ok(far.back > chase.back && far.up > chase.up && far.back <= 7 && far.up <= 2);
+    for (const c of [chase, far]) assert.ok(c.ahead > 0 && c.lookUp <= 0.5, 'looking down the road ahead');
 });
 
 test('cockpit eye sits inside the helmet (outward faces culled from inside), T-cam above the airbox pod', () => {
@@ -42,9 +51,12 @@ test('shadowHalf is gone: cascaded shadows fit themselves', () => {
 test('eye and wheel per car: the model\'s own markers, the procedural values without them', () => {
     assert.deepStrictEqual(V.eyeFor('cockpit', null), V.EYE.cockpit);
     assert.deepStrictEqual(V.eyeFor('tcam', {}), V.EYE.tcam);
-    assert.deepStrictEqual(V.eyeFor('cockpit', { eye: [0.2, 0, 0.8] }), [0.2, 0, 0.8]);
-    const t = V.eyeFor('tcam', { eye: [0.2, 0, 0.8] });
-    [0.04, 0, 1.08].forEach((v, k) => assert.ok(Math.abs(t[k] - v) < 1e-9, `tcam ${t}`));
+    // from the real car's eye marker: cockpit just over the halo bar, T-cam above and behind the helmet
+    const near = (a, b) => a.every((v, k) => Math.abs(v - b[k]) < 1e-9);
+    const c = V.eyeFor('cockpit', { eye: [0.2, 0, 0.8] }), t = V.eyeFor('tcam', { eye: [0.2, 0, 0.8] });
+    assert.ok(near(c, [0.08, 0, 1.04]), `cockpit ${c}`);
+    assert.ok(near(t, [-0.14, 0, 1.2]), `tcam ${t}`);
+    assert.ok(V.EYE_TILT.tcam < V.EYE_TILT.cockpit, 'T-cam looks down onto the helmet and wheel');
     assert.deepStrictEqual(V.wheelPosFor({}), V.WHEEL_POS);
     assert.deepStrictEqual(V.wheelPosFor(null), V.WHEEL_POS);
     assert.deepStrictEqual(V.wheelPosFor({ wheelPos: [0.7, 0, 0.6] }), [0.7, 0, 0.6]);
