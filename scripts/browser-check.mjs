@@ -1,6 +1,6 @@
 // Drives a local LanRace race in Chrome over the DevTools protocol: screenshots per view, fps, console errors.
 // Uses its own server on PORT 3299 (never the user's 3232) and kills only what it started.
-// node scripts/browser-check.mjs --track monza --level high --time day --views chase,tcam,cockpit --out <dir> [--headed] [--fps 10] [--lose] [--webgl] [--logdepth] [--at countdown] [--eval <js run before screenshots>] [--spots <json: [{ name, pos: [x, y, z], look: [x, y, z] }]>] [--bots <n>] [--cpuprofile <file>] [--vsync]
+// node scripts/browser-check.mjs --track monza --level high --time day --views chase,tcam,cockpit --out <dir> [--headed] [--fps 10] [--lose] [--webgl] [--logdepth] [--at countdown] [--eval <js run before screenshots>] [--spots <json: [{ name, pos: [x, y, z], look: [x, y, z] }]>] [--bots <n>] [--cpuprofile <file>] [--vsync] [--team <name>]
 import { spawn, execSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -50,6 +50,10 @@ try {
     await until(`location.port === '${PORT}' && document.readyState === 'complete' && !!document.getElementById('graphics-select')`);
     await evalJs(`(() => { const e = document.getElementById('graphics-select'); e.value = ${JSON.stringify(level)}; e.dispatchEvent(new Event('change', { bubbles: true })); return e.value; })()`);
     await send('Page.reload'); await until(`document.readyState === 'complete' && !!document.getElementById('btn-join')`);
+    if (arg('team')) { // a team by (part of) its name, e.g. --team mercedes
+        await until(`document.querySelectorAll('.team-card').length > 0`);
+        await evalJs(`[...document.querySelectorAll('.team-card')].find((c) => c.title.toLowerCase().includes(${JSON.stringify(String(arg('team')).toLowerCase())}))?.click(); true`);
+    }
     await evalJs(`document.getElementById('username').value = 'Check'; document.getElementById('btn-join').click(); true`);
     await until(`!document.getElementById('host-settings').classList.contains('hidden')`);
     await evalJs(`(() => { const set = (id, v) => { const e = document.getElementById(id); e.value = v; e.dispatchEvent(new Event('change', { bubbles: true })); e.dispatchEvent(new Event('input', { bubbles: true })); };

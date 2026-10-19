@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { buildCar, buildSteeringWheel, liveryTexture as carLivery, WHEEL_RADIUS } from './carModel.js';
-import { VIEW_NAMES, VIEW_FOV, EYE, EYE_TILT, nextView, viewOf, onboard, wheelAngle, toThree } from './views.js';
+import { WHEELS } from './carShape.js';
+import { loadTeamCar, cloneForCar, detailFor, loadParts } from './carModels.js';
+import { VIEW_NAMES, VIEW_FOV, EYE_TILT, nextView, viewOf, onboard, wheelAngle, toThree, eyeFor, wheelPosFor } from './views.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
 import { CSMShadowNode } from 'three/addons/csm/CSMShadowNode.js';
@@ -1666,8 +1668,14 @@ function makeCar(id) {
     const root = new THREE.Group();
     const wheels = [];
     carTemplate = carTemplateFor();
-    let model = null;
-    if (carTemplate) {
+    const asset = teamAssets[lp.teamId] || null;
+    let model = null, driver = null;
+    if (asset) model = realCar(asset, lp.teamId, wheels);
+    if (model) {
+        driver = model.getObjectByName('driver');
+        model.scale.setScalar(scale);
+        root.add(model);
+    } else if (carTemplate) {
         model = carTemplate.clone(true);
         const map = liveryTexture(lp.teamId);
         model.traverse((o) => {
@@ -1684,6 +1692,8 @@ function makeCar(id) {
             const w = model.getObjectByName(name);
             if (!w) continue;
             wheels.push(w);
+            w.add(w.userData.tyre = new THREE.Object3D()); // the real tyre's frame: 0.36 m radius, the car's own width
+            w.userData.tyre.scale.set(1, 1, WHEELS[name][2]);
             // Drawn by the shared wheel batches instead (tyre + rim for every car = 2 draws)
             w.traverse((o) => { if (o.isMesh) { o.visible = false; o.castShadow = false; } });
         }
@@ -1700,7 +1710,47 @@ function makeCar(id) {
     if (tag) root.add(tag);
     if (!Q.shadows) root.add(blobShadow(1)); // Low has no sun shadows: a contact shadow keeps the car on the road
     singlePass(root);
-    return { id, root, model, wheels, teamId: lp.teamId, ghost: false, tag };
+    return { id, root, model, wheels, teamId: lp.teamId, ghost: false, tag, asset, driver };
+}
+
+// A team's real car: its LOD body, wheels at the model's own positions and sizes, the driver in team colours (near only)
+function realCar(asset, teamId, wheels) {
+    const model = new THREE.Group(), body = cloneForCar(asset, detailFor(level) === 'far' ? 0 : CAR_LOD_M * scale); // 0: far only
+    model.add(body);
+    for (const [name, wh] of Object.entries(asset.wheels)) {
+        const w = new THREE.Group();
+        w.name = name;
+        w.position.set(...toThree(wh.pos));
+        const tyre = new THREE.Object3D();
+        tyre.scale.set(wh.radius / WHEEL_RADIUS, wh.radius / WHEEL_RADIUS, wh.width);
+        w.add(tyre);
+        w.userData.tyre = tyre;
+        // the procedural tyre and cover too (hidden: the batches draw them) for when the real tyres didn't load
+        const proc = carTemplate?.getObjectByName(name);
+        if (proc) {
+            const fit = new THREE.Group();
+            fit.scale.set(wh.radius / WHEEL_RADIUS, wh.radius / WHEEL_RADIUS, wh.width / WHEELS[name][2]);
+            for (const c of proc.children) fit.add(c.clone(true));
+            fit.traverse((o) => { if (o.isMesh) { o.visible = false; o.castShadow = false; } });
+            w.add(fit);
+        }
+        model.add(w);
+        wheels.push(w);
+    }
+    if (carParts && asset.head) {
+        const driver = new THREE.Group(), colour = teamInfo[teamId]?.chatColor || '#888888';
+        driver.name = 'driver';
+        driver.add(carParts.helmet.clone(), carParts.shoulders.clone());
+        driver.traverse((o) => {
+            if (!o.isMesh) return;
+            o.material = o.material.clone();
+            if (o.material.name === 'helmet_paint' || o.material.name === 'suit') o.material.color.set(colour);
+            o.castShadow = true;
+        });
+        driver.position.set(...toThree(asset.head));
+        body.levels[0].object.add(driver); // past the LOD distance the driver isn't drawn
+    }
+    return model;
 }
 
 function updateCars(dt) {
@@ -1750,6 +1800,8 @@ function updateCars(dt) {
         for (const w of car.wheels) w.userData.show = !far;
         for (const w of car.wheels) w.rotation.z -= (s.speed / (WHEEL_RADIUS_M * scale)) * dt;
         if (skid) skidMarks(car, s, dt);
+        // the cockpit eye is inside the helmet; T-cam looks over its top, as on TV
+        if (car.driver) car.driver.visible = !(car === onboardCar && activeView === 'cockpit');
         // +steer turns toward +z (right); a +y rotation points the wheel toward -z, so negate
         car.wheels[0] && (car.wheels[0].rotation.y = -(s.steer || 0)); // wheel_FL
         car.wheels[1] && (car.wheels[1].rotation.y = -(s.steer || 0)); // wheel_FR
@@ -1822,7 +1874,24 @@ function applyNet(nowS, dt) {
 // All wheels of all cars in two instanced draws (tyre, rim); each frame copies every wheel part's world matrix
 const compoundColor = Object.fromEntries(Object.entries(COMPOUND_COLORS).map(([c, hex]) => [c, new THREE.Color(hex)]));
 let wheelBatch = null; // [{ mesh: InstancedMesh }] per wheel sub-mesh, built from the car model
+
+// The real cars (carModels.js), fetched at page load: cars drawn before their team's model (or the tyres and helmet)
+// arrived are rebuilt with it. Here, below everything the callbacks touch: the module's top-level awaits let them run early.
+const teamAssets = {}; // teamId → CarAsset, once loaded
+let carParts = null; // real tyres per compound and the driver's helmet; until then the procedural tyre and no driver
+fetch('teams.json').then((r) => r.json()).then((list) => {
+    for (const t of list) loadTeamCar(t.id).then((a) => { if (a) { teamAssets[t.id] = a; for (const id in cars) if (cars[id].teamId === t.id) dropCar(id); } });
+});
+loadParts().then((p) => {
+    if (!p) return;
+    carParts = p;
+    for (const m of wheelBatch || []) m.removeFromParent();
+    wheelBatch = null;
+    for (const id in cars) dropCar(id); // rebuilt with drivers
+});
+const TYRE_BATCHES = ['S', 'M', 'H', 'rim'];
 function updateWheelBatch() {
+    if (carParts) return updateTyreBatch();
     if (!carTemplate) return;
     if (!wheelBatch) {
         const parts = [];
@@ -1857,6 +1926,29 @@ function updateWheelBatch() {
     }
     wheelBatch.forEach((mesh, k) => { mesh.count = counts[k]; mesh.instanceMatrix.needsUpdate = true; });
     if (wheelBatch[0].instanceColor) wheelBatch[0].instanceColor.needsUpdate = true;
+}
+
+// The real tyres (tyre.glb): one draw per compound (their own sidewall markings) and one for the rims
+function updateTyreBatch() {
+    wheelBatch ||= TYRE_BATCHES.map((k) => {
+        const part = carParts.tyres[k], mesh = new THREE.InstancedMesh(part.geometry, part.material, 4 * 24);
+        mesh.frustumCulled = false;
+        mesh.castShadow = true;
+        mesh.count = 0;
+        world.add(mesh);
+        return mesh;
+    });
+    world.updateMatrixWorld();
+    const [S, M, H, rim] = wheelBatch, tyres = { S, M, H };
+    for (const mesh of wheelBatch) mesh.count = 0;
+    for (const id in cars) {
+        const tyre = tyres[clientState.gameState?.[id]?.compound] || M;
+        for (const w of cars[id].wheels) {
+            if (!w.parent || !w.userData.show || !w.userData.tyre) continue;
+            for (const mesh of [tyre, rim]) if (mesh.count < mesh.instanceMatrix.count) mesh.setMatrixAt(mesh.count++, w.userData.tyre.matrixWorld);
+        }
+    }
+    for (const mesh of wheelBatch) mesh.instanceMatrix.needsUpdate = true;
 }
 
 // ---------- camera ----------
@@ -1896,7 +1988,7 @@ function updateCamera(dt) {
     } else {
         // Bolted to the car: its heading, pitch and roll, no smoothing (TV onboards and the F1 games look like this)
         car.root.updateMatrixWorld();
-        camera.position.set(...toThree(EYE[v])).multiplyScalar(scale).applyMatrix4(car.root.matrixWorld);
+        camera.position.set(...toThree(eyeFor(v, car.asset))).multiplyScalar(scale).applyMatrix4(car.root.matrixWorld);
         car.root.getWorldQuaternion(camera.quaternion).multiply(eyeTurn.setFromEuler(eyeEuler.set(EYE_TILT[v], -Math.PI / 2, 0, 'YXZ'))); // camera -z → car +x
         look.set(0, 0, -10 * scale).applyQuaternion(camera.quaternion).add(camera.position);
     }
@@ -1921,6 +2013,7 @@ function updateCamera(dt) {
         steeringWheel ||= buildSteeringWheel(document.createElement('canvas'));
         if (steeringWheel.root.parent !== car.model) {
             car.model.add(steeringWheel.root);
+            steeringWheel.root.position.set(...toThree(wheelPosFor(car.asset)));
             steeringWheel.setGlove(teamInfo[car.teamId]?.chatColor || '#e10600');
         }
         steeringWheel.root.visible = true;

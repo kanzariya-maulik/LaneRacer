@@ -38,3 +38,14 @@ test('wheel angle: ±90° at full lock, clamped, right is positive; car frame to
 test('shadowHalf is gone: cascaded shadows fit themselves', () => {
     assert.strictEqual(V.shadowHalf, undefined);
 });
+
+test('eye and wheel per car: the model\'s own markers, the procedural values without them', () => {
+    assert.deepStrictEqual(V.eyeFor('cockpit', null), V.EYE.cockpit);
+    assert.deepStrictEqual(V.eyeFor('tcam', {}), V.EYE.tcam);
+    assert.deepStrictEqual(V.eyeFor('cockpit', { eye: [0.2, 0, 0.8] }), [0.2, 0, 0.8]);
+    const t = V.eyeFor('tcam', { eye: [0.2, 0, 0.8] });
+    [0.04, 0, 1.08].forEach((v, k) => assert.ok(Math.abs(t[k] - v) < 1e-9, `tcam ${t}`));
+    assert.deepStrictEqual(V.wheelPosFor({}), V.WHEEL_POS);
+    assert.deepStrictEqual(V.wheelPosFor(null), V.WHEEL_POS);
+    assert.deepStrictEqual(V.wheelPosFor({ wheelPos: [0.7, 0, 0.6] }), [0.7, 0, 0.6]);
+});

@@ -13,3 +13,7 @@ export const viewOf = (stored) => (VIEWS.includes(stored) ? stored : 'chase');
 export const onboard = (v) => v === 'tcam' || v === 'cockpit';
 export const wheelAngle = (steer) => Math.max(-1, Math.min(1, steer || 0)) * (Math.PI / 2);
 export const toThree = ([x, y, z]) => [x, z, -y];
+// Per car: the real model's own markers (carModels.js), the procedural car's values without them
+const TCAM_FROM_EYE = [-0.16, 0, 0.28]; // T-cam over the airbox, behind and above the driver's eye
+export const eyeFor = (view, asset) => (asset?.eye ? (view === 'tcam' ? asset.eye.map((v, k) => v + TCAM_FROM_EYE[k]) : asset.eye) : EYE[view]);
+export const wheelPosFor = (asset) => asset?.wheelPos || WHEEL_POS;
