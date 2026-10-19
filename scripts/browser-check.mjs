@@ -1,6 +1,6 @@
 // Drives a local LanRace race in Chrome over the DevTools protocol: screenshots per view, fps, console errors.
 // Uses its own server on PORT 3299 (never the user's 3232) and kills only what it started.
-// node scripts/browser-check.mjs --track monza --level high --time day --views chase,tcam,cockpit --out <dir> [--headed] [--fps 10] [--lose] [--webgl] [--logdepth] [--at countdown] [--eval <js run before screenshots>] [--spots <json: [{ name, pos: [x, y, z], look: [x, y, z] }]>] [--bots <n>] [--cpuprofile <file>] [--vsync] [--team <name>]
+// node scripts/browser-check.mjs --track monza --level high --time day --views chase,tcam,cockpit --out <dir> [--headed] [--fps 10] [--lose] [--webgl] [--logdepth] [--at countdown] [--eval <js run before screenshots>] [--spots <json: [{ name, pos: [x, y, z], look: [x, y, z] }]>] [--bots <n>] [--cpuprofile <file>] [--vsync] [--team <name>] [--credits]
 import { spawn, execSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -50,6 +50,14 @@ try {
     await until(`location.port === '${PORT}' && document.readyState === 'complete' && !!document.getElementById('graphics-select')`);
     await evalJs(`(() => { const e = document.getElementById('graphics-select'); e.value = ${JSON.stringify(level)}; e.dispatchEvent(new Event('change', { bubbles: true })); return e.value; })()`);
     await send('Page.reload'); await until(`document.readyState === 'complete' && !!document.getElementById('btn-join')`);
+    if (process.argv.includes('--credits')) { // the lobby's Credits panel: open it, screenshot, done
+        await evalJs(`document.getElementById('btn-credits').click(); true`);
+        await until(`document.getElementById('credits').open && document.getElementById('credits-list').childElementCount > 0`);
+        const shot = await send('Page.captureScreenshot', { format: 'png' });
+        writeFileSync(`${out}/credits.png`, Buffer.from(shot.result.data, 'base64'));
+        console.log(JSON.stringify({ credits: await evalJs(`document.getElementById('credits-list').childElementCount`), errors }));
+        process.exit(0);
+    }
     if (arg('team')) { // a team by (part of) its name, e.g. --team mercedes
         await until(`document.querySelectorAll('.team-card').length > 0`);
         await evalJs(`[...document.querySelectorAll('.team-card')].find((c) => c.title.toLowerCase().includes(${JSON.stringify(String(arg('team')).toLowerCase())}))?.click(); true`);

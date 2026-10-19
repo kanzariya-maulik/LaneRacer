@@ -5,7 +5,7 @@
 import bpy, json, math, os, sys
 from mathutils import Vector, Matrix
 sys.path.insert(0, os.path.dirname(__file__))
-from build import ROOT, log, meshes, world_bbox, import_model, tris, decimated_copy
+from build import ROOT, log, meshes, world_bbox, import_model, tris, decimated_copy, write_credits
 
 OUT = os.path.join(ROOT, 'public', 'models')
 MODELS = json.load(open(os.path.join(ROOT, 'scripts', 'cars', 'models.json')))
@@ -103,3 +103,4 @@ def helmet():
 
 tyres()
 helmet()
+write_credits()

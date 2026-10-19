@@ -510,3 +510,23 @@ window.handleStatusChange = (status) => {
         document.getElementById('countdown-text').innerText = 'FINISH!';
     }
 };
+
+// Credits: every model's author and licence (public/models/credits.json, written by the car build) and the textures'
+// sources (public/textures/manifest.json)
+const TEXTURE_SITES = { polyhaven: 'Poly Haven', ambientcg: 'ambientCG' };
+document.getElementById('btn-credits').addEventListener('click', async () => {
+    const dlg = document.getElementById('credits'), list = document.getElementById('credits-list');
+    if (!list.childElementCount) {
+        const get = (url) => fetch(url).then((r) => r.json()).catch(() => null);
+        const [models, textures] = await Promise.all([get('models/credits.json'), get('textures/manifest.json')]);
+        const rows = [...(models || []).map((m) => [m.name, `${m.author} (${m.licence})`, m.url]),
+            ...[...new Map(Object.values(textures || {}).map((t) => [t.url, t])).values()].map((t) => { const [site, name] = t.src.split(':'); return [name, `${TEXTURE_SITES[site] || site} (${t.licence})`, t.url]; })];
+        for (const [name, who, url] of rows) {
+            const li = document.createElement('li'), a = document.createElement('a');
+            a.href = url; a.target = '_blank'; a.rel = 'noopener'; a.textContent = name;
+            li.append(a, ` — ${who}`);
+            list.appendChild(li);
+        }
+    }
+    dlg.showModal();
+});
