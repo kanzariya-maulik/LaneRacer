@@ -167,18 +167,19 @@ function buildPitGeometry(t, rp, N, eR, eL, H, clamp) {
     for (let i = 0; i + 1 < m; i++) if (rows[i] && rows[i + 1] && rows[i][2] === rows[i + 1][2]) { const [a, b] = rows[i], [c, d] = rows[i + 1]; apron.tri(a, b, d); apron.tri(a, d, c); }
 
     // pit wall: a box along its line, PIT_WALL_M thick and tall, standing on the lane's ground
-    const wall = mesher(sc), W = pit.wall, wn = W.length;
+    const wall = mesher(sc), W = pit.wall, wn = W.length, face = (a, b, c) => wall.tri(a, c, b); // the ring's order winds inwards
     if (wn > 1) {
         const WN = W.map((_, i) => { const a = W[Math.max(0, i - 1)], b = W[Math.min(wn - 1, i + 1)], l = Math.hypot(b.x - a.x, b.y - a.y) || 1; return { x: -(b.y - a.y) / l, y: (b.x - a.x) / l }; });
         const WZ = pathHeights(t, W).map((z) => z * sc), th = (PIT_WALL_M.thick / 2) * sc, tall = PIT_WALL_M.tall * sc;
         const ring = W.map((p, i) => [-1, 1].flatMap((d) => [0, tall].map((y) => wall.vertex(p.x + WN[i].x * d * th, WZ[i] + LAYER_Y.lane + y, p.y + WN[i].y * d * th))));
         for (let i = 0; i + 1 < wn; i++) {
             const [lb, lt, rb, rt] = ring[i], [lb2, lt2, rb2, rt2] = ring[i + 1];
-            wall.tri(lb, lb2, lt2); wall.tri(lb, lt2, lt); // left face
-            wall.tri(rb, rt, rt2); wall.tri(rb, rt2, rb2); // right face
-            wall.tri(lt, lt2, rt2); wall.tri(lt, rt2, rt); // top
+            face(lb, lb2, lt2); face(lb, lt2, lt); // left face
+            face(rb, rt, rt2); face(rb, rt2, rb2); // right face
+            face(lt, lt2, rt2); face(lt, rt2, rt); // top
+            face(lb, rb2, lb2); face(lb, rb, rb2); // bottom (closed: never seen, but a box)
         }
-        for (const [i, flip] of [[0, false], [wn - 1, true]]) { const [lb, lt, rb, rt] = ring[i]; if (flip) { wall.tri(lb, lt, rt); wall.tri(lb, rt, rb); } else { wall.tri(lb, rt, lt); wall.tri(lb, rb, rt); } }
+        for (const [i, flip] of [[0, true], [wn - 1, false]]) { const [lb, lt, rb, rt] = ring[i]; if (flip) { face(lb, lt, rt); face(lb, rt, rb); } else { face(lb, rt, lt); face(lb, rb, rt); } }
     }
     return { lane: lane.done(), apron: apron.done({ trackSide, laneSide }), wall: wall.done() };
 }

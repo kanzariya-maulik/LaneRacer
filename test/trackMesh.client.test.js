@@ -82,4 +82,23 @@ for (const id of Track.TRACK_IDS) {
             assert.ok(n.dist <= (t.pit.widthAt[n.i] + (t.pit.widthAt[Math.min(n.i + 1, t.pit.widthAt.length - 1)] - t.pit.widthAt[n.i]) * n.t) / 2 + 0.001 * sc, 'apron edge outside the lane');
         }
     });
+
+    test(`${id}: the pit wall is a closed box facing outwards, 0.6 m thick and 1 m tall`, () => {
+        const G = build(id), t = tracks[id], sc = t.scale, W = t.pit.wall, g = G.pit.wall, P = g.position, I = g.index;
+        let vol = 0, len = 0;
+        // the box's top vertices: odd ring entries (trackMesh.js: per wall point [left bottom, left top, right bottom, right top])
+        const tops = new Set(); for (let i = 1; i < P.length / 3; i += 2) tops.add(i);
+        for (let k = 1; k < W.length; k++) len += Math.hypot(W[k].x - W[k - 1].x, W[k].y - W[k - 1].y) / sc;
+        for (let k = 0; k < I.length; k += 3) {
+            const [a, b, c] = [I[k], I[k + 1], I[k + 2]].map((i) => [P[i * 3], P[i * 3 + 1], P[i * 3 + 2]].map((v) => v / sc));
+            const n = [(b[1] - a[1]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[1] - a[1]), (b[2] - a[2]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[2] - a[2])];
+            const up = (b[2] - a[2]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[2] - a[2]);
+            // a top face (all its vertices top ones) faces up; the bottom faces down
+            const top = [I[k], I[k + 1], I[k + 2]].every((i) => tops.has(i));
+            if (Math.abs(up) > Math.hypot(n[0], (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]))) assert.ok(top ? up > 0 : up < 0, `${top ? 'top' : 'bottom'} face facing the wrong way`);
+            vol += (a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6;
+        }
+        // outward faces: positive volume, about its length x 0.6 m x 1 m (closed: any hole or flipped face shows here)
+        assert.ok(Math.abs(vol / (len * 0.6) - 1) < 0.1, `volume ${vol.toFixed(1)} m³ for ${len.toFixed(0)} m of wall`);
+    });
 }

@@ -1,8 +1,8 @@
 // Drives a local LanRace race in Chrome over the DevTools protocol: screenshots per view, fps, console errors.
 // Uses its own server on PORT 3299 (never the user's 3232) and kills only what it started.
-// node scripts/browser-check.mjs --track monza --level high --time day --views chase,tcam,cockpit --out <dir> [--headed] [--fps 10] [--lose] [--webgl] [--logdepth] [--at countdown] [--eval <js run before screenshots>]
+// node scripts/browser-check.mjs --track monza --level high --time day --views chase,tcam,cockpit --out <dir> [--headed] [--fps 10] [--lose] [--webgl] [--logdepth] [--at countdown] [--eval <js run before screenshots>] [--spots <json: [{ name, pos: [x, y, z], look: [x, y, z] }]>]
 import { spawn, execSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { setTimeout as wait } from 'node:timers/promises';
 
 const arg = (k, d) => { const i = process.argv.indexOf(`--${k}`); return i < 0 ? d : process.argv[i + 1] ?? true; };
@@ -75,6 +75,14 @@ try {
         await wait(400);
         const shot = await send('Page.captureScreenshot', { format: 'png' });
         writeFileSync(`${out}/${track}-${time}-${level}-${v}.png`, Buffer.from(shot.result.data, 'base64'));
+    }
+    // free camera at each spot (world units, three.js axes), one screenshot each
+    const spotsFile = arg('spots', null);
+    for (const sp of spotsFile ? JSON.parse(readFileSync(spotsFile, 'utf8')) : []) {
+        await evalJs(`(() => { const d = window.lanraceDebug; d.freeCam = true; d.camera.position.set(${sp.pos}); d.camera.lookAt(${sp.look}); d.camera.updateMatrixWorld(); return true; })()`);
+        await wait(700);
+        const shot = await send('Page.captureScreenshot', { format: 'png' });
+        writeFileSync(`${out}/${track}-${sp.name}.png`, Buffer.from(shot.result.data, 'base64'));
     }
     const stats = await evalJs(`document.getElementById('stats')?.textContent || ''`);
     console.log(JSON.stringify({ track, time, level: await evalJs('window.lanraceQuality?.level'), backend, fps, stats, evalOut, errors, warnings: warnings.slice(0, 5) }));

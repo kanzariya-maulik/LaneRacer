@@ -10,6 +10,7 @@ import { parseAssist } from './sim/carphysics.js';
 import { LEVELS, capLevel, scaleRange, pixelRatio, resolveLevel, autoPick, shouldMeasure, stepDown, depthBias, adaptStep, frameCapped } from './quality.js';
 import { placeScenery, seedOf, vergeReach, terrainHeights, terrainGround, skirtDepth, gridSampler, carveReach, onVerge, onPit, untangle, smoothPath, RENDER_STEP_M, SKIRT_M } from './scenery.js';
 import { heightAt, pathHeights } from './sim/elevation.js';
+import { buildTrackGeometry } from './trackMesh.js';
 import { themeOf, LANDS, SKIES, nightOf } from './themes.js';
 import { SnapshotBuffer, RenderClock, sample, samplePresent, decodeFlags } from './netsync.js';
 import { decodeFast } from './netcodec.js';
@@ -572,6 +573,38 @@ function strip(path, from, to, y, keep, colorAt, opts = {}) {
     return coloredMesh(pos, col, uv, opts);
 }
 
+// A trackMesh.js ribbon as a mesh; opts: color, map, roughnessMap, uvScale (its UVs are metres), layer (depth offset)
+function ribbonMesh(r, opts = {}) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(r.position, 3));
+    g.setAttribute('uv', new THREE.BufferAttribute(opts.uvScale ? r.uv.map((v) => v * opts.uvScale) : r.uv, 2));
+    g.setIndex(new THREE.BufferAttribute(r.index, 1));
+    g.computeVertexNormals();
+    const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({
+        color: opts.color ?? 0xffffff, roughness: 0.9, map: opts.map || null, roughnessMap: opts.roughnessMap || null,
+        polygonOffset: !!opts.layer, polygonOffsetFactor: depthBias(-(opts.layer || 0), reversed), polygonOffsetUnits: depthBias(-(opts.layer || 0) * 2, reversed),
+    }));
+    m.receiveShadow = true;
+    return m;
+}
+
+// Kerb stripes: one texel per colour along v (trackMesh.js: v = metres along the kerb), so each stripe is 1 m
+const KERB_COLORS = { red: '#d62828', white: '#f2f2f2', green: '#1f8a3b', yellow: '#facc15', blue: '#1e5bd8', black: '#1b1b1b' };
+const kerbTextures = new Map();
+function kerbTexture(colors = ['red', 'white']) {
+    const key = colors.join();
+    if (!kerbTextures.has(key)) {
+        const tex = new THREE.DataTexture(new Uint8Array(colors.flatMap((c) => [...new THREE.Color(KERB_COLORS[c] || c).convertLinearToSRGB().toArray().map((v) => Math.round(v * 255)), 255])), 1, colors.length);
+        tex.magFilter = tex.minFilter = THREE.NearestFilter;
+        tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+        tex.repeat.set(1, 1 / colors.length);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.needsUpdate = true;
+        kerbTextures.set(key, tex);
+    }
+    return kerbTextures.get(key);
+}
+
 // Grey speckle, tiled along the track
 let asphaltTex = null, asphaltRough = null;
 function asphaltTexture() {
@@ -905,13 +938,13 @@ function updateCrews(dt) {
 const bar = (w, d, x, z) => { const q = new THREE.PlaneGeometry(w, d); q.rotateX(-Math.PI / 2); q.translate(x, 0, z); return q; };
 
 let entryGuide = null;
-function buildPit(pit, t) {
+function buildPit(pit, t, G) {
     const n = pit.path.length, ph = pit.width / 2, s = pit.trackSide, line = 0.3 * scale;
     const W = pit.widthAt, half = W.map((w) => w / 2), neg = (A) => A.map((v) => -v);
     const inner = (i) => i >= 1 && i <= n - 3; // end segments would use wrapped normals
-    const fullAt = (i) => W[i] >= pit.width - 1e-6;
     // The lane: per-point width, 0 where it joins the road edge, so it never lies over the racing surface
-    world.add(strip(pit.path, neg(half), half, 0.55, inner, solid('#3a3f47')));
+    world.add(ribbonMesh(G.lane, { color: '#3a3f47', map: asphaltTexture(), roughnessMap: asphaltRough, uvScale: 1 / 8 }));
+    world.add(ribbonMesh(G.apron, { color: '#4a505a', map: asphaltTexture(), roughnessMap: asphaltRough, uvScale: 1 / 8 })); // the lane to the road edge
     // White edges: the outer one all along; the track-side one is the blend line in the mouths and the pit-wall line beside it
     const inL = half.map((h) => h - line), inR = half.map((h) => -h + line);
     world.add(strip(pit.path, inL, half, 0.85, (i) => inner(i) && W[i] > line, solid('#f2f2f2')));
@@ -931,10 +964,8 @@ function buildPit(pit, t) {
     const yA = half.map((h) => -s * (h - line)), yB = half.map((h) => -s * (h - 2 * line));
     world.add(strip(pit.path, s > 0 ? yA : yB, s > 0 ? yB : yA, 0.86, onSpan, solid('#ffd400')));
 
-    // Pit wall on the track side; outer wall behind the lane except where the garages open onto it
-    world.add(wall(pit.wall, 0, 1 * scale, (i) => i < pit.wall.length - 1, solid('#9aa0a6')));
-    const [lo, hi] = pit.garageSpan, back = ph + PIT_RUNOFF_M * scale, backOff = half.map((h) => -s * (h + PIT_RUNOFF_M * scale));
-    world.add(wall(pit.path, backOff, 1 * scale, (i) => inner(i) && fullAt(i) && fullAt(i + 1) && (pit.cum[i + 1] < lo || pit.cum[i] > hi), solid('#9aa0a6')));
+    // Pit wall on the track side, a solid 0.6 m box (the barriers behind the lane are track.walls, buildWorld)
+    world.add(ribbonMesh(G.wall, { color: '#9aa0a6' }));
 
     const at = (s0) => {
         const i = Math.max(1, pit.cum.findIndex((c) => c >= s0));
@@ -1396,24 +1427,7 @@ function buildWorld(t) {
     const { rp, up, K } = smoothPath(path, t.scale, t.cum), m = rp.length;
     heightCache.set(rp, t.z ? up(t.z).map((z) => z * t.scale * ELEVATION_SCALE) : rp.map(() => 0));
     bounds = getBounds(path);
-    const all = () => true;
     const alternate = (h1, h2) => { const a = new THREE.Color(h1), b = new THREE.Color(h2); return (i) => (i % 2 ? a : b); };
-    // How far the asphalt reaches per smooth-curve point and side (dir as offsetPoints: +1 / -1): half the road, or as far
-    // as a median (Track.js buildMedians: Monaco's Fairmont hairpin, two legs side by side at different heights), where
-    // each road ends; no verge or gravel past it either
-    const roadTo = { 1: rp.map(() => half), [-1]: rp.map(() => half) };
-    for (const md of t.medians || []) for (const dir of [1, -1]) rp.forEach((p, k) => {
-        const a = rp[(k - 1 + m) % m], b = rp[(k + 1) % m], l = Math.hypot(b.x - a.x, b.y - a.y) || 1;
-        const dx = (-(b.y - a.y) / l) * dir, dy = ((b.x - a.x) / l) * dir; // sideways, as offsetPoints
-        for (let i = 0; i + 1 < md.length; i++) {
-            const c = md[i], ex = md[i + 1].x - c.x, ey = md[i + 1].y - c.y, r = dx * ey - dy * ex;
-            if (!r) continue;
-            const s = ((c.x - p.x) * ey - (c.y - p.y) * ex) / r, v = ((c.x - p.x) * dy - (c.y - p.y) * dx) / r;
-            if (s > 0 && v >= 0 && v <= 1) roadTo[dir][k] = Math.min(roadTo[dir][k], s);
-        }
-    });
-    const clipped = (dir, k) => roadTo[dir][k] < half; // a median beside this point
-    const signed = (dir, A) => A.map((v) => dir * v);
 
     // Grass verge at road height from the track edge towards the barrier, so the road never sits on a step; it stops
     // short wherever another part of the track is nearer (hairpins, Suzuka's bridge) and leaves room for a grass bank down
@@ -1496,39 +1510,18 @@ function buildWorld(t) {
             old.dispose();
             buildGroundWalls(H, fine);
         });
-        for (const dir of [1, -1]) world.add(strip(rp, signed(dir, roadTo[dir]), rreach[dir], 0.3, (k) => !clipped(dir, k) && !clipped(dir, (k + 1) % m), solid(land.verge)));
     }
-    world.add(strip(rp, signed(-1, roadTo[-1]), roadTo[1], 0.6, all, solid('#4a505a'), { map: asphaltTexture(), roughnessMap: asphaltRough, repeatM: 8 }));
-    // White lines on the track limits (t.edgeR / edgeL: judged there); beyond them the road carries on as asphalt run-off
-    // to the drawn edge (Track.js: the road 2x the real width, the lines 4/3)
-    const R = t.edgeR || path.map(() => half - 0.5 * scale), L = t.edgeL || R, lineW = 0.3 * scale; // per point (+ = driver's right)
-    const rR = up(R), rL = up(L);
-    const add = (e, d) => e.map((v) => v + d), neg = (e, d = 0) => e.map((v) => -(v + d));
-    world.add(strip(rp, add(rR, -lineW), rR, 0.9, all, solid('#f2f2f2'), { layer: 2 }));
-    world.add(strip(rp, neg(rL), neg(rL, -lineW), 0.9, all, solid('#f2f2f2'), { layer: 2 }));
-
-    // Kerbs on corners (visual only), widened by 2 points so they don't flicker on and off; stripes ~2.5 m (alternate per
-    // smooth-curve step, as real kerbs)
-    const turny = path.map((_, i) => turnAngle(path, i) > KERB_TURN);
-    const curvy = turny.map((_, i) => [-2, -1, 0, 1, 2].some((d) => turny[(i + d + n) % n])), rc = up(curvy);
-    // 1.5 m wide, ending at the road's edge where the white line runs closer to it than that (never out on the grass)
-    const kerbW = 1.5 * scale, kR = rR.map((v, k) => Math.min(v + kerbW, roadTo[1][k])), kL = rL.map((v, k) => Math.min(v + kerbW, roadTo[-1][k]));
-    world.add(strip(rp, rR, kR, 0.7, (i) => rc[i], alternate('#d62828', '#f2f2f2'), { layer: 1 }));
-    world.add(strip(rp, neg(kL), neg(rL), 0.7, (i) => rc[i], alternate('#d62828', '#f2f2f2'), { layer: 1 }));
+    // The road, its lines, kerbs and verges, the pit lane, apron and wall: seamless ribbons along the smooth curve
+    // (trackMesh.js); world-space UVs in metres, the asphalt texture every 8 m
+    const G = buildTrackGeometry(t);
+    if (t.z) for (const v of [G.verge.R, G.verge.L]) world.add(ribbonMesh(v, { color: land.verge }));
+    world.add(ribbonMesh(G.road, { color: '#4a505a', map: asphaltTexture(), roughnessMap: asphaltRough, uvScale: 1 / 8 }));
+    // White lines on the track limits (t.edgeR / edgeL: judged there), kerbs (build data: style, colours; 1 m stripes)
+    const R = t.edgeR, L = t.edgeL;
+    for (const l of [G.lines.R, G.lines.L]) world.add(ribbonMesh(l, { color: '#f2f2f2', layer: 2 }));
+    for (const kb of G.kerbs) world.add(ribbonMesh(kb, { map: kerbTexture(kb.colors), layer: 1 }));
 
     const scen = placeScenery(t, Q.scenery, seedOf(t.id));
-    const onSlow = (side) => {
-        const mark = new Array(n).fill(false);
-        for (const c of scen.slowCorners) if (c.side === side) for (let i = c.from; i !== c.to; i = (i + 1) % n) mark[i] = true;
-        return mark;
-    };
-    const slowOut = { 1: onSlow(1), [-1]: onSlow(-1) }, rslow = { 1: up(slowOut[1]), [-1]: up(slowOut[-1]) };
-    // Gravel traps on the outside of slow corners, between the kerb and the barrier (visual only)
-    for (const dir of [1, -1]) {
-        const edge = rreach[dir].map((r) => r - dir * scale); // a metre inside the verge's reach
-        // from the end of the asphalt run-off
-        world.add(strip(rp, signed(dir, roadTo[dir]), edge, 0.4, (i) => rslow[dir][i] && !clipped(dir, i) && !clipped(dir, (i + 1) % m), solid('#cdb98f')));
-    }
     // Rubbered-in racing line through slow corners: inside at the apex, drifting out on exit (Medium/High)
     if (Q.tyreMarks) {
         for (const c of scen.slowCorners) {
@@ -1539,47 +1532,19 @@ function buildWorld(t) {
             }, solid('#1a1c20'), { opacity: 0.35, layer: 1 }));
         }
     }
-    // Thin dark outer edge on the kerbs so they read at speed
-    world.add(strip(rp, add(kR, -0.2 * scale), kR, 0.72, (i) => rc[i], solid('#5a1414'), { layer: 2 }));
-    world.add(strip(rp, neg(kL), neg(kL, -0.2 * scale), 0.72, (i) => rc[i], solid('#5a1414'), { layer: 2 }));
     buildRacingLine(t);
 
-    // Barriers exactly where the physics wall is; skipped where another part of the track is closer. 1 m tall, or where
-    // the barrier stands in the bank between two roads at different heights, tall enough to stand 1 m above the ground
-    // there (a retaining wall) instead of being buried in it
-    const wallOff = half + (t.wallOffset ?? WALL_OFFSET);
-    const ok = {}, foot = {}, H0 = heights(rp), redWhite = alternate('#d62828', '#f2f2f2'), tyre = solid('#1b1b1b'), fence = solid('#d8dde2');
-    const med5 = (A) => A.map((_, i) => [-2, -1, 0, 1, 2].map((d) => A[(i + d * K + m) % m]).sort((a, b) => a - b)[2]); // no one-point spikes
-    for (const dir of [1, -1]) {
-        // drawn only where the physics wall is: each point of the smooth curve's barrier line checked itself (holding a
-        // track point's answer along the curve let pieces through on the inside of hairpins and over Suzuka's lower road)
-        // ...and only where the line's nearest bit of track is its own (within ±4 points): on the inside of a hairpin tighter
-        // than the barrier distance the line folds back past the apex, far from the road but on the wrong side
-        foot[dir] = offsetPoints(rp, dir * wallOff);
-        const openW = t.openWall ? t.openWall[dir > 0 ? 0 : 1] : null; // no barrier there (Track.js openWalls), as in physics
-        ok[dir] = foot[dir].map((p, k) => {
-            if (openW && openW[Math.floor(k / K)]) return false;
-            if (distToPath(p, path) <= wallOff * 0.95) return false;
-            if (t.pit && distToPath(p, t.pit.path, false) < t.pit.width / 2 + (PIT_RUNOFF_M + 2) * scale) return false;
-            const d = Math.abs(trackIndex(path, p.x, p.y, null) - Math.floor(k / K));
-            return Math.min(d, n - d) <= 4;
-        });
-    }
+    // Barriers where the physics has them (track.walls: build data barriers; Task 11 draws each kind properly): from the
+    // ground (or 0.3 m under the road, whichever is lower) to h above the road or the ground, a see-through fence on top
+    const barrierColor = { concrete: '#a29d92', armco: '#c9ced4', tyres: '#1b1b1b', tecpro: '#2b5cab', wall: '#a29d92' };
+    const fence = solid('#d8dde2');
     wallBuilders.push((at) => {
-        for (const dir of [1, -1]) {
-            // from the ground (or the road, whichever is lower: no gap under it where the ground falls away past the run-off)
-            // to 1 m above the road or the ground, whichever is higher
-            const g = foot[dir].map((p) => at(p.x, p.y) * scale * ELEVATION_SCALE);
-            const base = med5(g.map((h, i) => Math.min(0, h - H0[i]) - 0.3 * scale));
-            // a piece joins two neighbouring line points; none where they are far apart (the line folds on the inside of a bend)
-            const F = foot[dir], keep = (i) => ok[dir][i] && ok[dir][(i + 1) % m] && Math.hypot(F[(i + 1) % m].x - F[i].x, F[(i + 1) % m].y - F[i].y) < 4 * RENDER_STEP_M * scale;
-            const top = med5(g.map((h, i) => Math.max(1 * scale, h + 1 * scale - H0[i])));
-            const stripe = (i) => Math.floor(i / Math.max(1, K / 2)); // red/white blocks ~5 m long, whatever the curve's step
-            // concrete from the ground up to the barrier, the 1 m barrier (red/white, tyres at slow corners) on top
-            groundWalls.add(wall(rp, dir * wallOff, top.map((v, i) => v - 1 * scale - base[i]), keep, solid('#a29d92'), base));
-            groundWalls.add(wall(rp, dir * wallOff, 1 * scale, keep, (i) => (rslow[dir][i] ? tyre(i) : redWhite(stripe(i))), top.map((v) => v - 1 * scale)));
-            // a see-through catch fence on top (not on Low: a big transparent surface costs fill rate)
-            if (Q.scenery >= 0.5) groundWalls.add(wall(rp, dir * wallOff, 3 * scale, keep, fence, top, { opacity: 0.22 }));
+        for (const w of t.build.barriers) {
+            const P = w.pts, H = heights(P), keep = (i) => i < P.length - 1, h = (w.h || 1) * scale;
+            const g = P.map((p) => at(p.x, p.y) * scale * ELEVATION_SCALE);
+            const base = g.map((v, i) => Math.min(0, v - H[i]) - 0.3 * scale), top = g.map((v, i) => Math.max(h, v + h - H[i]));
+            groundWalls.add(wall(P, 0, top.map((v, i) => v - base[i]), keep, solid(barrierColor[w.kind] || '#a29d92'), base));
+            if (w.fence && Q.scenery >= 0.5) groundWalls.add(wall(P, 0, (w.fence - (w.h || 1)) * scale, keep, fence, top, { opacity: 0.22 }));
         }
     });
     buildGroundWalls(coarse, GROUND_COARSE);
@@ -1589,7 +1554,7 @@ function buildWorld(t) {
         const H = heights(md), S = scale * ELEVATION_SCALE, keep = (i) => i < md.length - 1;
         const lo = md.map((q, i) => q.lo * S - H[i] - 0.3 * scale), hi = md.map((q, i) => q.hi * S - H[i] + ROAD_DRAW_Y);
         world.add(wall(md, 0, hi.map((v, i) => v - lo[i]), keep, solid('#a29d92'), lo));
-        world.add(wall(md, 0, 1 * scale, keep, (i) => redWhite(Math.floor(i / 2)), hi));
+        world.add(wall(md, 0, 1 * scale, keep, alternate('#d62828', '#f2f2f2'), hi));
         if (Q.scenery >= 0.5) world.add(wall(md, 0, 3 * scale, keep, fence, hi.map((v) => v + 1 * scale), { opacity: 0.22 }));
     }
 
@@ -1606,7 +1571,7 @@ function buildWorld(t) {
         world.add(m);
     }
     gridBoxes(t.startPositions);
-    if (t.pit) buildPit(t.pit, t);
+    if (t.pit) buildPit(t.pit, t, G.pit);
     for (const b of t.bridges || []) buildBridge(b, t);
     snapCamera = true; pitBlend = 0;
 }

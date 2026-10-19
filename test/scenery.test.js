@@ -3,8 +3,8 @@ const assert = require('node:assert');
 const Track = require('../src/game/Track');
 const Physics = require('../src/game/Physics');
 
-let S, E;
-before(async () => { S = await import('../public/js/scenery.js'); E = await import('../public/js/sim/elevation.js'); });
+let S, E, TM;
+before(async () => { S = await import('../public/js/scenery.js'); E = await import('../public/js/sim/elevation.js'); TM = await import('../public/js/trackMesh.js'); });
 const tracks = Track.loadAll();
 
 for (const id of Track.TRACK_IDS) {
@@ -47,7 +47,6 @@ function offsetPoints(P, off) {
     });
 }
 // Points on the asphalt every 3 m: { x, y, h (road height, m), i (segment) }
-const KNOWN_FOLDS = { cota: [650] };
 
 function asphalt(t, fn) {
     const P = t.path, n = P.length;
@@ -66,18 +65,16 @@ for (const id of Track.TRACK_IDS) {
     test(`${id}: no grass verge lies over any asphalt (hairpins, bridges, slopes)`, () => {
         const t = tracks[id], P = t.path, n = P.length, CELL = 20 * t.scale, grid = new Map();
         const key = (x, y) => `${Math.floor(x / CELL)},${Math.floor(y / CELL)}`;
-        for (const dir of [1, -1]) {
-            const A = offsetPoints(P, (dir > 0 ? t.edgeR : t.edgeL).map((e) => dir * e)), B = offsetPoints(P, S.vergeReach(t, dir).map((r) => dir * r));
-            for (let i = 0; i < n; i++) {
-                const j = (i + 1) % n, h = Math.max(t.z[i], t.z[j]);
-                for (const tri of [[A[i], B[i], B[j]], [A[i], B[j], A[j]]]) {
-                    const xs = tri.map((p) => p.x), ys = tri.map((p) => p.y);
-                    for (let cx = Math.floor(Math.min(...xs) / CELL); cx <= Math.floor(Math.max(...xs) / CELL); cx++)
-                        for (let cy = Math.floor(Math.min(...ys) / CELL); cy <= Math.floor(Math.max(...ys) / CELL); cy++) {
-                            const k = `${cx},${cy}`; if (!grid.has(k)) grid.set(k, []); grid.get(k).push({ tri, h, i });
-                        }
+        // the verge as drawn (trackMesh.js): its triangles, each at its highest vertex's road height (metres)
+        const G = TM.buildTrackGeometry(t);
+        for (const g of [G.verge.R, G.verge.L]) for (let q = 0; q < g.index.length; q += 3) {
+            const vs = [0, 1, 2].map((d) => g.index[q + d]), tri = vs.map((v) => ({ x: g.position[v * 3], y: g.position[v * 3 + 2] }));
+            const h = (Math.max(...vs.map((v) => g.position[v * 3 + 1])) - TM.LAYER_Y.verge) / t.scale;
+            const xs = tri.map((p) => p.x), ys = tri.map((p) => p.y);
+            for (let cx = Math.floor(Math.min(...xs) / CELL); cx <= Math.floor(Math.max(...xs) / CELL); cx++)
+                for (let cy = Math.floor(Math.min(...ys) / CELL); cy <= Math.floor(Math.max(...ys) / CELL); cy++) {
+                    const k = `${cx},${cy}`; if (!grid.has(k)) grid.set(k, []); grid.get(k).push({ tri, h });
                 }
-            }
         }
         const side = (p, a, b) => (p.x - b.x) * (a.y - b.y) - (a.x - b.x) * (p.y - b.y);
         // a zero-width verge (reach = the edge) is no triangle at all: nothing is inside it
@@ -87,9 +84,7 @@ for (const id of Track.TRACK_IDS) {
             // the verge is drawn 0.05 m under the asphalt (0.3 vs 0.6 world units): higher than that and it shows
             for (const v of grid.get(key(p.x, p.y)) || []) if (v.h > p.h + 0.05 && inside(p, v.tri)) { bad.push(Math.round(t.cum[p.i] / t.scale)); break; }
         });
-        // KNOWN_FOLDS: the verge of a hairpin apex whose real width narrows fast (COTA T1: 13 m to 8.5 m in 20 m) laps ~5 cm
-        // over the wider road just before it. Task 10 (welded ribbons) removes this list
-        assert.deepStrictEqual([...new Set(bad)].filter((m) => !(KNOWN_FOLDS[id] || []).includes(m)), [], `${id}: grass over the road at metres`);
+        assert.deepStrictEqual([...new Set(bad)], [], `${id}: grass over the road at metres`);
     });
 
     // The ground as game3d.js builds it: banked between roads, 256 x 256 grid, pressed down under asphalt and kerbs
