@@ -1,0 +1,116 @@
+{
+ "about": "Free Sketchfab models used for the cars (docs/superpowers/specs/2026-10-19-real-f1-cars-design.md). scripts/cars/fetch.py downloads them; build.py builds public/models from them.",
+ "cars": {
+  "redbull": {
+   "uid": "e4afe46f3aab4b23a418da06fc163821",
+   "name": "Oracle Red Bull F1 Car RB19 2023",
+   "author": "Redgrund",
+   "licence": "CC Attribution",
+   "url": "https://sketchfab.com/3d-models/e4afe46f3aab4b23a418da06fc163821",
+   "year": 2023
+  },
+  "redbull-suzuka": {
+   "uid": "e4afe46f3aab4b23a418da06fc163821",
+   "name": "Oracle Red Bull F1 Car RB19 2023",
+   "author": "Redgrund",
+   "licence": "CC Attribution",
+   "url": "https://sketchfab.com/3d-models/e4afe46f3aab4b23a418da06fc163821",
+   "year": 2023,
+   "repaint": {
+    "to": "RB-suzuka"
+   }
+  },
+  "mercedes": {
+   "uid": "26fda66f3e8a48d5a636056f8a64e299",
+   "name": "Mercedes F1 W14 [FREE!!]",
+   "author": "3dblender_1",
+   "licence": "CC Attribution",
+   "url": "https://sketchfab.com/3d-models/26fda66f3e8a48d5a636056f8a64e299",
+   "year": 2023
+  },
+  "ferrari": {
+   "uid": "ecb0f812bc454331bbe721655b0780ec",
+   "name": "Scuderia Ferrari F1 SF23 2023",
+   "author": "Redgrund",
+   "licence": "CC Attribution",
+   "url": "https://sketchfab.com/3d-models/ecb0f812bc454331bbe721655b0780ec",
+   "year": 2023
+  },
+  "mclaren": {
+   "uid": "8340e27c325345e4aa92a6a31cc34b1e",
+   "name": "McLaren MCL60 F1 2023",
+   "author": "Redgrund",
+   "licence": "CC Attribution",
+   "url": "https://sketchfab.com/3d-models/8340e27c325345e4aa92a6a31cc34b1e",
+   "year": 2023
+  },
+  "astonmartin": {
+   "uid": "4aff0e5da09c413d92a01a8f45a445ff",
+   "name": "Aston Martin AMR23 S3 2023 | www.vecarz.com",
+   "author": "vecarz",
+   "licence": "CC Attribution-NonCommercial",
+   "url": "https://sketchfab.com/3d-models/4aff0e5da09c413d92a01a8f45a445ff",
+   "year": 2023
+  },
+  "alpine": {
+   "uid": "e97c2bb620d8461c92a03d007d63188c",
+   "name": "Alpine A523 2023",
+   "author": "Redgrund",
+   "licence": "CC Attribution",
+   "url": "https://sketchfab.com/3d-models/e97c2bb620d8461c92a03d007d63188c",
+   "year": 2023
+  },
+  "williams": {
+   "uid": "52418bf2132a4dc6b85aac0846630fc2",
+   "name": "Williams Fw46",
+   "author": "MattDoesBlender",
+   "licence": "CC Attribution",
+   "url": "https://sketchfab.com/3d-models/52418bf2132a4dc6b85aac0846630fc2",
+   "year": 2024,
+   "repaint": {
+    "to": "FW45-2023"
+   }
+  },
+  "alphatauri": {
+   "uid": "a8003f86f7a24dfbad6cbc1c90069eaf",
+   "name": "AlphaTauri AT04  2023",
+   "author": "Redgrund",
+   "licence": "CC Attribution",
+   "url": "https://sketchfab.com/3d-models/a8003f86f7a24dfbad6cbc1c90069eaf",
+   "year": 2023
+  },
+  "alfaromeo": {
+   "uid": "6be2b9c98a9a4534b197c13dba9eeff6",
+   "name": "AlfaRomeo F1 Team KICK C43 #24 ZHOU",
+   "author": "Metazeon",
+   "licence": "CC Attribution",
+   "url": "https://sketchfab.com/3d-models/6be2b9c98a9a4534b197c13dba9eeff6",
+   "year": 2023
+  },
+  "haas": {
+   "uid": "1f41e03886724bc6acd16c92402989bc",
+   "name": "2026 Haas VF-26",
+   "author": "Dave Love SketchFab",
+   "licence": "CC Attribution",
+   "url": "https://sketchfab.com/3d-models/1f41e03886724bc6acd16c92402989bc",
+   "year": 2026,
+   "repaint": {
+    "to": "VF23-2023"
+   }
+  }
+ },
+ "tyre": {
+  "uid": "307a0557dde44cf1a7f6f2d1958c383d",
+  "name": "F1 TYRES PACK 2022 - HARD - MEDIUM - SOFT",
+  "author": "zordew",
+  "licence": "CC Attribution",
+  "url": "https://sketchfab.com/3d-models/307a0557dde44cf1a7f6f2d1958c383d"
+ },
+ "helmet": {
+  "uid": "1124fa1f754645d7b9d54de84009d463",
+  "name": "F1 Helmet ZhouGuanyu 24",
+  "author": "Miopass",
+  "licence": "CC Attribution",
+  "url": "https://sketchfab.com/3d-models/1124fa1f754645d7b9d54de84009d463"
+ }
+}
