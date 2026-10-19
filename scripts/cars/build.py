@@ -202,7 +202,7 @@ def tris(o):
     return sum(len(p.vertices) - 2 for p in o.data.polygons)
 
 
-def decimated_copy(src, name, target):
+def decimated_copy(src, name, target, keep_materials=False):
     o = src.copy(); o.data = src.data.copy(); o.name = name
     bpy.context.scene.collection.objects.link(o)
     mod = o.modifiers.new('dec', 'DECIMATE')
@@ -214,7 +214,8 @@ def decimated_copy(src, name, target):
     if tris(o) > target:
         mod = o.modifiers.new('dec', 'DECIMATE'); mod.ratio = target / tris(o) * 0.99
         bpy.ops.object.modifier_apply(modifier='dec')
-    o.data.materials.clear()
+    if not keep_materials:  # the body bakes into one new material
+        o.data.materials.clear()
     log(f'{name}: {tris(o)} triangles')
     return o
 
@@ -359,5 +360,6 @@ def build(team):
     return out
 
 
-args = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
-build(args[0])
+if __name__ == '__main__':  # build_parts.py imports the helpers
+    args = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
+    build(args[0])

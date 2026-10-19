@@ -52,3 +52,24 @@ function checkCar(team) {
 }
 
 test('the Mercedes W14: markers, budgets and real proportions', () => checkCar('mercedes'));
+
+test('tyres: Soft, Medium and Hard tyres and a rim, light, at the game\'s wheel radius, unit width on the axle', () => {
+    const G = readGlb(path.join(ROOT, 'public/models/tyre.glb'));
+    for (const n of ['tyre_S', 'tyre_M', 'tyre_H']) {
+        assert.ok(G.nodes.has(n), n);
+        assert.ok(G.triangles(n) <= 3000, `${n}: ${G.triangles(n)} triangles`);
+        const b = G.bounds(n), r = (b.max[1] - b.min[1]) / 2, w = b.max[2] - b.min[2];
+        assert.ok(Math.abs(r - 0.36) <= 0.01, `${n}: radius ${r.toFixed(3)}`);
+        assert.ok(Math.abs(w - 1) <= 0.05, `${n}: width ${w.toFixed(2)} (unit, along the axle: three.js z)`);
+    }
+    assert.ok(G.nodes.has('rim') && G.triangles('rim') <= 1500, `rim: ${G.triangles('rim')} triangles`);
+});
+
+test('helmet: paint the game tints, a visor, shoulders; light and helmet-sized', () => {
+    const G = readGlb(path.join(ROOT, 'public/models/helmet.glb')), mats = (G.json.materials || []).map((m) => m.name);
+    for (const m of ['helmet_paint', 'visor', 'suit']) assert.ok(mats.includes(m), `material ${m}`);
+    assert.ok(G.nodes.has('helmet') && G.triangles('helmet') <= 4000, `helmet: ${G.triangles('helmet')} triangles`);
+    assert.ok(G.nodes.has('shoulders') && G.triangles('shoulders') <= 800, `shoulders: ${G.triangles('shoulders')} triangles`);
+    const b = G.bounds('helmet'), h = b.max[1] - b.min[1];
+    assert.ok(h >= 0.26 && h <= 0.32, `helmet ${h.toFixed(2)} m tall`);
+});
