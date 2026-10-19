@@ -1,19 +1,19 @@
 // F1-style handling model. SI units inside; world units = metres × scale.
-// Tuned against test/carPhysics.test.js: 0-100 ≈ 2.9 s, vmax ≈ 343 km/h, 300→0 ≈ 112 m (realistic),
-// cornering assisted (LAT_ASSIST, YAW_ASSIST) so chicanes are drivable on a keyboard.
+// Tuned against test/carPhysics.test.js to real 2023 figures: 0-100 ≈ 2.6 s, vmax ≈ 343 km/h, 5-6 g braking from 300 km/h,
+// 2 g slow / 5 g fast cornering, a Monza limit lap near pole; YAW_ASSIST keeps it slide-free on a keyboard.
 const C = {
     MASS: 798,             // kg, 2023 minimum incl. driver
     POWER: 750000,         // W (~1000 hp)
     CDA: 1.4,              // drag area, m²
-    CLA: 3.5,              // downforce area, m²
+    CLA: 4.0,              // downforce area, m² (a mid-downforce 2023 car: real cars run ~3.5 at Monza to ~5 at Monaco)
     RHO: 1.225,            // air density, kg/m³
     G: 9.81,
-    MU: 1.6,               // tyre grip on asphalt
+    MU: 1.8,               // tyre grip on asphalt: ~2 g in slow corners, 5-5.5 g at 300 km/h with the downforce (real 2023)
     TRACTION: 0.6,         // share of load on the driven (rear) tyres
     WHEELBASE: 3.6,        // m
     MAX_STEER: 0.35,       // rad of wheel angle at standstill
     STEER_FADE: 80,        // m/s: max steer halves by this speed
-    LAT_ASSIST: 2.0,       // cornering grip multiplier (assist); launch/braking stay at MU
+    LAT_ASSIST: 1.0,       // cornering grip multiplier: 1 = real grip (was 2: twice an F1 car's cornering)
     YAW_ASSIST: 1.25,      // car may rotate this much faster than grip allows → controlled slide
     MAX_SLIP: 0.21,        // rad (~12°): assist switches off beyond this slide angle, so no spins
     BRAKE_STEER_GIVE: 0.45, // steering priority: full lock leaves brakes 55% of grip, straight line 100%

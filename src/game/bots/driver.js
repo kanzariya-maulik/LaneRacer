@@ -52,6 +52,18 @@ function insideSide(t, i) {
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 // Pure pursuit onto (x, y): wheel angle for the arc through it, as a share of the lock (full help: the larger lock)
+// The racing line's curvature per path point (1/m, unsigned), once per track: the turn the car makes on the line
+const lineK = new WeakMap();
+const lineCurv = (t) => lineK.get(t) || lineK.set(t, RacingLine.curvatures(RacingLine.linePoints(t.path, t.racingLine.offset), t.scale).map(Math.abs)).get(t);
+// The turn the car is making: the line's while on it; off it (wide out of a corner) the arc back to the aim point, if tighter
+const OFF_LINE_M = 1.5;
+function turnCurv(p, t, here, L, x, y) {
+    const sc = t.scale, q = t.path[here], off = ((p.x - q.x) * L.N[here].x + (p.y - q.y) * L.N[here].y - t.racingLine.offset[here]) / sc;
+    if (Math.abs(off) <= OFF_LINE_M) return lineCurv(t)[here];
+    const dx = (x - p.x) / sc, dy = (y - p.y) / sc;
+    return Math.max(lineCurv(t)[here], Math.abs(2 * (-dx * Math.sin(p.angle) + dy * Math.cos(p.angle))) / Math.max(1, dx * dx + dy * dy));
+}
+
 function steerTo(p, x, y, sc, v) {
     const dx = (x - p.x) / sc, dy = (y - p.y) / sc, d2 = Math.max(1, dx * dx + dy * dy);
     const lat = -dx * Math.sin(p.angle) + dy * Math.cos(p.angle);
@@ -195,9 +207,13 @@ function drive(p, ctx) {
         const lim = (r.alongside.off - Math.sign(r.alongside.l) * ROOM_M) * sc;
         o = r.alongside.l > 0 ? Math.min(o, lim) : Math.max(o, lim);
     }
-    const steer = steerTo(p, t.path[j].x + L.N[j].x * o, t.path[j].y + L.N[j].y * o, sc, v);
+    const tx = t.path[j].x + L.N[j].x * o, ty = t.path[j].y + L.N[j].y * o, steer = steerTo(p, tx, ty, sc, v);
     const err = vt - v;
-    const throttle = err > 0 ? Math.min(1, 0.35 + err * 0.5) : 0, brake = err < -0.5 ? Math.min(1, -err * 0.3) : 0;
+    // Friction circle (carphysics): the drive force takes grip from the turn, so only what the turn leaves is used, as a
+    // driver feeds in the throttle out of a corner (at real F1 grip a floored exit runs wide)
+    const grip = C.MU * (p.tyreGrip ?? 1) * (C.MASS * C.G + 0.5 * C.RHO * C.CLA * v * v);
+    const spare = Math.sqrt(Math.max(0, grip * grip - (C.MASS * v * v * turnCurv(p, t, here, L, tx, ty)) ** 2)) / Math.min(C.POWER / Math.max(v, 1), C.TRACTION * grip);
+    const throttle = err > 0 ? Math.min(1, 0.35 + err * 0.5, Math.max(0.2, spare)) : 0, brake = err < -0.5 ? Math.min(1, -err * 0.3) : 0;
     const lift = Math.abs(steer) > 0.95 && v > 8 ? 0.2 : 1; // at full lock at speed it can't make the turn: lift like a driver would (crawling out of gravel it needs the power)
     return { throttle: (bogging ? Math.min(throttle, 0.6) : throttle) * lift, brake, steer, drs: !!p.drsAvailable && brake === 0 };
 }

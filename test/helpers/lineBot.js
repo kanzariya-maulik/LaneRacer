@@ -48,8 +48,12 @@ function driveLap(track, assist, { driver = 'limit', aim = 1.0, offsetM = 0, wor
         // Speed: the line's speed a short way ahead, so braking starts in time
         const target = aim * rl.speed[(i + 2) % n];
         // Friction circle (as carphysics): leave the cornering grip the line needs here, use the rest to drive or brake
-        const spare = grip * Math.sqrt(Math.max(0, 1 - ((v * v * k[i] * C.MASS) / (C.LAT_ASSIST * grip)) ** 2));
-        const throttle = Math.min((target - v) / 2, spare / Math.min(C.POWER / Math.max(v, 1), C.TRACTION * grip));
+        // (the turn it is making: the line's on it, or the pursuit arc's when more than 1.5 m off it, e.g. wide out of a
+        // hairpin: as the bots' driver.js)
+        const offLine = Math.sqrt(d2(i)) / sc > 1.5;
+        const turn = offLine ? Math.max(Math.abs(k[i]), Math.abs((2 * Math.sin(alpha)) / ld)) : Math.abs(k[i]);
+        const spare = grip * Math.sqrt(Math.max(0, 1 - ((v * v * turn * C.MASS) / (C.LAT_ASSIST * grip)) ** 2));
+        const throttle = Math.min((target - v) * 2, spare / Math.min(C.POWER / Math.max(v, 1), C.TRACTION * grip));
         const brake = Math.min((v - target) / 2, spare / ((1 - C.BRAKE_STEER_GIVE * Math.abs(steer)) * grip));
         p.input = driver === 'flat' ? { steer, throttle: 1, brake: 0 }
             : { steer, throttle: Math.max(0, Math.min(1, throttle)), brake: Math.max(0, Math.min(1, brake)) };

@@ -61,3 +61,18 @@ test('eye and wheel per car: the model\'s own markers, the procedural values wit
     assert.deepStrictEqual(V.wheelPosFor(null), V.WHEEL_POS);
     assert.deepStrictEqual(V.wheelPosFor({ wheelPos: [0.7, 0, 0.6] }), [0.7, 0, 0.6]);
 });
+
+test('front wheels steer anti-Ackermann as an F1 car: the inner wheel turns less than the outer one', () => {
+    const [l, r] = V.frontSteer(0.3); // turning right: the right wheel is the inner one
+    assert.ok(r > 0 && l > r, `left ${l} right ${r}`);
+    const [l2, r2] = V.frontSteer(-0.3); // turning left: the left wheel is inner
+    assert.ok(l2 < 0 && r2 < l2, `left ${l2} right ${r2}`);
+    assert.ok(Math.abs((l + r) / 2 - 0.3) < 1e-9, 'the mean is the steering angle');
+    assert.deepStrictEqual(V.frontSteer(0), [0, 0]);
+});
+
+test('cars drawn and collided at CAR_SCALE of real size (a touch smaller beside the track), the hitbox the same', async () => {
+    const Physics = (await import('../public/js/sim/physics.js')).default;
+    assert.ok(Physics.CAR_SCALE >= 0.85 && Physics.CAR_SCALE < 1, `${Physics.CAR_SCALE}`);
+    assert.ok(Math.abs(Physics.CAR_HALF_LENGTH_M - 2.74 * Physics.CAR_SCALE) < 1e-9 && Math.abs(Physics.CAR_HALF_WIDTH_M - 1.0 * Physics.CAR_SCALE) < 1e-9);
+});

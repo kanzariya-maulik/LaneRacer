@@ -2,9 +2,12 @@ import * as THREE from 'three';
 import { buildCar, buildSteeringWheel, liveryTexture as carLivery, WHEEL_RADIUS } from './carModel.js';
 import { WHEELS } from './carShape.js';
 import { loadTeamCar, cloneForCar, detailFor, loadParts } from './carModels.js';
-import { VIEW_NAMES, VIEW_FOV, EYE_TILT, CHASE, nextView, viewOf, onboard, wheelAngle, toThree, eyeFor, wheelPosFor } from './views.js';
+import { VIEW_NAMES, VIEW_FOV, EYE_TILT, CHASE, nextView, viewOf, onboard, wheelAngle, toThree, eyeFor, wheelPosFor, frontSteer } from './views.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import Physics from './sim/physics.js';
+const CAR_SCALE = Physics.CAR_SCALE; // every car drawn this much under real size (models, wheels, drivers, cameras)
 import { CSMShadowNode } from 'three/addons/csm/CSMShadowNode.js';
 import { buildPost } from './postfx.js';
 import { keyboardStep, gamepadInput, liftOffBrake } from './input.js';
@@ -169,8 +172,10 @@ function applySky(sky) {
     if (isDay) sun.intensity = sky.power * 3;
     renderer.toneMappingExposure = sky.exposure ?? 1;
     // Sky light now comes from the environment map: the hemisphere light is only a small fill where there is one
-    hemi.intensity = sky.hemi * (Q.envMap && isDay ? 0.35 : 1); // night: the dark dome gives no fill, keep the hemisphere
-    scene.environmentIntensity = isDay ? 0.12 : 0.25; // the physical sky is bright: more washes the scene milky
+    // Daylight: the sky lights the shade at about a quarter of the sun (real ratio ~3-5:1); at 0.12 the shadow side of
+    // every car was black. Above ~0.45 the scene goes flat and milky
+    hemi.intensity = sky.hemi * (Q.envMap && isDay ? 0.6 : 1); // night: the dark dome gives no fill, keep the hemisphere
+    scene.environmentIntensity = isDay ? 0.3 : 0.45; // night: the floodlit room (envTexture) on paint and asphalt
     envTex?.dispose(); envTex = null;
     scene.environment = Q.envMap ? envTexture() : null;
     // The post chain follows the level and the sky (sun glare is day-only); buildWorld always calls this after applyLevel
@@ -883,7 +888,7 @@ function updateCrews(dt) {
         if (c.id === null) continue;
         const p = gs[c.id], box = p.box, phase = p.stopPhase || '', h = pitY(box.x, box.y);
         if (!c.spots || c.spotsFor !== box) {
-            c.spots = crew17(box, scale, td.pit.trackSide); c.spotsFor = box; c.marks = tMarks(box, scale);
+            c.spots = crew17(box, scale * CAR_SCALE, td.pit.trackSide); // round the (smaller) car c.spotsFor = box; c.marks = tMarks(box, scale);
             c.mesh.material.color.set(teamInfo[p.teamId]?.chatColor || '#888888');
             c.group.position.set(c.spots[16].idle.x, h, c.spots[16].idle.y); c.group.rotation.y = -box.angle;
             c.brake.rotation.y = c.go.rotation.y = facing(box.angle) + box.angle; // net yaw = facing(): toward the arriving car
@@ -1634,7 +1639,7 @@ function blobShadow(strength = 1) {
         g.fillRect(0, 0, 64, 64);
         blobTex = new THREE.CanvasTexture(c);
     }
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(5.6 * scale, 2.3 * scale), new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, opacity: strength, depthWrite: false, polygonOffset: true, polygonOffsetFactor: depthBias(-2, reversed), polygonOffsetUnits: depthBias(-4, reversed) }));
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(5.6 * CAR_SCALE * scale, 2.3 * CAR_SCALE * scale), new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, opacity: strength, depthWrite: false, polygonOffset: true, polygonOffsetFactor: depthBias(-2, reversed), polygonOffsetUnits: depthBias(-4, reversed) }));
     m.rotation.x = -Math.PI / 2;
     m.position.set(0.2 * scale, 0.1, 0); // just over the asphalt under the car, a touch forward of the axle midpoint
     m.renderOrder = 1;
@@ -1645,18 +1650,15 @@ function blobShadow(strength = 1) {
 let envTex = null;
 function envTexture() {
     if (envTex) return envTex;
-    let s = skyScene;
-    if (skyDome.visible) { // night: the dome and its stars
-        s = new THREE.Scene();
-        const dome = skyDome.clone();
-        dome.position.set(0, 0, 0); dome.scale.setScalar(50);
-        s.add(dome);
-    }
+    // Night: what a car reflects under a floodlight rig is bright light panels all round, not the black sky (from the
+    // dark dome every car was a black shape): three's RoomEnvironment, a neutral room lit by panels
+    const s = skyDome.visible ? new RoomEnvironment() : skyScene;
     // Without the sun disc: the sun light lights the scene already, a disc blurred into the map would add it twice
     daySky.showSunDisc.value = 0;
     const pmrem = new THREE.PMREMGenerator(renderer);
     envTex = pmrem.fromScene(s, 0, 0.1, 1000).texture;
     pmrem.dispose(); // its blur targets and materials; the env texture stays
+    if (s !== skyScene) s.dispose();
     daySky.showSunDisc.value = 1;
     return envTex;
 }
@@ -1672,7 +1674,7 @@ function makeCar(id) {
     if (asset) model = realCar(asset, lp.teamId, wheels);
     if (model) {
         driver = model.getObjectByName('driver');
-        model.scale.setScalar(scale);
+        model.scale.setScalar(scale * CAR_SCALE);
         root.add(model);
     } else if (carTemplate) {
         model = carTemplate.clone(true);
@@ -1693,10 +1695,11 @@ function makeCar(id) {
             wheels.push(w);
             w.add(w.userData.tyre = new THREE.Object3D()); // the real tyre's frame: 0.36 m radius, the car's own width
             w.userData.tyre.scale.set(1, 1, WHEELS[name][2]);
+            if (name.endsWith('L')) w.userData.tyre.rotation.y = Math.PI; // tyre.glb's outer face (rim, lettering) out
             // Drawn by the shared wheel batches instead (tyre + rim for every car = 2 draws)
             w.traverse((o) => { if (o.isMesh) { o.visible = false; o.castShadow = false; } });
         }
-        model.scale.setScalar(scale);
+        model.scale.setScalar(scale * CAR_SCALE);
         root.add(model);
     } else {
         const box = new THREE.Mesh(new THREE.BoxGeometry(5.6 * scale, 1 * scale, 2 * scale), new THREE.MeshStandardMaterial({ color: lp.color }));
@@ -1722,6 +1725,7 @@ function realCar(asset, teamId, wheels) {
         w.position.set(...toThree(wh.pos));
         const tyre = new THREE.Object3D();
         tyre.scale.set(wh.radius / WHEEL_RADIUS, wh.radius / WHEEL_RADIUS, wh.width);
+        if (name.endsWith('L')) tyre.rotation.y = Math.PI; // tyre.glb's outer face (rim, lettering) out on both sides
         w.add(tyre);
         w.userData.tyre = tyre;
         // the procedural tyre and cover too (hidden: the batches draw them) for when the real tyres didn't load
@@ -1797,13 +1801,14 @@ function updateCars(dt) {
         if (s.stopPhase === 'service') r.position.y += LIFT_M * scale; // the jacks lift the car for the wheel change
         const far = camera.position.distanceTo(r.position) > 300 * scale; // wheels unreadable that far: 4 fewer draws per car
         for (const w of car.wheels) w.userData.show = !far;
-        for (const w of car.wheels) w.rotation.z -= (s.speed / (WHEEL_RADIUS_M * scale)) * dt;
+        for (const w of car.wheels) w.rotation.z -= (s.speed / (WHEEL_RADIUS_M * CAR_SCALE * scale)) * dt;
         if (skid) skidMarks(car, s, dt);
         // the cockpit eye is inside the helmet; T-cam looks over its top, as on TV
         if (car.driver) car.driver.visible = !(car === onboardCar && activeView === 'cockpit');
         // +steer turns toward +z (right); a +y rotation points the wheel toward -z, so negate
-        car.wheels[0] && (car.wheels[0].rotation.y = -(s.steer || 0)); // wheel_FL
-        car.wheels[1] && (car.wheels[1].rotation.y = -(s.steer || 0)); // wheel_FR
+        const [steerL, steerR] = frontSteer(s.steer || 0); // anti-Ackermann: the inner wheel turns less
+        car.wheels[0] && (car.wheels[0].rotation.y = -steerL); // wheel_FL
+        car.wheels[1] && (car.wheels[1].rotation.y = -steerR); // wheel_FR
         if (car.tag) {
             const m = camera.position.distanceTo(r.position) / scale;
             const fade = Math.min(1, Math.max(0, (TAG_GONE_M - m) / (TAG_GONE_M - TAG_FULL_M)));
@@ -1981,13 +1986,13 @@ function updateCamera(dt) {
     if (camera.fov !== VIEW_FOV[v]) { camera.fov = VIEW_FOV[v]; camera.updateProjectionMatrix(); }
     if (!onboard(v)) {
         // Height: the road behind the car (so the camera rises before a crest, not into it), never below the car's own level
-        const c = CHASE[v], bx = p.x - Math.cos(h) * c.back * scale, bz = p.z - Math.sin(h) * c.back * scale;
-        camera.position.set(bx, Math.max(p.y, roadY(bx, bz, h)) + c.up * scale, bz);
-        look.set(p.x + Math.cos(h) * c.ahead * scale, p.y + c.lookUp * scale, p.z + Math.sin(h) * c.ahead * scale);
+        const c = CHASE[v], k = scale * CAR_SCALE, bx = p.x - Math.cos(h) * c.back * k, bz = p.z - Math.sin(h) * c.back * k; // framed to the car's size
+        camera.position.set(bx, Math.max(p.y, roadY(bx, bz, h)) + c.up * k, bz);
+        look.set(p.x + Math.cos(h) * c.ahead * k, p.y + c.lookUp * k, p.z + Math.sin(h) * c.ahead * k);
     } else {
         // Bolted to the car: its heading, pitch and roll, no smoothing (TV onboards and the F1 games look like this)
         car.root.updateMatrixWorld();
-        camera.position.set(...toThree(eyeFor(v, car.asset))).multiplyScalar(scale).applyMatrix4(car.root.matrixWorld);
+        camera.position.set(...toThree(eyeFor(v, car.asset))).multiplyScalar(scale * CAR_SCALE).applyMatrix4(car.root.matrixWorld);
         car.root.getWorldQuaternion(camera.quaternion).multiply(eyeTurn.setFromEuler(eyeEuler.set(EYE_TILT[v], -Math.PI / 2, 0, 'YXZ'))); // camera -z → car +x
         look.set(0, 0, -10 * scale).applyQuaternion(camera.quaternion).add(camera.position);
     }

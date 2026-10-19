@@ -23,6 +23,8 @@ const CONNECTOR_R_M = 50;       // entry / exit curves no tighter than this (rea
 const TAPER_MAX_M = 60;         // a mouth reaches full lane width within this
 const MOUTH_STEP_M = 5, MOUTH_MAX_M = 300; // mouths tried further from the garages until a connector fits
 const PIT_STEP_M = 4;           // spacing of the rebuilt lane's points
+const MIN_WIDTH_M = 11.5;      // narrow surveys widened to this median width (F1 circuits: about 11-15 m)
+const WALL_ROOM_M = 1.5;       // a widened edge stays this far from the barrier
 const PIT_SNAP_M = 0.5;         // lane points this little short of the wall room are moved out to it (see buildPit)
 const PIT_SMOOTH_PASSES = 400, PIT_SMOOTH_MAX_M = 3, PIT_KINK_DEG = 4; // smoothing the surveyed lane
 
@@ -383,9 +385,24 @@ function build(raw, circuit = {}) {
     // Staggered two-column grid behind the start line, or behind a separate grid line where the circuit has one
     // (gridLineM metres past the timing line: Monza, Suzuka); -1 = driver's left (y points down the screen)
     const gridS = startS + fromStart(circuit.gridLineM || 0);
-    // White lines per point: the real edges (the survey's), right and left of the driver: the track limits
-    const edge = (k) => pts.map((_, i) => (raw.edges ? raw.edges[i][k] * scale : width / 2)); // no survey: half the width
+    // White lines per point: the real edges (the survey's), right and left of the driver: the track limits. A narrow
+    // survey (Monza, Spa, Suzuka... about 9 m) is widened to an F1 width, so real-size cars don't fill the road
+    const surveyM = raw.edges ? [...raw.edges.map((e) => e[0] + e[1])].sort((a, b) => a - b)[raw.edges.length >> 1] : width / scale;
+    const widen = Math.max(1, MIN_WIDTH_M / surveyM);
+    const edge = (k) => pts.map((_, i) => (raw.edges ? raw.edges[i][k] * scale * widen : width / 2)); // no survey: half the width
     const edgeR = edge(0), edgeL = edge(1);
+    if (raw.edges && raw.pit && widen > 1) { // ...but not into the surveyed pit lane beside it: the lane is built as before
+        const n = pts.length, half = raw.pit.width / 2, near = 10 * scale;
+        for (let i = 0; i < n; i++) {
+            const a = pts[(i - 1 + n) % n], b = pts[(i + 1) % n], l = Math.hypot(b.x - a.x, b.y - a.y) || 1, tx = (b.x - a.x) / l, ty = (b.y - a.y) / l;
+            for (const q of raw.pit.path) {
+                const dx = q.x - pts[i].x, dy = q.y - pts[i].y, along = dx * tx + dy * ty, lat = -dx * ty + dy * tx; // + = right
+                if (Math.abs(along) > near) continue;
+                const room = Math.abs(lat) - half, [e, k] = lat > 0 ? [edgeR, 0] : [edgeL, 1];
+                e[i] = Math.max(raw.edges[i][k] * scale, Math.min(e[i], room));
+            }
+        }
+    }
     const edgeOf = (s, side) => { // at lap distance s; side +1 right, -1 left
         const total = cum[pts.length]; s = ((s % total) + total) % total;
         let i = 0; while (cum[i + 1] < s) i++;
@@ -408,7 +425,7 @@ function build(raw, circuit = {}) {
     // the car physics (public/js/sim/elevation.js)
     const shape = raw.z ? Elevation.profile(raw.z, cum, scale) : { grade: null, vcurv: null };
     const tunnels = (raw.tunnels || []).map(([a, b]) => [onLap(a), onLap(b)]); // lap distances from point 0 (Monaco)
-    const track = { id: raw.id, name: raw.name, scale, width, tunnels, edgeR, edgeL, gridLine, path: pts, z: raw.z || null, grade: shape.grade, vcurv: shape.vcurv, cum, start, startS, drsZones, checkpoints, sectorCps, startPositions, safeSpeed: Assist.safeSpeeds(pts, scale, shape.vcurv), pit: null };
+    const track = { id: raw.id, name: raw.name, scale, width: width * widen, tunnels, edgeR, edgeL, gridLine, path: pts, z: raw.z || null, grade: shape.grade, vcurv: shape.vcurv, cum, start, startS, drsZones, checkpoints, sectorCps, startPositions, safeSpeed: Assist.safeSpeeds(pts, scale, shape.vcurv), pit: null };
     if (raw.pit) track.pit = buildPit(raw, circuit, track);
     track.bridges = buildBridges(track);
     track.medians = buildMedians(track);
@@ -421,6 +438,11 @@ function build(raw, circuit = {}) {
     const normal = (i) => { const a = pts[(i - 1 + n) % n], b = pts[(i + 1) % n], l = Math.hypot(b.x - a.x, b.y - a.y) || 1; return [-(b.y - a.y) / l, (b.x - a.x) / l]; }; // + = right
     track.barrierR = pts.map((p, i) => { const [nx, ny] = normal(i); return Math.min(far, Walls.rayToWall(index, p.x, p.y, nx, ny, far)); });
     track.barrierL = pts.map((p, i) => { const [nx, ny] = normal(i); return Math.min(far, Walls.rayToWall(index, p.x, p.y, -nx, -ny, far)); });
+    if (raw.edges && widen > 1) { // widened, but never closer to a barrier than WALL_ROOM_M (a hand-built layout's walls stay put)
+        for (const [e, b, k] of [[edgeR, track.barrierR, 0], [edgeL, track.barrierL, 1]]) {
+            for (let i = 0; i < n; i++) e[i] = Math.max(raw.edges[i][k] * scale, Math.min(e[i], b[i] - WALL_ROOM_M * scale));
+        }
+    }
     const lap = pts.map((_, i) => ((((cum[i] - startS) % total) + total) % total) / scale); // metres past the start line
     const kerb = (side) => lap.map((m) => {
         const k = track.build.kerbs.find((q) => q.side === side && (q.fromM <= q.toM ? m >= q.fromM && m < q.toM : m >= q.fromM || m < q.toM));

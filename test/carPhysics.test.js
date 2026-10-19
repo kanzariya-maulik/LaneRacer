@@ -18,7 +18,7 @@ function pathRadius(v, seconds, input = COAST_LOCK, assist = 'off') {
     return (Math.hypot(c.vx, c.vy) / S) / ((vDir(c) - d0) / seconds);
 }
 
-test('launch: 0-100 km/h in 2.6–3.4 s, 0-200 under 7 s, top speed 320–360 km/h', () => {
+test('launch: 0-100 km/h in 2.4–3.4 s, 0-200 under 7 s, top speed 320–360 km/h', () => {
     const c = mk();
     let t = 0, t100 = null, t200 = null;
     while (t < 120) {
@@ -27,7 +27,7 @@ test('launch: 0-100 km/h in 2.6–3.4 s, 0-200 under 7 s, top speed 320–360 km
         if (t100 === null && kmh(c) >= 100) t100 = t;
         if (t200 === null && kmh(c) >= 200) t200 = t;
     }
-    assert.ok(t100 >= 2.6 && t100 <= 3.4, `0-100 ${t100}`);
+    assert.ok(t100 >= 2.4 && t100 <= 3.4, `0-100 ${t100}`);
     assert.ok(t200 < 7, `0-200 ${t200}`);
     assert.ok(kmh(c) >= 320 && kmh(c) <= 360, `vmax ${kmh(c)}`);
 });
@@ -56,9 +56,9 @@ test('too fast for a 50 m corner: the car runs wide', () => {
     assert.ok(r > 50, `radius ${r} m`); // can't hold the 50 m corner at 252 km/h
 });
 
-test('chicane: full lock at 75 km/h holds a path radius under 20 m', () => {
+test('chicane: full lock at 75 km/h holds a path radius under 25 m (real grip: 2 g, 22 m)', () => {
     const r = pathRadius(75 / 3.6, 0.5, { throttle: 0.3, brake: 0, steer: 1 });
-    assert.ok(r < 20, `radius ${r} m`);
+    assert.ok(r < 25, `radius ${r} m`);
 });
 
 test('assist never spins: 3 s at full lock from 80 km/h keeps the slide under 17°', () => {
@@ -98,21 +98,21 @@ test('full brake + full steer still turns (ABS keeps grip for steering)', () => 
     assert.ok(pathDeg > 5, `path turned only ${pathDeg.toFixed(2)}° in 0.5 s while braking`);
 });
 
-test('keyboard chicane: full lock at 100 km/h holds a path radius ≤ 22 m', () => {
+test('keyboard chicane: full lock at 100 km/h holds a path radius ≤ 40 m (real grip)', () => {
     const r = pathRadius(100 / 3.6, 0.5, { throttle: 0.3, brake: 0, steer: 1 });
-    assert.ok(r <= 22, `radius ${r} m`);
+    assert.ok(r <= 40, `radius ${r} m`);
 });
 
-test('braking into a corner (S + full lock at 130 km/h) still turns tighter than 32 m', () => {
+test('braking into a corner (S + full lock at 130 km/h) still turns tighter than 55 m (real grip)', () => {
     const r = pathRadius(130 / 3.6, 0.5, { throttle: 0, brake: 1, steer: 1 });
-    assert.ok(r <= 32, `radius ${r} m`);
+    assert.ok(r <= 55, `radius ${r} m`);
 });
 
-test('on grass at 60 km/h full lock gets back within a 24 m radius', () => {
+test('on grass at 60 km/h full lock gets back within a 32 m radius', () => {
     const c = mk(60 / 3.6), d0 = vDir(c);
     for (let i = 0; i < 30; i++) step(c, { throttle: 1, brake: 0, steer: 1 }, DT, S, GRASS);
     const r = (Math.hypot(c.vx, c.vy) / S) / ((vDir(c) - d0) / 0.5);
-    assert.ok(r <= 24, `radius ${r} m`);
+    assert.ok(r <= 32, `radius ${r} m`);
 });
 
 test('high-speed steering is progressive: a light tap at 290 km/h is well below full-lock rotation', () => {
@@ -140,12 +140,12 @@ test('grass: full throttle levels off below 110 km/h, and a stopped car can stil
     assert.ok(kmh(stopped) > 20, `${kmh(stopped).toFixed(0)} km/h after 5 s from rest`);
 });
 
-test('steering assist: chicane at 100 km/h ≤ 22.2 m, hairpin at 60 km/h ≤ 10 m', () => {
+test('steering assist: chicane at 100 km/h ≤ 40 m (real grip), hairpin at 60 km/h ≤ 15 m', () => {
     const chicane = pathRadius(100 / 3.6, 0.5, { throttle: 0.3, brake: 0, steer: 1 }, 'steering');
-    assert.ok(chicane <= 22.2, // no extra grip from the steering help since 2026-10-09 (measured 20.14 m)
+    assert.ok(chicane <= 40, // no extra grip from the steering help; real grip since 2026-10-19 (measured 38.0 m)
         `chicane radius ${chicane} m`);
     const hairpin = pathRadius(60 / 3.6, 0.5, COAST_LOCK, 'steering');
-    assert.ok(hairpin <= 10, `hairpin radius ${hairpin} m`);
+    assert.ok(hairpin <= 15, `hairpin radius ${hairpin} m`); // real grip: 2 g at 60 km/h is a 14 m radius
 });
 
 test('steering assist changes nothing above 250 km/h', () => {
@@ -155,11 +155,11 @@ test('steering assist changes nothing above 250 km/h', () => {
     assert.deepStrictEqual([b.x, b.y, b.angle, b.vx, b.vy], [a.x, a.y, a.angle, a.vx, a.vy]);
 });
 
-test('DRS drag cut adds 35–45 km/h of top speed', async () => {
+test('DRS drag cut adds 10–20 km/h of top speed, as in F1', async () => {
     const { DRS_DRAG } = await import('../public/js/sim/drive.js');
     const top = (dragMul) => { const c = { ...mk(80), dragMul }; for (let i = 0; i < 60 * 40; i++) step(c, FULL, DT, S); return kmh(c); };
     const gain = top(DRS_DRAG) - top(1);
-    assert.ok(gain > 35 && gain < 45, `+${gain.toFixed(1)} km/h`);
+    assert.ok(gain >= 10 && gain <= 20, `+${gain.toFixed(1)} km/h`);
 });
 
 // Elevation (car.grade: rise per metre along the heading; car.vcurv: 1/m, + compression, − crest)
@@ -219,4 +219,30 @@ test('steering help gives no extra grip: at the grip limit both cars corner alik
     const on = lat('100,0'), off = lat('0,0');
     assert.ok(on.use > 0.98 && off.use > 0.98, `not at the limit: ${on.use} / ${off.use}`);
     assert.ok(Math.abs(on.a - off.a) / off.a < 0.01, `on ${on.a.toFixed(2)} vs off ${off.a.toFixed(2)} m/s²`);
+});
+
+// Real 2023 F1 figures: ~2 g in slow corners rising to 5-5.5 g at 300 km/h, 5-6 g braking from 300 km/h, 0-100 in 2.6 s
+const gOf = (dv) => dv / C.G;
+function latG(kmhNow) { // full lock for 0.2 s: the turn the grip holds
+    const c = mk(kmhNow / 3.6), d0 = vDir(c);
+    for (let i = 0; i < 12; i++) step(c, COAST_LOCK, DT, S);
+    return gOf((Math.hypot(c.vx, c.vy) / S) * ((vDir(c) - d0) / (12 * DT)));
+}
+test('real F1 cornering: about 2 g at 80 km/h, 4.5-6 g at 300 km/h', () => {
+    const slow = latG(80), fast = latG(300);
+    assert.ok(slow >= 1.8 && slow <= 2.6, `80 km/h: ${slow.toFixed(2)} g`);
+    assert.ok(fast >= 4.5 && fast <= 6.2, `300 km/h: ${fast.toFixed(2)} g`);
+});
+test('real F1 braking: 5-6.5 g from 300 km/h, 0-100 km/h in 2.4-2.9 s', () => {
+    const c = mk(300 / 3.6), v0 = c.speed / S;
+    for (let i = 0; i < 6; i++) step(c, BRAKE, DT, S);
+    const g = gOf((v0 - c.speed / S) / (6 * DT));
+    assert.ok(g >= 5 && g <= 6.5, `${g.toFixed(2)} g`);
+    const l = mk(); let t = 0;
+    while (kmh(l) < 100) { step(l, FULL, DT, S); t += DT; }
+    assert.ok(t >= 2.4 && t <= 2.9, `0-100 ${t.toFixed(2)} s`);
+});
+test('real F1 pace: a Monza lap at the limit on the racing line in 1:19-1:25 (2023 pole 1:20.29)', () => {
+    const lap = require('../src/game/Track').load('monza').racingLine.lapS;
+    assert.ok(lap >= 79 && lap <= 85, `${lap} s`);
 });

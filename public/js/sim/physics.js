@@ -1,8 +1,11 @@
 // Collision box = the car (carShape.js) from front wing tip (+2.92 m) to rear wing (−2.56 m), wheel to wheel (±0.98 m).
 // Its middle sits ahead of the car's origin (between the axles), so the box is offset forward.
-const CAR_HALF_LENGTH_M = 2.74;
-const CAR_CENTER_OFFSET_M = 0.18;
-const CAR_HALF_WIDTH_M = 1.0;
+// Every car is drawn and collides at CAR_SCALE of its real size: real-size cars looked too big beside the track and its
+// surroundings (game3d.js scales the models, wheels, drivers and cameras by the same factor)
+const CAR_SCALE = 0.9;
+const CAR_HALF_LENGTH_M = 2.74 * CAR_SCALE;
+const CAR_CENTER_OFFSET_M = 0.18 * CAR_SCALE;
+const CAR_HALF_WIDTH_M = 1.0 * CAR_SCALE;
 import { C } from './carphysics.js';
 const RESTITUTION = 0.3;
 const HINT_SPAN = 10; // segments (~100 m) either side of a car's last road point
@@ -195,6 +198,7 @@ class Physics {
     }
 }
 
+Physics.CAR_SCALE = CAR_SCALE;
 Physics.CAR_HALF_LENGTH_M = CAR_HALF_LENGTH_M;
 Physics.CAR_HALF_WIDTH_M = CAR_HALF_WIDTH_M;
 Physics.CAR_CENTER_OFFSET_M = CAR_CENTER_OFFSET_M;

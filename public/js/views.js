@@ -22,3 +22,7 @@ export const toThree = ([x, y, z]) => [x, z, -y];
 const FROM_EYE = { cockpit: [-0.12, 0, 0.24], tcam: [-0.34, 0, 0.4] };
 export const eyeFor = (view, asset) => (asset?.eye ? asset.eye.map((v, k) => v + FROM_EYE[view][k]) : EYE[view]);
 export const wheelPosFor = (asset) => asset?.wheelPos || WHEEL_POS;
+// Front wheel angles [left, right] for a steering angle (+ = right): anti-Ackermann as an F1 car, the inner wheel turning
+// ANTI_ACKERMANN less than the mean and the outer one as much more (high-speed corners load the outer tyre)
+const ANTI_ACKERMANN = 0.15;
+export const frontSteer = (s) => { const k = ANTI_ACKERMANN * Math.sign(s); return [s * (1 + k), s * (1 - k)]; };

@@ -94,9 +94,9 @@ for (const id of Track.TRACK_IDS) {
 
     test(`${id}: safe corner speeds`, () => {
         assert.strictEqual(t.safeSpeed.length, t.path.length);
-        for (const v of t.safeSpeed) assert.ok(v > 15 && v <= 100);
+        for (const v of t.safeSpeed) assert.ok(v > 10 && v <= 100); // real grip: Monaco's hairpin is ~45-50 km/h (12.5-14 m/s)
         assert.strictEqual(t.lineLimit.length, t.path.length);
-        for (const v of t.lineLimit) assert.ok(v > 15 && v <= 100);
+        for (const v of t.lineLimit) assert.ok(v > 10 && v <= 100);
         // The line is wider than the centreline: its slowest corner is no slower than the centreline's
         assert.ok(Math.min(...t.lineLimit) >= Math.min(...t.safeSpeed) - 0.1, `${id}: line corner slower than centreline`);
     });
@@ -155,18 +155,17 @@ for (const id of Track.TRACK_IDS) {
         }
     });
 
-    test(`${id}: real width: the survey's edges are the track limits, barriers beyond them, kerbs per point`, () => {
+    test(`${id}: real width: the survey's edges (widened when narrow) are the track limits, barriers beyond them, kerbs per point`, () => {
         const raw = JSON.parse(require('fs').readFileSync(require('path').join(__dirname, '..', 'data', 'tracks', `${id}.json`), 'utf8'));
         t.path.forEach((_, i) => {
-            assert.strictEqual(t.edgeR[i], raw.edges[i][0] * t.scale);
-            assert.strictEqual(t.edgeL[i], raw.edges[i][1] * t.scale);
+            assert.ok(t.edgeR[i] >= raw.edges[i][0] * t.scale - 1e-9 && t.edgeL[i] >= raw.edges[i][1] * t.scale - 1e-9, `narrower than the survey at ${i}`);
             assert.ok(t.barrierR[i] > t.edgeR[i] && t.barrierL[i] > t.edgeL[i], `barrier inside the road at point ${i}`);
             assert.ok(t.kerbR[i] >= 0 && t.kerbL[i] >= 0);
         });
         assert.ok(t.walls.length > 0 && t.build && t.build.barriers.length > 0);
         assert.ok(t.kerbR.some((k) => k > 0), 'some kerbs');
         const median = raw.edges.map(([r, l]) => r + l).sort((a, b) => a - b)[raw.edges.length >> 1];
-        assert.ok(Math.abs(t.width / t.scale - median) <= 0.5, `width ${t.width / t.scale} m vs real median ${median} m`);
+        assert.ok(Math.abs(t.width / t.scale - Math.max(median, 11.5)) <= 0.5, `width ${t.width / t.scale} m vs real median ${median} m`);
     });
 
     test(`${id}: 22 grid slots on the asphalt and not overlapping`, () => {
@@ -273,10 +272,28 @@ for (const id of Track.TRACK_IDS) {
             // Zandvoort T10/T13, Monaco T19): past the corner's slowest point and flat out within 60 m
             const p = Track.pointAt(t.path, t.cum, t.startS + z.startS), n = t.path.length, i = Physics.nearestOnTrack(p.x, p.y, t).i;
             const ahead = Physics.nearestOnTrack(...Object.values(Track.pointAt(t.path, t.cum, t.startS + z.startS + 60 * t.scale)).slice(0, 2), t).i;
-            assert.strictEqual(t.safeSpeed[ahead], 100, `${id} zone starts in a corner`);
+            assert.ok(Math.max(t.lineLimit[ahead], t.safeSpeed[ahead]) >= 99.9, `${id} zone starts in a corner`); // flat on the line or the centreline
             let slow = i; // the corner's slowest point is behind the activation, or within 15 m (corner positions are ±10 m)
             for (let k = i; k !== ahead; k = (k + 1) % n) if (t.safeSpeed[k] < t.safeSpeed[slow] - 0.5) slow = k;
             assert.ok((((t.cum[slow] - t.cum[i]) % t.cum[n]) + t.cum[n]) % t.cum[n] <= 15 * t.scale, `${id} zone starts before the apex`);
         }
     });
 }
+
+test('narrow surveys widened to an F1 width (11.5 m median), never within 1.5 m of a barrier, never narrower', () => {
+    const median = (a) => [...a].sort((x, y) => x - y)[a.length >> 1];
+    for (const t of Object.values(tracks)) {
+        const raw = JSON.parse(fs.readFileSync(path.join(DATA, `${t.id}.json`), 'utf8'));
+        if (!raw.edges) continue;
+        const w = t.edgeR.map((r, i) => (r + t.edgeL[i]) / t.scale), was = raw.edges.map((e) => e[0] + e[1]);
+        const m = median(w);
+        if (median(was) < 11.5) assert.ok(m >= 11.0, `${t.id}: median ${m.toFixed(1)} m (survey ${median(was).toFixed(1)})`);
+        else assert.ok(Math.abs(m - median(was)) < 0.05, `${t.id}: a wide survey stays as it is`);
+        for (let i = 0; i < w.length; i++) {
+            assert.ok(t.edgeR[i] / t.scale >= raw.edges[i][0] - 1e-6 && t.edgeL[i] / t.scale >= raw.edges[i][1] - 1e-6, `${t.id} ${i}: narrower than the survey`);
+            for (const [e, b, k] of [[t.edgeR[i], t.barrierR[i], 0], [t.edgeL[i], t.barrierL[i], 1]]) {
+                if (e / t.scale > raw.edges[i][k] + 1e-6) assert.ok(b - e >= 1.5 * t.scale - 1e-6, `${t.id} ${i}: widened to ${((b - e) / t.scale).toFixed(2)} m from a barrier`);
+            }
+        }
+    }
+});

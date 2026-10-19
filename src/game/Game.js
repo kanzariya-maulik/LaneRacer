@@ -31,7 +31,7 @@ const REALIGN_BEHIND = 4;     // newest input this many slots behind the server'
 const SLACK_TICKS = 30;       // input cushion report window: the fewest spare inputs held over this many ticks
 const LAG_REALIGN_BATCHES = 30; // input packets in a row landing behind the server's slots (~0.5 s) = lasting lag: re-align
 const DRS_GAP_S = 1;          // race: within this of the car ahead at the detection point
-const SLIP_MAX = 0.2;         // drag cut right behind another car…
+const SLIP_MAX = 0.1;         // drag cut right behind another car (real F1 tow: ~+6-10 km/h)…
 const SLIP_MIN_M = 5, SLIP_RANGE_M = 40, SLIP_LAT_M = 3; // …fading out by 40 m behind, only roughly in line
 
 const STOP_S = 2.5, STOP_SPREAD_S = 0.4, RELEASE_HOLD_S = 0.5, RELEASE_GAP_M = 10, PARK_M = 0.5, PARK_MS = 0.3;

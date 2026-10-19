@@ -1177,7 +1177,7 @@ test('incident: both moving into each other alike is a racing incident; light ru
 
 test('incident: pushing the other car off the track is +10 s, and the victim gets no track-limits strike for it', () => {
     const { g, a, b, sent } = incidentGame();
-    placeAt(a, 300, -1.9, 50, 6); placeAt(b, 300, 0, 50);
+    placeAt(a, 300, -1.9 * Physics.CAR_SCALE, 50, 6); placeAt(b, 300, 0, 50); // 1.9 m apart at real car size
     g.update();                                        // contact
     placeAt(b, 300, 30, 50);                             // b ends up well off the track
     run(g, 2.2);

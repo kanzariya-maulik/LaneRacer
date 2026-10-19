@@ -2,9 +2,9 @@ const test = require('node:test');
 const assert = require('node:assert');
 const Physics = require('../src/game/Physics');
 
-const S = 6;
+const S = 6, K = Physics.CAR_SCALE; // positions below in real-car metres: the cars (and their box) are drawn at K of that
 const car = (x, y, angleDeg = 0, vx = 0, vy = 0) =>
-    ({ x: x * S, y: y * S, angle: (angleDeg * Math.PI) / 180, vx: vx * S, vy: vy * S });
+    ({ x: x * K * S, y: y * K * S, angle: (angleDeg * Math.PI) / 180, vx: vx * S, vy: vy * S });
 const close = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} vs ${b}`);
 
 test('side by side 2.3 m apart does not collide (old 3 m circle did)', () => {
@@ -16,7 +16,7 @@ test('side by side 2.3 m apart does not collide (old 3 m circle did)', () => {
 test('nose to tail 5.4 m apart collides along the length axis', () => {
     const hit = Physics.carOverlap(car(0, 0), car(5.4, 0), S);
     assert.ok(hit);
-    close(hit.depth, (2 * 2.74 - 5.4) * S); // same heading: the offsets cancel
+    close(hit.depth, (2 * 2.74 - 5.4) * K * S); // same heading: the offsets cancel
     close(hit.nx, -1);
     close(hit.ny, 0);
 });
@@ -24,7 +24,7 @@ test('nose to tail 5.4 m apart collides along the length axis', () => {
 test('car rotated 90°: collides at 3.5 m, clear at 4.0 m', () => {
     const hit = Physics.carOverlap(car(0, 0), car(3.5, 0, 90), S);
     assert.ok(hit);
-    close(hit.depth, (0.18 + 2.74 + 1 - 3.5) * S); // a's box front reaches 2.92, b's side is 1.0 m from its centre
+    close(hit.depth, (0.18 + 2.74 + 1 - 3.5) * K * S); // a's box front reaches 2.92, b's side is 1.0 m from its centre
     assert.strictEqual(Physics.carOverlap(car(0, 0), car(4.0, 0, 90), S), null);
 });
 
@@ -35,7 +35,7 @@ test('car rotated 45°: SAT separates at 5.4 m even though x-extents overlap', (
     // min overlap is on b's sideways axis: 2.74·√½ + 1·√½ + 1 − (distance between box centres on that axis)
     const n = [-Math.SQRT1_2, Math.SQRT1_2], ca = [0.18, 0], cb = [4.9 + 0.18 * Math.SQRT1_2, 0.18 * Math.SQRT1_2];
     const gap = Math.abs((ca[0] - cb[0]) * n[0] + (ca[1] - cb[1]) * n[1]);
-    close(hit.depth, (2.74 * Math.SQRT1_2 + Math.SQRT1_2 + 1 - gap) * S);
+    close(hit.depth, (2.74 * Math.SQRT1_2 + Math.SQRT1_2 + 1 - gap) * K * S);
 });
 
 test('resolve separates the cars', () => {
@@ -88,7 +88,8 @@ async function carExtents() {
     let front = -Infinity, rear = Infinity, side = 0;
     for (let i = 0; i < pos.length; i += 3) { front = Math.max(front, pos[i]); rear = Math.min(rear, pos[i]); side = Math.max(side, Math.abs(pos[i + 2])); }
     for (const [x, y, w] of Object.values(S.WHEELS)) { front = Math.max(front, x + S.WHEEL_RADIUS); rear = Math.min(rear, x - S.WHEEL_RADIUS); side = Math.max(side, Math.abs(y) + w / 2); }
-    return { front, rear, side };
+    const K = Physics.CAR_SCALE; // drawn (and collided) at this share of the real car
+    return { front: front * K, rear: rear * K, side: side * K };
 }
 
 test('collision box matches the car model: front wing to rear wing, wheel to wheel', async () => {

@@ -10,7 +10,7 @@ import { wallIndex, collideWalls } from './walls.js';
 
 export const PIT_RUNOFF_M = 2;     // the pit lane's run-off: this far outside its edge (build.js puts its barrier there)
 export const PIT_LIMIT_KMH = 80;    // unless the circuit sets its own (circuits.json pitLimitKmh: Zandvoort 60)
-export const DRS_DRAG = 0.70;      // drag with the flap open (~+43 km/h top speed)
+export const DRS_DRAG = 0.89;      // drag with the flap open (~+13 km/h top speed, as in F1)
 const BRIDGE_ROAD = 6;             // points either side of a bridge wall's own road that it applies to
 
 // The track as built, ready for the sim: its surface grid and barrier index, made once per track object (the server's,

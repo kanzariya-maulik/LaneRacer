@@ -31,8 +31,10 @@ function curvatures(L, scale) {
     });
 }
 
-// Cornering acceleration: every car has the same grip (the steering help adds lock, not grip)
-const latMax = (v) => C.LAT_ASSIST * C.MU * (C.G + DOWN * v * v);
+// Cornering acceleration: every car has the same grip (the steering help adds lock, not grip). The line plans at
+// LINE_GRIP of it, as a driver does: at real F1 grip there is no slack left for a steering correction otherwise
+const LINE_GRIP = 0.98;
+const latMax = (v) => LINE_GRIP * C.LAT_ASSIST * C.MU * (C.G + DOWN * v * v);
 const drag = (v) => (0.5 * C.RHO * C.CDA * v * v) / C.MASS + C.ROLL_G * C.G;
 
 function cornerSpeed(k) {

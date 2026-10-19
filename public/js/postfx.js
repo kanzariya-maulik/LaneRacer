@@ -1,8 +1,9 @@
 // The post-processing chain for a level: its `effects` list (quality.js) turned into one three.js RenderPipeline.
 // Browser only (WebGPURenderer). An effect that fails to build is dropped with a warning; the race goes on.
 import * as THREE from 'three/webgpu';
-import { pass, mrt, output, normalView, velocity, metalness, roughness, convertToTexture, vec2, vec4, uv, float, length, smoothstep, step, mix, renderOutput } from 'three/tsl';
+import { pass, mrt, output, normalView, velocity, metalness, roughness, convertToTexture, vec2, vec4, uv, float, length, smoothstep, step, mix, min, renderOutput } from 'three/tsl';
 import { ao } from 'three/addons/tsl/display/GTAONode.js';
+import { gaussianBlur } from 'three/addons/tsl/display/GaussianBlurNode.js';
 import { ssr } from 'three/addons/tsl/display/SSRNode.js';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { lensflare } from 'three/addons/tsl/display/LensflareNode.js';
@@ -33,10 +34,16 @@ export function buildPost(renderer, scene, camera, effects) {
     // GTAO sizes itself to the screen: its resolution follows the internal scale or it misreads the depth (line artifacts),
     // at half of it (AO is soft shading: no visible difference, 1.3 ms a frame back at High — 120 Hz needs 8.3 ms frames)
     const AO_RES = 0.5;
+    // With TRAA its noise turns every frame and averages out; fixed, it stays on detailed surfaces (the cars) as grain
+    const temporalAA = fx.has('traa') || fx.has('taau');
     let aoNode = null;
     // Not on the sky (depth at the far plane: 0 reversed, 1 otherwise): on WebGL2 GTAO rings it with noise
     const surface = renderer.reversedDepthBuffer ? step(1e-7, depth.r) : step(depth.r, 0.9999999);
-    tryFx('ao', (c) => { aoNode = own(ao(depth, normal, camera)); aoNode.resolutionScale = AO_RES; return vec4(c.rgb.mul(mix(float(1), aoNode.getTextureNode().r, surface.mul(0.8))), c.a); });
+    tryFx('ao', (c) => { aoNode = own(ao(depth, normal, camera)); aoNode.resolutionScale = AO_RES; aoNode.useTemporalFiltering = temporalAA;
+        // its raw output is per-pixel noise (grain over the whole screen): blurred at its own half resolution, two
+        // small passes (a depth-aware denoise looked the same at 16 full-resolution samples a pixel)
+        const soft = own(gaussianBlur(aoNode.getTextureNode(), null, 2));
+        return vec4(c.rgb.mul(mix(float(1), soft.r, surface.mul(0.8))), c.a); });
     tryFx('ssr', (c) => {
         const mr = scenePass.getTextureNode('metalrough');
         const r = own(ssr(own(convertToTexture(c)), depth, normal, { metalnessNode: mr.r, roughnessNode: mr.g, reflectNonMetals: false, camera }));
@@ -44,7 +51,10 @@ export function buildPost(renderer, scene, camera, effects) {
     });
     let glow = null;
     // Threshold above the HDR sky's own brightness: only sun glints, floodlights and lamps bloom, not the whole sky
-    tryFx('bloom', (c) => { glow = own(bloom(c, 0.2, 0.4, 3.0)); return c.add(glow); });
+    // The physical sky's sun disc is thousands of times brighter than the scene: fed to the bloom as it is, its glow
+    // covered half the screen facing the sun. Capped, it glows round the sun only (as a camera or the eye does)
+    const BLOOM_CAP = 8;
+    tryFx('bloom', (c) => { glow = own(bloom(vec4(min(c.rgb, float(BLOOM_CAP)), c.a), 0.2, 0.4, 3.0)); return c.add(glow); });
     tryFx('lensflare', (c) => (glow ? c.add(own(lensflare(glow, { threshold: 4, ghostAttenuationFactor: 25 }))) : c));
     tryFx('vignette', (c) => vec4(c.rgb.mul(float(1).sub(smoothstep(0.45, 1.0, length(uv().sub(0.5)).mul(1.4)).mul(0.35))), c.a));
 
