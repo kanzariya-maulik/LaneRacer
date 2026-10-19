@@ -35,7 +35,7 @@ def world_bbox(o):
     return Vector([min(p[k] for p in pts) for k in range(3)]), Vector([max(p[k] for p in pts) for k in range(3)])
 
 
-def import_model(uid):
+def import_model(uid, keyed=None, drop=(), colours=None):
     bpy.ops.wm.read_factory_settings(use_empty=True)
     f = glob.glob(os.path.join(CACHE, uid, '**', '*.gltf'), recursive=True)[0]
     bpy.ops.import_scene.gltf(filepath=f)
@@ -52,9 +52,38 @@ def import_model(uid):
     bpy.context.view_layer.objects.active = meshes()[0]
     bpy.ops.object.make_single_user(object=True, obdata=True)
     bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+    for o in list(meshes()):  # models.json "drop": materials of another season's livery (logo sheets) left out
+        if any(m and m.name in drop for m in o.data.materials):
+            bpy.data.objects.remove(o, do_unlink=True)
+    for m in bpy.data.materials:  # models.json "colours": untextured materials (flat grey in the download) given theirs
+        b = next((n for n in m.node_tree.nodes if n.type == 'BSDF_PRINCIPLED'), None) if m.use_nodes else None
+        if m.name in (colours or {}) and b and not b.inputs['Base Color'].is_linked:
+            b.inputs['Base Color'].default_value = (*[c ** 2.2 for c in _hex(colours[m.name])], 1)  # linear
+    for m in bpy.data.materials:
+        if m.name in (keyed or {}):
+            key_alpha(m, keyed[m.name])
     # decals: sponsor logos on thin planes with see-through textures; never part of the drawn mesh, baked on instead
     for o in meshes():
         o['decal'] = any(is_decal(m) for m in o.data.materials if m)
+
+
+def key_alpha(m, background):
+    # a logo sheet whose see-through parts were flattened to a colour (models.json "keyed": black or white): its alpha
+    # from how far each texel is from that background
+    t = m.node_tree
+    b = next(n for n in t.nodes if n.type == 'BSDF_PRINCIPLED')
+    tex = b.inputs['Base Color'].links[0].from_node
+    sep = t.nodes.new('ShaderNodeSeparateColor')
+    t.links.new(tex.outputs['Color'], sep.inputs['Color'])
+    op = 'MAXIMUM' if background == 'black' else 'MINIMUM'
+    m1 = t.nodes.new('ShaderNodeMath'); m1.operation = op
+    m2 = t.nodes.new('ShaderNodeMath'); m2.operation = op
+    t.links.new(sep.outputs[0], m1.inputs[0]); t.links.new(sep.outputs[1], m1.inputs[1])
+    t.links.new(m1.outputs[0], m2.inputs[0]); t.links.new(sep.outputs[2], m2.inputs[1])
+    mr = t.nodes.new('ShaderNodeMapRange')  # clamped: near the background 0, clearly off it 1
+    mr.inputs['From Min'].default_value, mr.inputs['From Max'].default_value = (0.08, 0.3) if background == 'black' else (0.92, 0.7)
+    t.links.new(m2.outputs[0], mr.inputs['Value'])
+    t.links.new(mr.outputs['Result'], b.inputs['Alpha'])
 
 
 def is_decal(m):
@@ -64,7 +93,37 @@ def is_decal(m):
     return bool(b and (b.inputs['Alpha'].is_linked or b.inputs['Alpha'].default_value < 0.99))
 
 
+def islands(o):
+    bm = bmesh.new(); bm.from_mesh(o.data)
+    seen, n = set(), 0
+    for v in bm.verts:
+        if v in seen:
+            continue
+        n += 1; stack = [v]; seen.add(v)
+        while stack:
+            for e in stack.pop().link_edges:
+                for y in e.verts:
+                    if y not in seen:
+                        seen.add(y); stack.append(y)
+    bm.free()
+    return n
+
+
+def weld_if_split(length):
+    # a model exported as unwelded triangles (tens of thousands of islands): its coincident vertices merged first,
+    # or splitting it into parts takes forever and every triangle becomes a "part"
+    if sum(islands(o) for o in meshes()) <= 30000:
+        return
+    for o in meshes():
+        bm = bmesh.new(); bm.from_mesh(o.data)
+        bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-4 * length)
+        bm.to_mesh(o.data); bm.free()
+    log(f'welded: {sum(islands(o) for o in meshes())} islands')
+
+
 def separate_loose():
+    ext = robust_extent()
+    weld_if_split(max(b - a for a, b in ext[:2]))
     bpy.ops.object.select_all(action='DESELECT')
     for o in meshes():
         o.select_set(True)
@@ -117,7 +176,15 @@ def find_wheels():
             corners[key] = c
     if len(corners) != 4:
         sys.exit(f'wheels found at {len(corners)} corners')
-    wheels = list(corners.values())
+    wheels = []
+    for o, c, dia, wid in corners.values():
+        # the whole tyre across: every round part on the same axle centre (a tyre can be split into sidewall halves)
+        same = [k for k in cands if math.hypot(k[1][L] - c[L], k[1][2] - c[2]) < 0.1 * dia and k[2] > 0.8 * dia
+                and abs(k[1][W] - c[W]) < dia]
+        lo = min(k[1][W] - k[3] / 2 for k in same)
+        hi = max(k[1][W] + k[3] / 2 for k in same)
+        c = c.copy(); c[W] = (lo + hi) / 2
+        wheels.append((o, c, dia, hi - lo))
     # the narrower pair is the front (305 mm against 405 mm)
     ends = {}
     for c in wheels:
@@ -127,15 +194,41 @@ def find_wheels():
     return L, W, wheels, front_hi
 
 
+TYRE_NAME = __import__('re').compile(r'(^|[^a-z])(tyre|tire|rim)s?([^a-z]|$)')
+
+
 def remove_inside(wheels, L, W):
-    # rims, nuts, brake discs: every part whose centre lies inside a wheel's cylinder goes with the wheel
+    # the tyre and what turns with it: parts wholly within a wheel's tyre, and round parts on its axle (rim, disc, wheel
+    # cover); anything else that reaches outside the tyre (suspension arms, uprights, brake ducts, wing endplates) stays
     gone = 0
+    mid_w = sum(w[1][W] for w in wheels) / 4  # the car's centreline
     for o in list(meshes()):
         a, b = world_bbox(o)
         c = (a + b) / 2
         for _, wc, dia, wid in wheels:
-            r = math.hypot(c[L] - wc[L], c[2] - wc[2])
-            if r < dia / 2 * 1.02 and abs(c[W] - wc[W]) < wid * 0.75:
+            out = 1 if wc[W] > mid_w else -1
+            rr, half = dia / 2 * 1.03, wid / 2 + 0.01 * dia
+            inside = (math.hypot(c[L] - wc[L], c[2] - wc[2]) < rr
+                      and all(abs(v[k] - wc[k]) <= rr for v in (a, b) for k in (L, 2))
+                      and all(abs(v[W] - wc[W]) <= half for v in (a, b)))
+            d = b - a
+            turning = (math.hypot(c[L] - wc[L], c[2] - wc[2]) < 0.05 * dia  # round, on the axle: rim, disc, wheel cover
+                       and abs(d[L] - d[2]) < 0.1 * max(d[L], d[2]) and max(d[L], d[2]) <= dia * 1.03
+                       and abs(c[W] - wc[W]) < wid * 0.75)
+            # within the tyre's circle and wholly on its outboard half: sidewall lettering, rim face, nut (nothing of
+            # the car sits outboard of a wheel's centre plane, inside its circle)
+            edges = sorted((v[W] - wc[W]) * out for v in (a, b))
+            outboard = (all(abs(v[k] - wc[k]) <= rr for v in (a, b) for k in (L, 2))
+                        and edges[0] >= 0 and edges[1] <= wid / 2 + 0.08 * dia)
+            # named as a tyre or rim by the model (whole words: not "steeringwheel" or "trim"), within the wheel's circle
+            named = (TYRE_NAME.search(o.name.lower()) and abs(c[W] - wc[W]) < dia
+                     and all(abs(v[k] - wc[k]) <= rr for v in (a, b) for k in (L, 2)))
+            # in the rubber: within the tyre's width (and its sidewall's bulge) and its circle, nowhere nearer the axle than 70 % of the radius
+            # (inner sidewall lettering; what the car has inside a wheel sits within the rim)
+            near = math.hypot(*(max(a[k] - wc[k], 0, wc[k] - b[k]) for k in (L, 2)))
+            rubber = (near > 0.7 * dia / 2 and all(abs(v[k] - wc[k]) <= rr for v in (a, b) for k in (L, 2))
+                      and all(abs(v[W] - wc[W]) <= half + 0.05 * dia for v in (a, b)))
+            if inside or turning or outboard or named or rubber:
                 bpy.data.objects.remove(o, do_unlink=True)
                 gone += 1
                 break
@@ -220,13 +313,20 @@ def decimated_copy(src, name, target, keep_materials=False):
     return o
 
 
-def bake_onto(low, high, decals, size, tag):
+def bake_onto(low, high, decals, size, tag, repaint_to=None):
     bpy.ops.object.select_all(action='DESELECT')
     bpy.context.view_layer.objects.active = low
     low.select_set(True)
+    for uv in list(low.data.uv_layers):  # one UV set, the bake's: the model's own are unused and only add weight
+        low.data.uv_layers.remove(uv)
+    low.data.uv_layers.new(name='uv')
     bpy.ops.object.mode_set(mode='EDIT')
     bpy.ops.mesh.select_all(action='SELECT')
-    bpy.ops.uv.smart_project(angle_limit=math.radians(66), island_margin=0.003)
+    bpy.ops.uv.smart_project(angle_limit=math.radians(66), island_margin=0.0)
+    # every island at the same texel density, then packed tight (rotated to fit), a margin of the bake's 4 px bleed
+    bpy.ops.uv.select_all(action='SELECT')
+    bpy.ops.uv.average_islands_scale()
+    bpy.ops.uv.pack_islands(rotate=True, margin_method='FRACTION', margin=4 / size)
     bpy.ops.object.mode_set(mode='OBJECT')
     mat = bpy.data.materials.new('livery'); mat.use_nodes = True
     low.data.materials.append(mat)
@@ -260,10 +360,19 @@ def bake_onto(low, high, decals, size, tag):
         src.select_set(True); low.select_set(True)
         bpy.context.view_layer.objects.active = low
     from_(high)
-    for kind, btype, extra in (('color', 'DIFFUSE', {'pass_filter': {'COLOR'}}), ('normal', 'NORMAL', {}), ('rough', 'ROUGHNESS', {})):
+    for kind, btype in (('normal', 'NORMAL'), ('rough', 'ROUGHNESS')):
         nt.nodes.active = tex[kind]
-        bpy.ops.object.bake(type=btype, **extra)
+        bpy.ops.object.bake(type=btype)
         log(f'{tag}: baked {kind}')
+    # colour as the base colour itself, emitted: a DIFFUSE colour pass is base colour x (1 - metallic), black on metal paint
+    restore = emit_base(high.data.materials, 'color')
+    nt.nodes.active = tex['color']
+    bpy.ops.object.bake(type='EMIT')
+    restore()
+    log(f'{tag}: baked color')
+    if repaint_to:
+        repaint(imgs['color'], repaint_to)
+        log(f'{tag}: repainted {repaint_to}')
     if decals:
         overlay_decals(low, decals, nt, imgs['color'], size, tag, from_)
     nt.links.new(tex['color'].outputs['Color'], bsdf.inputs['Base Color'])
@@ -275,30 +384,75 @@ def bake_onto(low, high, decals, size, tag):
         img.pack()
 
 
+# 2023 liveries on models painted otherwise: the baked body colour recoloured by hue/value regions (logos are decals,
+# laid over afterwards, so they keep their own colours). Each rule: (which texels, the new colour).
+def _hex(h):
+    return [int(h[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+
+
+REPAINTS = {
+    # Red Bull's Japanese GP special: the navy body white; red, yellow and carbon stay
+    'RB-suzuka': lambda h, s, v: [((h > 0.55) & (h < 0.75) & (s > 0.25) & (v < 0.55), '#f4f4f4')],
+    # Williams FW45: navy body (the 2024 model is white), its light blue kept as the 2023 cyan accent
+    'FW45-2023': lambda h, s, v: [((s < 0.2) & (v > 0.6), '#041e42'), ((h > 0.5) & (h < 0.6) & (s > 0.4) & (v > 0.5), '#00a0de')],
+    # Haas VF-23: the 2026 model's white bodywork black, its reds the 2023 red
+    'VF23-2023': lambda h, s, v: [((s < 0.2) & (v > 0.6), '#111111'), (((h < 0.04) | (h > 0.95)) & (s > 0.5) & (v > 0.3), '#e10600')],
+}
+
+
+def repaint(img, to):
+    import numpy as np
+    px = np.array(img.pixels[:], dtype=np.float32).reshape(-1, 4)
+    rgb = px[:, :3]
+    mx, mn = rgb.max(1), rgb.min(1)
+    v, s = mx, np.where(mx > 0, (mx - mn) / np.maximum(mx, 1e-6), 0)
+    r, g, b = rgb.T
+    d = np.maximum(mx - mn, 1e-6)
+    h = np.where(mx == r, ((g - b) / d) % 6, np.where(mx == g, (b - r) / d + 2, (r - g) / d + 4)) / 6
+    # sRGB image: compare and write in display values (pixels[] of a byte image are already sRGB-encoded)
+    for mask, col in REPAINTS[to](h, s, v):
+        rgb[mask] = _hex(col)
+    px[:, :3] = rgb
+    img.pixels[:] = px.ravel()
+    img.update()
+
+
+def emit_base(materials, what):
+    # each material's surface replaced by an emission of its Base Color (or Alpha, as grey) for an EMIT bake;
+    # returns the function that puts the surfaces back
+    saved = []
+    for m in materials:
+        if not m or not m.use_nodes:
+            continue
+        t = m.node_tree
+        b = next((n for n in t.nodes if n.type == 'BSDF_PRINCIPLED'), None)
+        out = next((n for n in t.nodes if n.type == 'OUTPUT_MATERIAL'), None)
+        if not b or not out:
+            continue
+        surf = out.inputs['Surface']
+        saved.append((t, surf, surf.links[0].from_socket if surf.links else None))
+        e = t.nodes.get('bake_emit') or t.nodes.new('ShaderNodeEmission')
+        e.name = 'bake_emit'
+        for l in list(e.inputs['Color'].links):
+            t.links.remove(l)
+        src = b.inputs['Base Color'] if what == 'color' else b.inputs['Alpha']
+        if src.is_linked:
+            t.links.new(src.links[0].from_socket, e.inputs['Color'])
+        else:
+            v = src.default_value
+            e.inputs['Color'].default_value = tuple(v) if what == 'color' else (v, v, v, 1)
+        t.links.new(e.outputs['Emission'], surf)
+    def restore():
+        for t, surf, was in saved:
+            if was:
+                t.links.new(was, surf)
+    return restore
+
+
 def overlay_decals(low, decals, nt, color, size, tag, select_from):
     # the decals' colour and coverage (alpha) baked as emission into two images, then laid over the body colour:
     # where no decal is in reach nothing is written (coverage stays 0) and the paint shows through
     import numpy as np
-    saved = {}
-    def emit(what):
-        for m in decals.data.materials:
-            if not m or not m.use_nodes:
-                continue
-            t = m.node_tree
-            b = t.nodes.get('Principled BSDF')
-            out = next(n for n in t.nodes if n.type == 'OUTPUT_MATERIAL')
-            saved.setdefault(m.name, out.inputs['Surface'].links[0].from_socket if out.inputs['Surface'].links else None)
-            e = t.nodes.get('bake_emit') or t.nodes.new('ShaderNodeEmission')
-            e.name = 'bake_emit'
-            for l in list(e.inputs['Color'].links):
-                t.links.remove(l)
-            src = b.inputs['Base Color'] if what == 'color' else b.inputs['Alpha']
-            if src.is_linked:
-                t.links.new(src.links[0].from_socket, e.inputs['Color'])
-            else:
-                v = src.default_value
-                e.inputs['Color'].default_value = tuple(v) if what == 'color' else (v, v, v, 1)
-            t.links.new(e.outputs['Emission'], out.inputs['Surface'])
     imgs = {}
     for what in ('color', 'alpha'):
         img = bpy.data.images.new(f'{tag}_decal_{what}', size, size, alpha=False)
@@ -306,9 +460,10 @@ def overlay_decals(low, decals, nt, color, size, tag, select_from):
         if what == 'alpha':
             img.colorspace_settings.name = 'Non-Color'
         n = nt.nodes.new('ShaderNodeTexImage'); n.image = img; nt.nodes.active = n
-        emit(what)
+        restore = emit_base(decals.data.materials, what)
         select_from(decals)
         bpy.ops.object.bake(type='EMIT')
+        restore()
         imgs[what] = img
         nt.nodes.remove(n)
     get = lambda im: np.array(im.pixels[:], dtype=np.float32).reshape(-1, 4)
@@ -331,7 +486,7 @@ def add_marker(name, pos, extras=None):
 def build(team):
     models = json.load(open(os.path.join(ROOT, 'scripts', 'cars', 'models.json')))
     m = models['cars'][team]
-    import_model(m['uid'])
+    import_model(m['uid'], m.get('keyed'), m.get('drop', ()), m.get('colours'))
     log(f'{team}: {len(meshes())} objects, {sum(tris(o) for o in meshes())} triangles')
     separate_loose()
     log(f'{len(meshes())} loose parts')
@@ -343,8 +498,9 @@ def build(team):
     high = join_all('high')
     near = decimated_copy(high, 'lod_near', NEAR_TRIS)
     far = decimated_copy(high, 'lod_far', FAR_TRIS)
-    bake_onto(near, high, decals, NEAR_TEX, f'{team}_near')
-    bake_onto(far, high, decals, FAR_TEX, f'{team}_far')
+    to = (m.get('repaint') or {}).get('to')
+    bake_onto(near, high, decals, NEAR_TEX, f'{team}_near', to)
+    bake_onto(far, high, decals, FAR_TEX, f'{team}_far', to)
     bpy.data.objects.remove(high, do_unlink=True)
     if decals:
         bpy.data.objects.remove(decals, do_unlink=True)
@@ -360,6 +516,18 @@ def build(team):
     return out
 
 
+def write_credits():
+    # public/models/credits.json: every model the game uses (models.json, one entry per Sketchfab model), for the lobby
+    models = json.load(open(os.path.join(ROOT, 'scripts', 'cars', 'models.json')))
+    used = {m['uid']: m for m in [*models['cars'].values(), models['tyre'], models['helmet']]}
+    credits = [{k: m[k] for k in ('uid', 'name', 'author', 'licence', 'url')} for m in used.values()]
+    with open(os.path.join(ROOT, 'public', 'models', 'credits.json'), 'w') as f:
+        json.dump(credits, f, indent=1, ensure_ascii=False)
+        f.write('\n')
+
+
 if __name__ == '__main__':  # build_parts.py imports the helpers
     args = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
-    build(args[0])
+    if args[0] != '--credits':
+        build(args[0])
+    write_credits()

@@ -66,10 +66,11 @@
    "author": "MattDoesBlender",
    "licence": "CC Attribution",
    "url": "https://sketchfab.com/3d-models/52418bf2132a4dc6b85aac0846630fc2",
-   "year": 2024,
-   "repaint": {
-    "to": "FW45-2023"
-   }
+   "year": 2023,
+   "colours": { "williams_carbon1": "#161616", "sw_carbon": "#161616", "black_s": "#111111", "details": "#2b2b2b",
+                "generics": "#202020", "material": "#202020", "cockpit_legs": "#202020", "gp21_pedals": "#3a3a3a",
+                "chrome": "#9a9a9a", "chrome_ao": "#7a7a7a", "colordrivers": "#041e42" },
+   "drop": ["williams_decals", "williams_decals2", "numbers", "sw_decals"]
   },
   "alphatauri": {
    "uid": "a8003f86f7a24dfbad6cbc1c90069eaf",
@@ -80,12 +81,14 @@
    "year": 2023
   },
   "alfaromeo": {
-   "uid": "6be2b9c98a9a4534b197c13dba9eeff6",
-   "name": "AlfaRomeo F1 Team KICK C43 #24 ZHOU",
-   "author": "Metazeon",
-   "licence": "CC Attribution",
-   "url": "https://sketchfab.com/3d-models/6be2b9c98a9a4534b197c13dba9eeff6",
-   "year": 2023
+   "uid": "0269947a7ba04168b388cfb2bb4d8c65",
+   "name": "f1 2023 alfa romeo c43",
+   "author": "MattDoesBlender",
+   "licence": "CC Attribution-NonCommercial-ShareAlike",
+   "url": "https://sketchfab.com/3d-models/0269947a7ba04168b388cfb2bb4d8c65",
+   "year": 2023,
+   "keyed": { "alfa_decals": "black", "number": "black" },
+   "drop": ["decals23"]
   },
   "haas": {
    "uid": "1f41e03886724bc6acd16c92402989bc",

@@ -41,9 +41,16 @@ sc.collection.objects.link(sun)
 cam = bpy.data.objects.new('cam', bpy.data.cameras.new('cam')); sc.collection.objects.link(cam); sc.camera = cam
 cam.data.lens = 50
 # Blender after import: car x forward, glTF y-up converted back to z up
-for view, pos in {'front34': (6, 4.5, 2.2), 'side': (0, 9, 1.2), 'top': (0.01, 0, 11), 'rear34': (-6, -4.5, 2.4)}.items():
+fl = sc.objects.get('wheel_FL'); rl = sc.objects.get('wheel_RL')
+views = {'front34': ((6, 4.5, 2.2), (0, 0, 0.4)), 'side': ((0, 9, 1.2), (0, 0, 0.4)), 'top': ((0.01, 0, 11), (0, 0, 0.4)),
+         'rear34': ((-6, -4.5, 2.4), (0, 0, 0.4))}
+if fl and rl:  # close to a front and a rear wheel: what stayed around them (arms, uprights, ducts) after the tyres went
+    f, r = fl.matrix_world.translation, rl.matrix_world.translation
+    views['wheelF'] = ((f.x + 1.6, f.y + 2.2, 1.0), tuple(f))
+    views['wheelR'] = ((r.x - 1.6, r.y + 2.2, 1.0), tuple(r))
+for view, (pos, at) in views.items():
     cam.location = pos
-    d = Vector((0, 0, 0.4)) - Vector(pos)
+    d = Vector(at) - Vector(pos)
     cam.rotation_euler = d.to_track_quat('-Z', 'Y').to_euler()
     sc.render.filepath = os.path.join(out, f'{name}_{lod}_{view}.png')
     bpy.ops.render.render(write_still=True)

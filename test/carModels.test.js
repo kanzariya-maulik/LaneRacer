@@ -20,7 +20,7 @@ test('models.json covers every team, allowed licences, no rips', () => {
     }
     assert.strictEqual(M.cars['redbull-suzuka'].uid, M.cars.redbull.uid);
     assert.strictEqual(M.cars['redbull-suzuka'].repaint?.to, 'RB-suzuka');
-    assert.strictEqual(M.cars.williams.repaint?.to, 'FW45-2023');
+    assert.ok(!M.cars.williams.repaint && M.cars.williams.colours, 'Williams: the model\'s own 2023 paint, its untextured parts coloured');
     assert.strictEqual(M.cars.haas.repaint?.to, 'VF23-2023');
 });
 
@@ -42,6 +42,8 @@ function checkCar(team) {
     for (const w of WHEEL_NAMES) {
         const r = G.nodes.get(w).extras.radius;
         assert.ok(r > 0.3 && r < 0.4, `${team}: ${w} radius ${r}`);
+        const wd = G.nodes.get(w).extras.width; // the whole tyre (a model can split it into sidewall halves)
+        assert.ok(wd > 0.25 && wd < 0.5, `${team}: ${w} width ${wd}`);
         assert.ok(Math.abs(car(w)[2] - r) < 0.02, `${team}: ${w} centre ${car(w)[2].toFixed(3)} m high, radius ${r}`);
     }
     const b = G.bounds('lod_near'), len = b.max[0] - b.min[0];
@@ -51,7 +53,13 @@ function checkCar(team) {
     assert.ok(G.bytes <= 8e6, `${team}: ${(G.bytes / 1e6).toFixed(1)} MB`);
 }
 
-test('the Mercedes W14: markers, budgets and real proportions', () => checkCar('mercedes'));
+for (const team of TEAMS) test(`${team}: markers, budgets and real proportions`, () => checkCar(team));
+
+test('every model together stays under 80 MB', () => {
+    const size = (d) => fs.readdirSync(d, { withFileTypes: true }).reduce((s, e) => s + (e.isDirectory() ? size(path.join(d, e.name)) : fs.statSync(path.join(d, e.name)).size), 0);
+    const mb = size(path.join(ROOT, 'public/models')) / 1e6;
+    assert.ok(mb <= 80, `${mb.toFixed(1)} MB`);
+});
 
 test('tyres: Soft, Medium and Hard tyres and a rim, light, at the game\'s wheel radius, unit width on the axle', () => {
     const G = readGlb(path.join(ROOT, 'public/models/tyre.glb'));
@@ -72,4 +80,13 @@ test('helmet: paint the game tints, a visor, shoulders; light and helmet-sized',
     assert.ok(G.nodes.has('shoulders') && G.triangles('shoulders') <= 800, `shoulders: ${G.triangles('shoulders')} triangles`);
     const b = G.bounds('helmet'), h = b.max[1] - b.min[1];
     assert.ok(h >= 0.26 && h <= 0.32, `helmet ${h.toFixed(2)} m tall`);
+});
+
+test('credits.json lists exactly the models used, each with name, author, licence and link', () => {
+    const M = models(), used = new Map([...Object.values(M.cars), M.tyre, M.helmet].map((m) => [m.uid, m]));
+    const credits = JSON.parse(fs.readFileSync(path.join(ROOT, 'public/models/credits.json'), 'utf8'));
+    assert.deepStrictEqual(credits.map((c) => c.uid).sort(), [...used.keys()].sort());
+    for (const c of credits) {
+        for (const k of ['name', 'author', 'licence', 'url']) assert.strictEqual(c[k], used.get(c.uid)[k], `${c.uid}: ${k}`);
+    }
 });

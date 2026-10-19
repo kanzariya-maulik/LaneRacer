@@ -18,3 +18,4 @@ logs/
 docs/superpowers/baseline/*.png
 .chrome/
 data/tracks/source/textures/
+__pycache__/
