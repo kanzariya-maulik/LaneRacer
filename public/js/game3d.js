@@ -36,7 +36,6 @@ import { distToPath, pitLayout, tMarks, wallStands, pickerOpen, cardText, crew17
 const WHEEL_RADIUS_M = WHEEL_RADIUS; // carShape.js
 const ROAD_DRAW_Y = 0.6;           // the asphalt is drawn this far (world units) over the road height: cars stand on it
 const WHEELBASE_M = 3.6, TRACK_WIDTH_M = 1.6; // contact patches for the body's pitch and roll on the road (sim C.WHEELBASE)
-const WALL_OFFSET = 80;       // public/js/sim/drive.js barrier beyond the track edge
 const CHASE_BACK_M = 10, CHASE_UP_M = 4, LOOK_AHEAD_M = 6;
 const CAM_TURN_SMOOTH = 8; // 1/s; time-based so lag doesn't grow at low frame rates
 const KERB_TURN = 0.05;       // rad per path segment (~10 m) → radius under ~200 m gets kerbs
@@ -462,7 +461,7 @@ function fineGround(t, reach, grid, done) {
     terrainWorker.pending.set(id, { done: finish, here });
     // what scenery.js's ground needs of the track (the pit lane too: the ground is pressed under it)
     const pit = t.pit && { path: t.pit.path, width: t.pit.width };
-    terrainWorker.w.postMessage({ id, t: { path: t.path, z: t.z, width: t.width, scale: t.scale, wallOffset: t.wallOffset, bridges: t.bridges, pit }, reach, ...grid });
+    terrainWorker.w.postMessage({ id, t: { path: t.path, z: t.z, scale: t.scale, bridges: t.bridges, pit }, reach, ...grid });
 }
 
 // ---------- track geometry ----------
@@ -1220,25 +1219,28 @@ function buildLandmark(l) {
 // Monaco's tunnel (OSM tunnel=yes, Track.js t.tunnels): concrete side walls on the barrier line (where cars stop), a
 // roof slab that shades the road, portal faces at both ends and a strip of lamps along the roof
 const TUNNEL_ROOF_M = 6.5, TUNNEL_SLAB_M = 2;
-function buildTunnels(t, path, half) {
-    const g = new THREE.Group(), n = path.length, W = half + (t.wallOffset ?? WALL_OFFSET);
-    const roof = TUNNEL_ROOF_M * scale, top = roof + TUNNEL_SLAB_M * scale, H = heights(path);
-    const inside = path.map((_, i) => t.tunnels.some(([a, b]) => t.cum[i] >= a && t.cum[i + 1] <= b)), keep = (i) => inside[i];
+function buildTunnels(t, rp, up, lap) {
+    const g = new THREE.Group(), m = rp.length, total = t.cum[t.path.length], H = heights(rp);
+    const roof = TUNNEL_ROOF_M * scale, top = roof + TUNNEL_SLAB_M * scale;
+    // walls where the physics barrier is (at most 8 m past the white line), along the smooth curve like the road
+    const ER = up(t.edgeR), EL = up(t.edgeL), R = up(t.barrierR).map((b, k) => Math.min(b, ER[k] + 8 * scale)), L = up(t.barrierL).map((b, k) => -Math.min(b, EL[k] + 8 * scale));
+    const inside = lap.map((l) => { const c = (l * scale + t.startS) % total; return t.tunnels.some(([a, b]) => c >= a && c <= b); });
+    const keep = (k) => inside[k] && inside[(k + 1) % m];
     const concrete = solid('#9d988d'), slab = solid('#76726a');
-    for (const s of [1, -1]) g.add(wall(path, s * W, top, keep, concrete));
-    const under = strip(path, -W, W, roof, keep, slab);
+    g.add(wall(rp, R, top, keep, concrete), wall(rp, L, top, keep, concrete));
+    const under = strip(rp, L, R, roof, keep, slab);
     under.castShadow = true;
-    g.add(under, strip(path, -W, W, top, keep, slab));
-    const lamps = strip(path, -0.25 * scale, 0.25 * scale, roof - 0.05 * scale, (i) => inside[i] && i % 2 === 0, solid('#fff1c4')); // one every other point
+    g.add(under, strip(rp, L, R, top, keep, slab));
+    const lamps = strip(rp, -0.25 * scale, 0.25 * scale, roof - 0.05 * scale, (k) => keep(k) && k % 4 === 0, solid('#fff1c4')); // one every 10 m
     lamps.material.emissive = new THREE.Color('#ffe7a8');
     g.add(lamps);
     // Portals: the slab's end faces above each mouth
-    const L = offsetPoints(path, -W), R = offsetPoints(path, W), pos = [], col = [], c = slab();
-    for (let k = 0; k < n; k++) {
-        if (inside[k] === inside[(k - 1 + n) % n]) continue; // a mouth: the first point inside, or the first past the end
+    const PL = offsetPoints(rp, L), PR = offsetPoints(rp, R), pos = [], col = [], c = slab();
+    for (let k = 0; k < m; k++) {
+        if (inside[k] === inside[(k - 1 + m) % m]) continue; // a mouth: the first point inside, or the first past the end
         const y0 = H[k] + roof, y1 = H[k] + top;
-        pos.push(L[k].x, y0, L[k].y, R[k].x, y0, R[k].y, R[k].x, y1, R[k].y, L[k].x, y0, L[k].y, R[k].x, y1, R[k].y, L[k].x, y1, L[k].y);
-        for (let m = 0; m < 6; m++) col.push(c.r, c.g, c.b);
+        pos.push(PL[k].x, y0, PL[k].y, PR[k].x, y0, PR[k].y, PR[k].x, y1, PR[k].y, PL[k].x, y0, PL[k].y, PR[k].x, y1, PR[k].y, PL[k].x, y1, PL[k].y);
+        for (let q = 0; q < 6; q++) col.push(c.r, c.g, c.b);
     }
     if (pos.length) g.add(coloredMesh(pos, col));
     return g;
@@ -1565,7 +1567,7 @@ function buildWorld(t) {
         if (Q.scenery >= 0.5) world.add(wall(md, 0, 3 * scale, keep, fence, hi.map((v) => v + 1 * scale), { opacity: 0.22 }));
     }
 
-    if (t.tunnels && t.tunnels.length) world.add(buildTunnels(t, path, half));
+    if (t.tunnels && t.tunnels.length) world.add(buildTunnels(t, rp, up, G.lap));
 
     world.add(buildScenery(t, scen, theme));
 

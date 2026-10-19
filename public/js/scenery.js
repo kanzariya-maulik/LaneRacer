@@ -375,12 +375,22 @@ export function terrainHeights(t, x0, y0, w, h, segs, ground, sink, reach) {
 // Mean spacing of the centreline's points (Monaco's are 5 m apart, the rest ~10 m): counts per point scale by it
 const meanStep = (t) => (t.cum ? t.cum[t.path.length] / t.path.length : 10 * t.scale);
 
+const boxOf = (Q) => ({ minX: Math.min(...Q.map((q) => q.x)), maxX: Math.max(...Q.map((q) => q.x)), minY: Math.min(...Q.map((q) => q.y)), maxY: Math.max(...Q.map((q) => q.y)) });
+function insidePoly(Q, x, y) { // even-odd
+    let c = false;
+    for (let i = 0, j = Q.length - 1; i < Q.length; j = i++) if ((Q[j].y > y) !== (Q[i].y > y) && x < Q[j].x + ((y - Q[j].y) * (Q[i].x - Q[j].x)) / (Q[i].y - Q[j].y)) c = !c;
+    return c;
+}
+
 export function placeScenery(t, density, seed, theme = themeOf(t.id)) {
     const P = t.path, n = P.length, sc = t.scale, rand = rng(seed);
-    // behind the barrier beside it, with a little margin over the tested clearance
+    // behind the barrier beside it, with a little margin over the tested clearance, and never on run-off, a car park or a
+    // service road (the build's gravel, asphalt and painted areas)
+    const runoff = (t.build?.surfaces || []).filter((x) => ['gravel', 'asphalt', 'paint'].includes(x.kind)).map((x) => ({ P: x.poly, box: boxOf(x.poly) }));
+    const onRunoff = (x, y) => runoff.some(({ P: Q, box }) => x >= box.minX && x <= box.maxX && y >= box.minY && y <= box.maxY && insidePoly(Q, x, y));
     const ok = (x, y) => {
         const { d, j, k } = nearestSeg(t, x, y);
-        return d > clearAt(t, j, sideOf(P, j, x, y), k) + 0.5 * sc && !(t.pit && distTo(t.pit.path, x, y, false) <= t.pit.width / 2 + 7 * sc);
+        return d > clearAt(t, j, sideOf(P, j, x, y), k) + 0.5 * sc && !(t.pit && distTo(t.pit.path, x, y, false) <= t.pit.width / 2 + 7 * sc) && !onRunoff(x, y);
     };
     // out from point i before anything fits: past the barrier wherever it stands furthest out round there (it can step out
     // between two points: an escape road)

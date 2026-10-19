@@ -8,6 +8,16 @@ before(async () => { S = await import('../public/js/scenery.js'); E = await impo
 const tracks = Track.loadAll();
 
 for (const id of Track.TRACK_IDS) {
+    test(`${id}: no scenery stands in the run-off (gravel, asphalt, painted areas)`, () => {
+        const t = tracks[id], out = S.placeScenery(t, 1, S.seedOf(id)), sc = t.scale;
+        const runoff = t.build.surfaces.filter((x) => ['gravel', 'asphalt', 'paint'].includes(x.kind)).map((x) => x.poly);
+        const inside = (q, poly) => { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const a = poly[j], d = poly[i]; if ((a.y > q.y) !== (d.y > q.y) && q.x < a.x + ((q.y - a.y) * (d.x - a.x)) / (d.y - a.y)) c = !c; } return c; };
+        const corners = (o, w, d) => [-w / 2, w / 2].flatMap((a) => [-d / 2, d / 2].map((e) => ({ x: o.x + (Math.cos(o.angle) * a - Math.sin(o.angle) * e) * sc, y: o.y + (Math.sin(o.angle) * a + Math.cos(o.angle) * e) * sc })));
+        const points = [...out.trees, ...out.billboards, ...out.posts, ...out.floodlights, ...out.boards, ...(out.landmark ? [out.landmark] : []),
+            ...out.grandstands.flatMap((g) => [g, ...corners(g, 60, 12)]), ...out.buildings.flatMap((b) => [b, ...corners(b, b.w, b.d)])];
+        for (const q of points) assert.ok(!runoff.some((poly) => inside(q, poly)), `${id}: scenery in the run-off at ${q.x.toFixed(0)},${q.y.toFixed(0)}`);
+    });
+
     test(`${id}: scenery stays clear of the track and pit lane`, () => {
         const t = tracks[id], out = S.placeScenery(t, 1, S.seedOf(id));
         const P = t.path, n = P.length, clearOf = (x, y) => { // past the barrier beside (x, y)
