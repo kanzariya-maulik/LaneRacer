@@ -89,6 +89,10 @@ test('monza build matches the research', () => {
     // the 2026 wall and debris fence on the left of the main straight
     const left = out(300, -1, 0), d = (w) => Math.min(...w.pts.map((q) => Math.hypot(q.x - left.x, q.y - left.y)));
     assert.ok(b.barriers.some((w) => w.fence >= 3 && w.kind === 'concrete' && d(w) < 40 * sc), 'wall and fence left of the main straight');
+    // Alboreto exit: the tricolour band, one stripe per colour, green at the track side, red outside
+    const paintAt = (q) => { let c = null; for (const s2 of b.surfaces) if (inside(q, s2.poly)) c = s2.kind === 'paint' ? s2.paint : null; return c; };
+    assert.ok(b.surfaces.filter((s2) => s2.kind === 'paint').every((s2) => s2.paint.length === 1), 'one colour per paint stripe');
+    assert.deepStrictEqual([6, 11, 16].map((o) => paintAt(out(5430, -1, o))?.[0]), ['#1f8a3b', '#f2f2f2', '#d62828']);
     // pit entry: the blue gore and yellow bollard
     assert.ok(b.features.some((f) => f.type === 'gore' && f.mouth === 'entry') && b.features.some((f) => f.type === 'bollard' && f.mouth === 'entry'));
     assert.ok(b.sources.length > 1 && b.unconfirmed.length > 0, 'sources and unconfirmed items carried');

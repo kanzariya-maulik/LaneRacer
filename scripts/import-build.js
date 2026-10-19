@@ -96,7 +96,11 @@ async function importBuild(id) {
         }
         return [...outer, ...inner.reverse()];
     };
-    const bands = (hand.bands || []).map((x) => ({ kind: x.kind, poly: band(x.fromM, x.toM, x.side === 'R' ? 1 : -1, x.fromEdgeM, x.toEdgeM), ...(x.paint ? { paint: x.paint } : {}), src: x.src }));
+    // a painted band: one stripe per colour, listed from the track side out
+    const bands = (hand.bands || []).flatMap((x) => {
+        const sd = x.side === 'R' ? 1 : -1, cols = x.paint || [null], w = (x.toEdgeM - x.fromEdgeM) / cols.length;
+        return cols.map((c, k) => ({ kind: x.kind, poly: band(x.fromM, x.toM, sd, x.fromEdgeM + k * w, x.fromEdgeM + (k + 1) * w), ...(c ? { paint: [c] } : {}), src: x.src }));
+    });
     const surfaces = [...osmSurfaces, ...(hand.surfaces || []), ...bands];
     const patches = (hand.asphalt?.patchesM || []).map((x) => ({ poly: band(x.fromM, x.toM, 0), src: x.src }));
 

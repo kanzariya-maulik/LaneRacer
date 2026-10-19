@@ -3,13 +3,13 @@
 // effects: the post chain (postfx.js), one anti-aliasing each. cascades: CSM cascades (0 = no sun shadows).
 export const LEVELS = {
     low:    { scale: [0.75, 0.5, 1], dpr: 1, effects: ['fxaa', 'fsr1'], shadows: 0, cascades: 0,
-              scenery: 0.3, far: 6000, fog: 6000, envMap: false, tyreMarks: false, anisotropy: 1 },
+              scenery: 0.3, far: 6000, fog: 6000, envMap: false, tyreMarks: false, anisotropy: 1, texRes: 512 },
     medium: { scale: [1, 0.6, 1], dpr: 1, effects: ['ao', 'bloom', 'vignette', 'smaa', 'fsr1'], shadows: 1024, cascades: 2,
-              scenery: 0.6, far: 12000, fog: 12000, envMap: true, tyreMarks: true, anisotropy: 4 },
+              scenery: 0.6, far: 12000, fog: 12000, envMap: true, tyreMarks: true, anisotropy: 4, texRes: 1024 },
     high:   { scale: [1, 1, 1], dpr: 1, effects: ['ao', 'bloom', 'vignette', 'traa'], shadows: 2048, cascades: 3,
-              scenery: 1, far: 20000, fog: 16000, envMap: true, tyreMarks: true, anisotropy: 8 },
+              scenery: 1, far: 20000, fog: 16000, envMap: true, tyreMarks: true, anisotropy: 16, texRes: 2048 },
     ultra:  { scale: [1, 1, 1], dpr: 1.5, effects: ['ao', 'ssr', 'bloom', 'lensflare', 'vignette', 'traa'], shadows: 4096, cascades: 4,
-              scenery: 1, far: 20000, fog: 16000, envMap: true, tyreMarks: true, anisotropy: 8 },
+              scenery: 1, far: 20000, fog: 16000, envMap: true, tyreMarks: true, anisotropy: 16, texRes: 2048 },
 };
 export const ORDER = ['low', 'medium', 'high', 'ultra'];
 

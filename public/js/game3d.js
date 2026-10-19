@@ -11,6 +11,9 @@ import { LEVELS, capLevel, scaleRange, pixelRatio, resolveLevel, autoPick, shoul
 import { placeScenery, seedOf, vergeReach, terrainHeights, terrainGround, skirtDepth, gridSampler, carveReach, onVerge, onPit, untangle, smoothPath, RENDER_STEP_M, SKIRT_M } from './scenery.js';
 import { heightAt, pathHeights } from './sim/elevation.js';
 import { buildTrackGeometry } from './trackMesh.js';
+import { loadTrackTextures, asphaltMaterial, groundMaterial, kerbMaterial, paintMaterial } from './trackMaterials.js';
+import { buildBarriers } from './barriers.js';
+import { prepareTrack } from './sim/drive.js';
 import { themeOf, LANDS, SKIES, nightOf } from './themes.js';
 import { SnapshotBuffer, RenderClock, sample, samplePresent, decodeFlags } from './netsync.js';
 import { decodeFast } from './netcodec.js';
@@ -573,17 +576,17 @@ function strip(path, from, to, y, keep, colorAt, opts = {}) {
     return coloredMesh(pos, col, uv, opts);
 }
 
-// A trackMesh.js ribbon as a mesh; opts: color, map, roughnessMap, uvScale (its UVs are metres), layer (depth offset)
+// A trackMesh.js ribbon as a mesh (its UVs are metres; `track` = lap and lateral metres); opts: material (else a plain one in color), layer (depth offset)
 function ribbonMesh(r, opts = {}) {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(r.position, 3));
-    g.setAttribute('uv', new THREE.BufferAttribute(opts.uvScale ? r.uv.map((v) => v * opts.uvScale) : r.uv, 2));
+    g.setAttribute('uv', new THREE.BufferAttribute(r.uv, 2));
+    if (r.track) g.setAttribute('track', new THREE.BufferAttribute(r.track, 2));
     g.setIndex(new THREE.BufferAttribute(r.index, 1));
     g.computeVertexNormals();
-    const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({
-        color: opts.color ?? 0xffffff, roughness: 0.9, map: opts.map || null, roughnessMap: opts.roughnessMap || null,
-        polygonOffset: !!opts.layer, polygonOffsetFactor: depthBias(-(opts.layer || 0), reversed), polygonOffsetUnits: depthBias(-(opts.layer || 0) * 2, reversed),
-    }));
+    const mat = opts.material || new THREE.MeshStandardMaterial({ color: opts.color ?? 0xffffff, roughness: 0.9 });
+    if (opts.layer) Object.assign(mat, { polygonOffset: true, polygonOffsetFactor: depthBias(-opts.layer, reversed), polygonOffsetUnits: depthBias(-opts.layer * 2, reversed) });
+    const m = new THREE.Mesh(g, mat);
     m.receiveShadow = true;
     return m;
 }
@@ -605,35 +608,6 @@ function kerbTexture(colors = ['red', 'white']) {
     return kerbTextures.get(key);
 }
 
-// Grey speckle, tiled along the track
-let asphaltTex = null, asphaltRough = null;
-function asphaltTexture() {
-    if (!asphaltTex) {
-        const c = document.createElement('canvas');
-        c.width = c.height = 256;
-        const g = c.getContext('2d'), rand = (() => { let s = 7; return () => ((s = (s * 16807) % 2147483647) / 2147483647); })();
-        g.fillStyle = '#d8d8d8';
-        g.fillRect(0, 0, 256, 256);
-        for (let k = 0; k < 9000; k++) {
-            const v = 150 + Math.floor(rand() * 105);
-            g.fillStyle = `rgb(${v},${v},${v})`;
-            g.fillRect(rand() * 256, rand() * 256, 1 + rand() * 2, 1 + rand() * 2);
-        }
-        asphaltTex = new THREE.CanvasTexture(c);
-        asphaltTex.wrapS = asphaltTex.wrapT = THREE.RepeatWrapping;
-        asphaltTex.colorSpace = THREE.SRGBColorSpace;
-        // Roughness varies grain to grain (0.6–0.92): the surface catches the sun at low angles
-        const r = document.createElement('canvas');
-        r.width = r.height = 256;
-        const rg = r.getContext('2d'), img = rg.createImageData(256, 256);
-        for (let i = 0; i < 256 * 256; i++) { const v = 150 + rand() * 85; img.data.set([v, v, v, 255], i * 4); }
-        rg.putImageData(img, 0, 0);
-        asphaltRough = new THREE.CanvasTexture(r);
-        asphaltRough.wrapS = asphaltRough.wrapT = THREE.RepeatWrapping;
-    }
-    asphaltTex.anisotropy = Q.anisotropy;
-    return asphaltTex;
-}
 
 // Vertical wall at one sideways offset
 function wall(path, offset, height, keep, colorAt, bottom = 0, opts = {}) { // height / bottom (from the road): one for all, or per point
@@ -650,23 +624,6 @@ function wall(path, offset, height, keep, colorAt, bottom = 0, opts = {}) { // h
     return coloredMesh(pos, col, null, opts);
 }
 
-// The ground: two mown tones in stripes and a fine speckle, in the circuit's land colours (themes.js LANDS)
-function grassTexture(w, h, land) {
-    const c = document.createElement('canvas');
-    c.width = c.height = 128;
-    const g = c.getContext('2d');
-    g.fillStyle = land.ground[0]; g.fillRect(0, 0, 128, 128);
-    g.fillStyle = land.ground[1]; g.fillRect(0, 0, 64, 128);
-    let seed = 7; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-    g.fillStyle = land.speck;
-    for (let k = 0; k < 900; k++) g.fillRect(Math.floor(rnd() * 128), Math.floor(rnd() * 128), 1 + Math.floor(rnd() * 2), 1);
-    const tex = new THREE.CanvasTexture(c);
-    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-    tex.repeat.set(w / (40 * scale), h / (40 * scale));
-    tex.colorSpace = THREE.SRGBColorSpace;
-    tex.anisotropy = 8;
-    return tex;
-}
 
 function startLine(start, width) {
     const c = document.createElement('canvas');
@@ -938,13 +895,13 @@ function updateCrews(dt) {
 const bar = (w, d, x, z) => { const q = new THREE.PlaneGeometry(w, d); q.rotateX(-Math.PI / 2); q.translate(x, 0, z); return q; };
 
 let entryGuide = null;
-function buildPit(pit, t, G) {
+function buildPit(pit, t, G, mats) {
     const n = pit.path.length, ph = pit.width / 2, s = pit.trackSide, line = 0.3 * scale;
     const W = pit.widthAt, half = W.map((w) => w / 2), neg = (A) => A.map((v) => -v);
     const inner = (i) => i >= 1 && i <= n - 3; // end segments would use wrapped normals
     // The lane: per-point width, 0 where it joins the road edge, so it never lies over the racing surface
-    world.add(ribbonMesh(G.lane, { color: '#3a3f47', map: asphaltTexture(), roughnessMap: asphaltRough, uvScale: 1 / 8 }));
-    world.add(ribbonMesh(G.apron, { color: '#4a505a', map: asphaltTexture(), roughnessMap: asphaltRough, uvScale: 1 / 8 })); // the lane to the road edge
+    world.add(ribbonMesh(G.lane, { material: mats.lane }));
+    world.add(ribbonMesh(G.apron, { material: mats.apron })); // the lane to the road edge: the track's own asphalt
     // White edges: the outer one all along; the track-side one is the blend line in the mouths and the pit-wall line beside it
     const inL = half.map((h) => h - line), inR = half.map((h) => -h + line);
     world.add(strip(pit.path, inL, half, 0.85, (i) => inner(i) && W[i] > line, solid('#f2f2f2')));
@@ -1400,7 +1357,7 @@ function buildWorld(t) {
     if (world) {
         scene.remove(world);
         // Free GPU memory; shared caches (asphalt, blob, env map, liveries) are kept for the next world
-        const keep = new Set([asphaltTex, asphaltRough, blobTex, envTex]);
+        const keep = new Set([blobTex, envTex]); // the photo textures (trackMaterials.js) are node inputs: never disposed here
         world.traverse((o) => {
             if (o.geometry) o.geometry.dispose();
             if (o.isInstancedMesh) o.dispose();
@@ -1458,13 +1415,19 @@ function buildWorld(t) {
     terrainAt = coarse && gridSampler(coarse, x0, y0, gw, gh, GROUND_COARSE);
     vergeR = vr;
     // Night: the land beyond the floodlit verges falls away into the dark
-    const ground = new THREE.Mesh(groundGeo(GROUND_COARSE, coarse), new THREE.MeshStandardMaterial({ map: grassTexture(gw, gh, land), roughness: 1, color: night ? 0x3a4250 : 0xffffff }));
+    // Photo materials (trackMaterials.js); the ground splat reads the same surface grid the physics drives on, with one grid
+    // value per paint colour
+    const tex = loadTrackTextures(level), sgrid = prepareTrack(t).grid, sandy = theme.land === 'desert', stripeDir = t.start.angle;
+    const vergeMat = groundMaterial(tex, t.build, scale, sgrid, { base: sandy ? 'sand' : 'grass', target: sandy ? null : land.verge, stripeDir });
+    const ground = new THREE.Mesh(groundGeo(GROUND_COARSE, coarse), groundMaterial(tex, t.build, scale, null, { // the land beyond: no surface grid
+        base: sandy ? 'sand' : theme.land === 'city' ? 'concrete' : 'grass', target: sandy || theme.land === 'city' ? null : land.ground[0],
+        dim: night ? 0.3 : 1, stripeDir })); // night: the land beyond the floodlit verges falls away into the dark
     ground.receiveShadow = true;
     world.add(ground);
     // Walls that meet the drawn ground (verge skirts, barriers): built for the coarse ground, again for the fine one
     const groundWalls = new THREE.Group(), wallBuilders = [];
     const buildGroundWalls = (H, segs) => {
-        for (const m of groundWalls.children) m.geometry.dispose();
+        groundWalls.traverse((o) => { o.geometry?.dispose(); if (o.isInstancedMesh) o.dispose(); });
         groundWalls.clear();
         const at = H ? gridSampler(H, x0, y0, gw, gh, segs) : () => -TERRAIN_SINK_M;
         for (const build of wallBuilders) build(at);
@@ -1514,12 +1477,28 @@ function buildWorld(t) {
     // The road, its lines, kerbs and verges, the pit lane, apron and wall: seamless ribbons along the smooth curve
     // (trackMesh.js); world-space UVs in metres, the asphalt texture every 8 m
     const G = buildTrackGeometry(t);
-    if (t.z) for (const v of [G.verge.R, G.verge.L]) world.add(ribbonMesh(v, { color: land.verge }));
-    world.add(ribbonMesh(G.road, { color: '#4a505a', map: asphaltTexture(), roughnessMap: asphaltRough, uvScale: 1 / 8 }));
+    if (t.z) for (const v of [G.verge.R, G.verge.L]) world.add(ribbonMesh(v, { material: vergeMat }));
+    const roadMat = asphaltMaterial(tex, t.build, scale);
+    world.add(ribbonMesh(G.road, { material: roadMat }));
     // White lines on the track limits (t.edgeR / edgeL: judged there), kerbs (build data: style, colours; 1 m stripes)
     const R = t.edgeR, L = t.edgeL;
-    for (const l of [G.lines.R, G.lines.L]) world.add(ribbonMesh(l, { color: '#f2f2f2', layer: 2 }));
-    for (const kb of G.kerbs) world.add(ribbonMesh(kb, { map: kerbTexture(kb.colors), layer: 1 }));
+    const lineMat = paintMaterial(tex, scale);
+    // Painted run-off (build data: one polygon per colour stripe), crisp over the ground
+    for (const sf of t.build.surfaces) if (sf.kind === 'paint') {
+        const P = sf.poly, tri = THREE.ShapeUtils.triangulateShape(P.map((q) => new THREE.Vector2(q.x, q.y)), []);
+        const g = new THREE.BufferGeometry();
+        g.setAttribute('position', new THREE.Float32BufferAttribute(P.flatMap((q) => [q.x, roadY(q.x, q.y) + 0.35, q.y]), 3));
+        const [a, b, c] = tri[0].map((i) => P[i]), up = (b.y - a.y) * (c.x - a.x) - (b.x - a.x) * (c.y - a.y) > 0; // three's y = up, z = our y
+        g.setIndex(tri.flatMap(([i, j, k]) => (up ? [i, j, k] : [i, k, j]))); // wound to face up
+        g.computeVertexNormals();
+        const mat = paintMaterial(tex, scale, sf.paint?.[0], 0.1);
+        Object.assign(mat, { polygonOffset: true, polygonOffsetFactor: depthBias(-1, reversed), polygonOffsetUnits: depthBias(-2, reversed) });
+        const m = new THREE.Mesh(g, mat);
+        m.receiveShadow = true;
+        world.add(m);
+    }
+    for (const l of [G.lines.R, G.lines.L]) world.add(ribbonMesh(l, { material: lineMat, layer: 2 }));
+    for (const kb of G.kerbs) world.add(ribbonMesh(kb, { material: kerbMaterial(tex, kerbTexture(kb.colors), scale), layer: 1 }));
 
     const scen = placeScenery(t, Q.scenery, seedOf(t.id));
     // Rubbered-in racing line through slow corners: inside at the apex, drifting out on exit (Medium/High)
@@ -1534,19 +1513,8 @@ function buildWorld(t) {
     }
     buildRacingLine(t);
 
-    // Barriers where the physics has them (track.walls: build data barriers; Task 11 draws each kind properly): from the
-    // ground (or 0.3 m under the road, whichever is lower) to h above the road or the ground, a see-through fence on top
-    const barrierColor = { concrete: '#a29d92', armco: '#c9ced4', tyres: '#1b1b1b', tecpro: '#2b5cab', wall: '#a29d92' };
-    const fence = solid('#d8dde2');
-    wallBuilders.push((at) => {
-        for (const w of t.build.barriers) {
-            const P = w.pts, H = heights(P), keep = (i) => i < P.length - 1, h = (w.h || 1) * scale;
-            const g = P.map((p) => at(p.x, p.y) * scale * ELEVATION_SCALE);
-            const base = g.map((v, i) => Math.min(0, v - H[i]) - 0.3 * scale), top = g.map((v, i) => Math.max(h, v + h - H[i]));
-            groundWalls.add(wall(P, 0, top.map((v, i) => v - base[i]), keep, solid(barrierColor[w.kind] || '#a29d92'), base));
-            if (w.fence && Q.scenery >= 0.5) groundWalls.add(wall(P, 0, (w.fence - (w.h || 1)) * scale, keep, fence, top, { opacity: 0.22 }));
-        }
-    });
+    // Barriers as built, per kind, where the physics has them (barriers.js), standing on the drawn ground
+    wallBuilders.push((at) => groundWalls.add(buildBarriers(t.build.barriers, tex, scale, { ground: (x, y) => at(x, y) * scale * ELEVATION_SCALE, road: (x, y) => roadY(x, y) })));
     buildGroundWalls(coarse, GROUND_COARSE);
     // Medians: concrete from the lower road up to the higher one (a retaining wall where they differ), the red and white
     // barrier and its catch fence on top, as the run-off barriers
@@ -1571,7 +1539,7 @@ function buildWorld(t) {
         world.add(m);
     }
     gridBoxes(t.startPositions);
-    if (t.pit) buildPit(t.pit, t, G.pit);
+    if (t.pit) buildPit(t.pit, t, G.pit, { lane: asphaltMaterial(tex, t.build, scale, { pit: true }), apron: roadMat });
     for (const b of t.bridges || []) buildBridge(b, t);
     snapCamera = true; pitBlend = 0;
 }

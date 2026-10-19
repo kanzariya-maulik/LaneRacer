@@ -21,6 +21,11 @@ test('presets follow the spec table', () => {
     assert.deepStrictEqual([Q.LEVELS.low.scenery, Q.LEVELS.medium.scenery, Q.LEVELS.high.scenery, Q.LEVELS.ultra.scenery], [0.3, 0.6, 1, 1]);
 });
 
+test('texRes per level: photo textures 512 / 1024 / 2048 / 2048, sharp at grazing angles on High and Ultra', () => {
+    assert.deepStrictEqual(Q.ORDER.map((l) => Q.LEVELS[l].texRes), [512, 1024, 2048, 2048]);
+    assert.deepStrictEqual([Q.LEVELS.high.anisotropy, Q.LEVELS.ultra.anisotropy], [16, 16]);
+});
+
 test('scaleRange and pixelRatio: internal scale per level, device pixels capped per level', () => {
     assert.deepStrictEqual(Q.scaleRange('low'), { start: 0.75, min: 0.5, max: 1 });
     assert.deepStrictEqual(Q.scaleRange('high'), { start: 1, min: 1, max: 1 });
