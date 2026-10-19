@@ -36,3 +36,10 @@ test('monza: every piece sits on the ground and on its barrier line', () => {
     }
     assert.ok(P['concrete:block'].every((q) => q.len > 0 && q.h > 0), 'blocks have size');
 });
+
+test('monza: the road height is looked up once per barrier point, not per piece (each lookup searches the whole track)', () => {
+    let calls = 0;
+    const P = B.barrierPlacements(t.build.barriers, sc, { ground: flat, road: (x, y) => { calls++; return (x + y) * 0.001; } });
+    assert.ok(calls <= t.build.barriers.reduce((a, w) => a + w.pts.length, 0), `${calls} road lookups`);
+    for (const q of P['armco:post']) assert.ok(q.y0 <= Math.min(0, (q.x + q.z) * 0.001) + 1e-6, 'posts still stand on the lower of road and ground');
+});

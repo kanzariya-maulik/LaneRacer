@@ -14,19 +14,19 @@ const TECPRO = { len: 1.5, tall: 1.2, deep: 0.6 };
 const FENCE_POST_M = 4;
 const CONCRETE_DEEP_M = 0.6;
 
-// Points every `every` m along a polyline (world units), each with its heading and distance along; ends included for pieces
+// Points every `every` m along a polyline (world units), each with its heading, distance along, segment and share of it
 function walk(pts, sc, every, fn) {
     let along = 0, next = 0;
     for (let i = 0; i + 1 < pts.length; i++) {
         const a = pts[i], b = pts[i + 1], len = Math.hypot(b.x - a.x, b.y - a.y) / sc;
         if (!len) continue;
         const rot = Math.atan2(b.y - a.y, b.x - a.x);
-        for (; next <= along + len + 1e-9; next += every) { const f = (next - along) / len; fn(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f, rot, next); }
+        for (; next <= along + len + 1e-9; next += every) { const f = (next - along) / len; fn(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f, rot, next, i, f); }
         along += len;
     }
 }
 
-// Pieces of at most PIECE_M along a polyline: { x, z (centre), rot, len (m), ax, ay, bx, by }
+// Pieces of at most PIECE_M along a polyline: { x, z (centre), rot, len (m), ax, ay, bx, by, i (segment), f0, f1 (its ends' shares) }
 function pieces(pts, sc) {
     const out = [];
     let along = 0;
@@ -35,7 +35,7 @@ function pieces(pts, sc) {
         if (!len) continue;
         for (let k = 0; k < n; k++) {
             const f0 = k / n, f1 = (k + 1) / n, ax = a.x + (b.x - a.x) * f0, ay = a.y + (b.y - a.y) * f0, bx = a.x + (b.x - a.x) * f1, by = a.y + (b.y - a.y) * f1;
-            out.push({ x: (ax + bx) / 2, z: (ay + by) / 2, rot: Math.atan2(b.y - a.y, b.x - a.x), len: len / n, ax, ay, bx, by, along: along + (len * (f0 + f1)) / 2 });
+            out.push({ x: (ax + bx) / 2, z: (ay + by) / 2, rot: Math.atan2(b.y - a.y, b.x - a.x), len: len / n, ax, ay, bx, by, i, f0, f1, along: along + (len * (f0 + f1)) / 2 });
         }
         along += len;
     }
@@ -46,19 +46,21 @@ function pieces(pts, sc) {
 // (y0, h world units; len metres; rot radians in the x-z plane)
 export function barrierPlacements(walls, sc, { ground, road }) {
     const out = {}, put = (name, q) => (out[name] ||= []).push(q);
-    const lo = (x, y) => Math.min(ground(x, y), road(x, y)) - SINK_M * sc, hi = (x, y) => Math.max(ground(x, y), road(x, y));
     walls.forEach((w, wi) => {
+        // the road's height looked up once per barrier point (a whole-track search each), in between interpolated
+        const R = w.pts.map((q) => road(q.x, q.y)), r = (i, f) => R[i] + (R[i + 1] - R[i]) * f;
+        const lo = (x, y, i, f) => Math.min(ground(x, y), r(i, f)) - SINK_M * sc, hi = (x, y, i, f) => Math.max(ground(x, y), r(i, f));
         const h = (w.h || 1) * sc, kind = { armco: 'armco', tyres: 'tyres', tecpro: 'tecpro' }[w.kind] || 'concrete';
         for (const p of pieces(w.pts, sc)) {
-            const y0 = Math.min(lo(p.ax, p.ay), lo(p.bx, p.by)), t = Math.max(hi(p.ax, p.ay), hi(p.bx, p.by)) + h;
+            const y0 = Math.min(lo(p.ax, p.ay, p.i, p.f0), lo(p.bx, p.by, p.i, p.f1)), t = Math.max(hi(p.ax, p.ay, p.i, p.f0), hi(p.bx, p.by, p.i, p.f1)) + h;
             if (kind === 'concrete') put('concrete:block', { x: p.x, z: p.z, y0, h: t - y0, len: p.len, rot: p.rot, along: p.along, wall: wi });
             if (kind === 'armco') for (const r of ARMCO.rails) put('armco:rail', { x: p.x, z: p.z, y0: t - h + r * sc, h: ARMCO.rail * sc, len: p.len, rot: p.rot, along: p.along, wall: wi });
             if (w.fence > (w.h || 1)) put('fence:mesh', { x: p.x, z: p.z, y0: t, h: (w.fence - (w.h || 1)) * sc, len: p.len, rot: p.rot, along: p.along, wall: wi });
         }
-        if (kind === 'armco') walk(w.pts, sc, ARMCO.post, (x, y, rot, along) => { const y0 = lo(x, y); put('armco:post', { x, z: y, y0, h: hi(x, y) + h - y0, rot, along, wall: wi }); });
-        if (kind === 'tyres') walk(w.pts, sc, TYRE.every, (x, y, rot, along) => { const y0 = lo(x, y); put('tyres:stack', { x, z: y, y0, h: hi(x, y) + h - y0, rot, along, wall: wi }); });
-        if (kind === 'tecpro') walk(w.pts, sc, TECPRO.len, (x, y, rot, along) => put('tecpro:block', { x, z: y, y0: hi(x, y), h: TECPRO.tall * sc, len: TECPRO.len, rot, along, wall: wi, alt: Math.round(along / TECPRO.len) % 2 }));
-        if (w.fence > (w.h || 1)) walk(w.pts, sc, FENCE_POST_M, (x, y, rot, along) => { const y0 = lo(x, y); put('fence:post', { x, z: y, y0, h: hi(x, y) + w.fence * sc - y0, rot, along, wall: wi }); });
+        if (kind === 'armco') walk(w.pts, sc, ARMCO.post, (x, y, rot, along, i, f) => { const y0 = lo(x, y, i, f); put('armco:post', { x, z: y, y0, h: hi(x, y, i, f) + h - y0, rot, along, wall: wi }); });
+        if (kind === 'tyres') walk(w.pts, sc, TYRE.every, (x, y, rot, along, i, f) => { const y0 = lo(x, y, i, f); put('tyres:stack', { x, z: y, y0, h: hi(x, y, i, f) + h - y0, rot, along, wall: wi }); });
+        if (kind === 'tecpro') walk(w.pts, sc, TECPRO.len, (x, y, rot, along, i, f) => put('tecpro:block', { x, z: y, y0: hi(x, y, i, f), h: TECPRO.tall * sc, len: TECPRO.len, rot, along, wall: wi, alt: Math.round(along / TECPRO.len) % 2 }));
+        if (w.fence > (w.h || 1)) walk(w.pts, sc, FENCE_POST_M, (x, y, rot, along, i, f) => { const y0 = lo(x, y, i, f); put('fence:post', { x, z: y, y0, h: hi(x, y, i, f) + w.fence * sc - y0, rot, along, wall: wi }); });
     });
     return out;
 }

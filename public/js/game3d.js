@@ -2422,7 +2422,7 @@ function drawMinimap() {
 }
 
 // ---------- loop ----------
-let last = performance.now(), compiling = false;
+let last = performance.now();
 // F3 / ?stats=1: network and frame-time overlay, refreshed at 4 Hz
 const frameMs = [], netstatsEl = document.getElementById('netstats');
 let netstatsOn = new URLSearchParams(location.search).has('stats'), lastNetstats = 0;
@@ -2512,7 +2512,7 @@ function frame(now) {
     skyDome.position.copy(camera.position);
     skyDome.scale.setScalar(camera.far * 0.9);
     if (paused) Sound.update(silentFrame); else updateSound(dt);
-    if (!compiling && (post || postFellBack)) { // a draw before the shaders are ready compiles them there and then (a ~1.6 s freeze)
+    if (post || postFellBack) { // the first draw of a world compiles its shaders there and then (~1 s, under the start lights)
         try { post ? post.render() : renderer.render(scene, camera); }
         catch (e) { // a chain that fails here: the Low chain once, then no post-processing at all; the race goes on
             console.warn(postFellBack ? 'postfx: Low chain failed too, plain render' : 'postfx: chain failed, Low chain instead', e);
@@ -2626,13 +2626,8 @@ window.initGameVisuals = () => {
     buildWorld(clientState.trackData);
     singlePass(scene);
     freeze(world);
-    // Shaders compile in the background; the world isn't drawn until they're done (the grid countdown covers it), at most
-    // 1.5 s (WebGPU warm-up can outlast the whole start sequence: a blank screen under the lights is worse than a hitch),
-    // with a car in the scene for that, so its paint shaders are ready too
-    compiling = !!renderer.compileAsync;
-    const warm = compiling && clientState.me != null ? makeCar(clientState.me)?.root : null;
-    if (warm) scene.add(warm);
-    if (compiling) Promise.race([renderer.compileAsync(scene, camera), new Promise((r) => setTimeout(r, 1500))]).catch(() => { /* compiled on first draw instead */ }).finally(() => { compiling = false; if (warm) scene.remove(warm); });
+    // No shader warm-up: renderer.compileAsync took ~22 s on Monza (the 1.5 s wait for it only left the screen blank, then
+    // the first draw compiled everything anyway, ~1 s); the world is drawn at once, under the start lights
     simStep(false); // resend what's held when a new session starts
 };
 renderer.setAnimationLoop(frame);
