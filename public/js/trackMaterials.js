@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { texture, positionWorld, attribute, uv, uniform, vec2, vec3, float, mix, smoothstep, step, sin, floor, fract, normalMap, mx_noise_float } from 'three/tsl';
 import { LEVELS } from './quality.js';
+import { RUBBER, SKID } from './rubber.js';
 
 const manifest = await (await fetch('/textures/manifest.json')).json();
 const loader = new THREE.TextureLoader();
@@ -71,9 +72,20 @@ const standard = (n) => { const m = new THREE.MeshStandardNodeMaterial(); Object
 
 // Road, apron and pit lane. Patches (build.asphalt.patchesM, lap metres) are fresher: darker and a touch smoother;
 // the `track` attribute (trackMesh.js: lap metres per vertex) says where
-export function asphaltMaterial(tex, build, sc, { pit = false } = {}) {
+// rubber (rubber.js, the road only): { profile: lap-metre texture of [line offset m, weight], lapM, level: uniform 0..1,
+// skids: SkidLayer texture, layer: the SkidLayer (its folding) }
+export function asphaltMaterial(tex, build, sc, { pit = false, rubber = null } = {}) {
     const p = metres(sc), A = asphaltAt(tex, build, p, pit ? 'asphalt_pit' : 'asphalt');
     let color = A.color, rough = A.rough;
+    if (rubber) { // the racing line rubbered in (Gaussian about its core) and skid marks, together never past the skid cap
+        const T = attribute('track', 'vec2'), lap = T.x, lat = T.y, L = rubber.layer;
+        const prof = texture(rubber.profile, vec2(lap.div(rubber.lapM), 0.5)), off = lat.sub(prof.r).abs().sub(RUBBER.coreM).max(0);
+        const g = off.mul(off).div(-2 * RUBBER.sigmaM * RUBBER.sigmaM).exp().mul(prof.g).mul(rubber.level);
+        const col = lap.div(L.colM).floor(), su = col.mul(L.colW).add(lat.add(SKID.latM).div(SKID.texLat)).div(L.width), sv = lap.sub(col.mul(L.colM)).div(L.colM);
+        const skid = texture(rubber.skids, vec2(su, sv)).r.mul(SKID.cap);
+        color = color.mul(float(1).sub(g.mul(RUBBER.maxDark).add(skid).min(RUBBER.totalDark)));
+        rough = rough.sub(g.mul(RUBBER.smooth)).sub(skid.mul(0.3)).max(0.2);
+    }
     if (!pit) for (const q of (build?.asphalt?.patchesM || []).slice(0, 8)) {
         const lap = attribute('track', 'vec2').x, edge = noise(p, 0.6).mul(1.5); // ragged ends
         const inside = step(q.fromM, lap.add(edge)).mul(step(lap.add(edge), q.toM));

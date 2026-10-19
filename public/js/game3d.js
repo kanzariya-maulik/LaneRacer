@@ -13,6 +13,8 @@ import { heightAt, pathHeights } from './sim/elevation.js';
 import { buildTrackGeometry } from './trackMesh.js';
 import { loadTrackTextures, asphaltMaterial, groundMaterial, kerbMaterial, paintMaterial } from './trackMaterials.js';
 import { buildBarriers } from './barriers.js';
+import { rubberProfile, rubberLevel, SkidLayer } from './rubber.js';
+import { uniform } from 'three/tsl';
 import { prepareTrack } from './sim/drive.js';
 import { themeOf, LANDS, SKIES, nightOf } from './themes.js';
 import { SnapshotBuffer, RenderClock, sample, samplePresent, decodeFlags } from './netsync.js';
@@ -574,6 +576,52 @@ function strip(path, from, to, y, keep, colorAt, opts = {}) {
         along += seg;
     }
     return coloredMesh(pos, col, uv, opts);
+}
+
+// Rubber (rubber.js): the racing line's profile per lap metre, the skid marks layer and its texture, the rubber level
+let skid = null, skidTex = null, rubberTex = null, skidUploaded = 0;
+const rubberLevelU = uniform(0.15);
+function dropRubber() { skidTex?.dispose(); rubberTex?.dispose(); skid = skidTex = rubberTex = null; }
+function rubberInputs(t, lap) {
+    dropRubber();
+    const prof = rubberProfile(t), lapM = t.cum[t.path.length] / t.scale, bins = Math.ceil(lapM), data = new Float32Array(bins * 2);
+    const order = lap.map((m, k) => k).sort((a, b) => lap[a] - lap[b]);
+    for (let b = 0, q = 0; b < bins; b++) { // each metre: the smooth-curve point at or just before it
+        while (q + 1 < order.length && lap[order[q + 1]] <= b + 0.5) q++;
+        data[b * 2] = prof[order[q] * 2]; data[b * 2 + 1] = prof[order[q] * 2 + 1];
+    }
+    rubberTex = new THREE.DataTexture(data, bins, 1, THREE.RGFormat, THREE.FloatType);
+    rubberTex.needsUpdate = true;
+    skid = new SkidLayer(t);
+    skidTex = new THREE.DataTexture(skid.data, skid.width, skid.height, THREE.RedFormat, THREE.UnsignedByteType);
+    skidTex.magFilter = skidTex.minFilter = THREE.LinearFilter;
+    skidTex.needsUpdate = true;
+    return { profile: rubberTex, lapM, level: rubberLevelU, skids: skidTex, layer: skid };
+}
+// Each drawn car's four tyres leave a mark where it brakes at the limit (harder than 3.5 g: the sim has no lock-up, its
+// brakes peak near 4.5 g, so a faint mark that builds up lap after lap in the braking zones) or slides (more than 0.12 rad
+// at over 20 m/s: a clear streak), from its pose frame to frame; stamped every 0.25 m along the tyre's path
+const LOCK_G = 3.5, LOCK_MARK = 0.15, SLIDE_RAD = 0.12, SLIDE_MS = 20;
+function skidMarks(car, s, dt) {
+    const v = s.speed / scale, prev = car.skidPose;
+    car.skidPose = { x: s.x, y: s.y, v };
+    if (!prev || dt <= 0) return;
+    car.decel = (car.decel || 0) + ((prev.v - v) / dt / 9.81 - (car.decel || 0)) * Math.min(1, dt * 12); // smoothed: snapshots jitter
+    const mv = Math.hypot(s.x - prev.x, s.y - prev.y);
+    let slip = mv > 0.05 * scale ? Math.abs(Math.atan2(s.y - prev.y, s.x - prev.x) - s.angle) : 0;
+    if (slip > Math.PI) slip = 2 * Math.PI - slip;
+    const strength = Math.max(car.decel > LOCK_G ? LOCK_MARK : 0, v > SLIDE_MS && slip > SLIDE_RAD ? Math.min(1, (slip - SLIDE_RAD) / 0.2) : 0);
+    if (!strength) { car.skidAt = null; return; }
+    const P = elev.path, n = P.length, i = (car.skidI = trackIndex(P, s.x, s.y, car.skidI ?? null)), a = P[i], b = P[(i + 1) % n];
+    const ex = b.x - a.x, ey = b.y - a.y, l = Math.hypot(ex, ey) || 1, total = elev.cum[n];
+    const lapC = ((((elev.cum[i] + ((s.x - a.x) * ex + (s.y - a.y) * ey) / l - elev.startS) % total) + total) % total) / scale;
+    const latC = ((s.x - a.x) * -ey + (s.y - a.y) * ex) / l / scale, d = s.angle - Math.atan2(ey, ex), cd = Math.cos(d), sd = Math.sin(d);
+    const at = [[1, 1], [1, -1], [-1, 1], [-1, -1]].map(([fa, fl]) => { const al = (fa * WHEELBASE_M) / 2, la = (fl * TRACK_WIDTH_M) / 2; return [lapC + al * cd - la * sd, latC + al * sd + la * cd]; });
+    if (car.skidAt) at.forEach(([m, w], k) => {
+        const [m0, w0] = car.skidAt[k], dm = m - m0, steps = Math.abs(dm) < 50 ? Math.min(40, Math.ceil(Math.hypot(dm, w - w0) / 0.25)) : 0;
+        for (let q = 1; q <= steps; q++) skid.stamp(m0 + (dm * q) / steps, w0 + ((w - w0) * q) / steps, strength);
+    });
+    car.skidAt = at;
 }
 
 // A trackMesh.js ribbon as a mesh (its UVs are metres; `track` = lap and lateral metres); opts: material (else a plain one in color), layer (depth offset)
@@ -1352,6 +1400,7 @@ function buildWorld(t) {
         }
         if (line) { world.remove(line.mesh); line.mesh.geometry.dispose(); line.mesh.material.dispose(); }
         buildRacingLine(t);
+        skid?.clear(); // a new session: a clean track
         return;
     }
     if (world) {
@@ -1478,7 +1527,7 @@ function buildWorld(t) {
     // (trackMesh.js); world-space UVs in metres, the asphalt texture every 8 m
     const G = buildTrackGeometry(t);
     if (t.z) for (const v of [G.verge.R, G.verge.L]) world.add(ribbonMesh(v, { material: vergeMat }));
-    const roadMat = asphaltMaterial(tex, t.build, scale);
+    const roadMat = asphaltMaterial(tex, t.build, scale, { rubber: Q.tyreMarks ? rubberInputs(t, G.lap) : (dropRubber(), null) });
     world.add(ribbonMesh(G.road, { material: roadMat }));
     // White lines on the track limits (t.edgeR / edgeL: judged there), kerbs (build data: style, colours; 1 m stripes)
     const R = t.edgeR, L = t.edgeL;
@@ -1501,16 +1550,6 @@ function buildWorld(t) {
     for (const kb of G.kerbs) world.add(ribbonMesh(kb, { material: kerbMaterial(tex, kerbTexture(kb.colors), scale), layer: 1 }));
 
     const scen = placeScenery(t, Q.scenery, seedOf(t.id));
-    // Rubbered-in racing line through slow corners: inside at the apex, drifting out on exit (Medium/High)
-    if (Q.tyreMarks) {
-        for (const c of scen.slowCorners) {
-            const inside = -c.side; // the outside is c.side
-            world.add(strip(rp, inside * half * 0.15, inside * half * 0.55, 0.62, (i) => {
-                const len = (c.to - c.from + n) % n, k = (Math.floor(i / K) - c.from + n) % n;
-                return k < len;
-            }, solid('#1a1c20'), { opacity: 0.35, layer: 1 }));
-        }
-    }
     buildRacingLine(t);
 
     // Barriers as built, per kind, where the physics has them (barriers.js), standing on the drawn ground
@@ -1539,7 +1578,7 @@ function buildWorld(t) {
         world.add(m);
     }
     gridBoxes(t.startPositions);
-    if (t.pit) buildPit(t.pit, t, G.pit, { lane: asphaltMaterial(tex, t.build, scale, { pit: true }), apron: roadMat });
+    if (t.pit) buildPit(t.pit, t, G.pit, { lane: asphaltMaterial(tex, t.build, scale, { pit: true }), apron: asphaltMaterial(tex, t.build, scale) });
     for (const b of t.bridges || []) buildBridge(b, t);
     snapCamera = true; pitBlend = 0;
 }
@@ -1664,6 +1703,12 @@ function makeCar(id) {
 
 function updateCars(dt) {
     const gs = clientState.gameState;
+    if (skid) { // rubber grows with the laps all cars have driven this session; skid marks uploaded at most twice a second
+        let laps = 0;
+        for (const id in gs) laps += Math.max(0, gs[id].lap || 0);
+        rubberLevelU.value = rubberLevel(window.lanraceDebug?.rubber.laps ?? laps); // ?stats=1: laps set by hand
+        if (skid.dirty && performance.now() - skidUploaded > 500) { skidTex.needsUpdate = true; skid.dirty = false; skidUploaded = performance.now(); }
+    }
     for (const id in cars) if (!gs[id]) dropCar(id);
     for (const id in gs) {
         const s = gs[id];
@@ -1702,6 +1747,7 @@ function updateCars(dt) {
         const far = camera.position.distanceTo(r.position) > 300 * scale; // wheels unreadable that far: 4 fewer draws per car
         for (const w of car.wheels) w.userData.show = !far;
         for (const w of car.wheels) w.rotation.z -= (s.speed / (WHEEL_RADIUS_M * scale)) * dt;
+        if (skid) skidMarks(car, s, dt);
         // +steer turns toward +z (right); a +y rotation points the wheel toward -z, so negate
         car.wheels[0] && (car.wheels[0].rotation.y = -(s.steer || 0)); // wheel_FL
         car.wheels[1] && (car.wheels[1].rotation.y = -(s.steer || 0)); // wheel_FR
@@ -2394,7 +2440,7 @@ const fpsHist = []; let capWarned = false; // steady 30 fps = browser frame cap,
 let autoMs = 0, autoFrames = 0, autoDone = false; // auto-pick: frame time while driving
 const stats = new URLSearchParams(location.search).has('stats') ? Object.assign(document.createElement('div'), { id: 'stats' }) : null;
 if (stats) document.body.appendChild(stats);
-if (stats) window.lanraceDebug = { renderer, scene, camera, freeCam: false, setScale: (s) => post?.setScale(s) }; // ?stats=1: profiling / looking around from the console
+if (stats) window.lanraceDebug = { renderer, scene, camera, freeCam: false, setScale: (s) => post?.setScale(s), rubber: { level: rubberLevelU, layer: () => skid, tex: () => skidTex, rubberLevel } }; // ?stats=1: profiling / looking around from the console
 
 // Sound + gear HUD: gearboxes for your car and every other car (cheap), audio frame in metres (track plane)
 const ownBox = new Gearbox(), remoteBoxes = new Map(), soundOthers = [];
