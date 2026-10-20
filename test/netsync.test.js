@@ -184,6 +184,20 @@ test('samplePresent: a correction (the car braked) fades out over ~100 ms instea
     assert.strictEqual(N.samplePresent(b, 0.26, 0, out, st, 6).x, 500);
 });
 
+test('samplePresent: small corrections every packet fade with time, not pile up (an accelerating car stays on its server position)', () => {
+    const b = new N.SnapshotBuffer(), out = {}, st = {};
+    const acc = 60, at = (t) => [0, 0.5 * acc * t * t, 0, 0, acc * t, 0, 0, acc * t, 0, 0, 0]; // speeding up: each projection a bit short
+    let worst = 0;
+    for (let k = 0; k < 180; k++) {
+        const t = k / 60;
+        b.push({ s: k + 1, t, c: [at(t)] }, t + 0.03);
+        const now = t + 0.03;                                       // a new packet every frame: the fade was restarted each time
+        const p = N.samplePresent(b, now, 0, out, st, 6);
+        if (k > 30) worst = Math.max(worst, Math.abs(p.x - 0.5 * acc * now * now));
+    }
+    assert.ok(worst < 0.3, `drawn ${worst.toFixed(2)} units (${(worst / 6).toFixed(2)} m) off the server position`);
+});
+
 test('present mode through a RenderClock (target delay 0): even frame steps on jittery WiFi', () => {
     const b = new N.SnapshotBuffer(), clock = new N.RenderClock(), out = {}, st = {};
     let seed = 9; const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);

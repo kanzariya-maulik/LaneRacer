@@ -1157,7 +1157,7 @@ test('incident: rear-end — the car behind gets +5 s, the car hit gets nothing'
 
 test('incident: side swipe — the car that moved across is to blame, not the one driving straight', () => {
     const { g, a, b } = incidentGame();
-    placeAt(a, 300, -1.9, 50, 6); placeAt(b, 300, 0, 50); // a level with b, 6 m/s sideways into it
+    placeAt(a, 300, -1.9 * Physics.CAR_SCALE, 50, 6); placeAt(b, 300, 0, 50); // a level with b, 6 m/s sideways into it
     run(g, 2.2);
     assert.deepStrictEqual([a.penalty, b.penalty], [5, 0]);
 });
@@ -1189,7 +1189,7 @@ test('incident: pushing the other car off the track is +10 s, and the victim get
 
 test('incident: long contact is one incident; quali ghosts and collisions-off races are never judged', () => {
     let { g, a, b } = incidentGame();
-    for (let k = 0; k < 150; k++) { placeAt(a, 300, -1.9, 50, 6); placeAt(b, 300, 0, 50); g.update(); } // 2.5 s leaning on b
+    for (let k = 0; k < 150; k++) { placeAt(a, 300, -1.9 * Physics.CAR_SCALE, 50, 6); placeAt(b, 300, 0, 50); g.update(); } // 2.5 s leaning on b
     run(g, 2.2);
     assert.strictEqual(a.penalty, 5, 'one incident, one penalty');
     for (const [settings, mode] of [[{ ...RACE, collisions: false }, 'race'], [{ maxLaps: 3, qualifying: true }, 'quali']]) {
@@ -1222,7 +1222,7 @@ test('incident: hitting a car that was already off track or spun is +5 s, not +1
 
 test('incident: a hit still pending when the race ends is counted in the result', () => {
     const { g, a, b } = incidentGame();
-    placeAt(a, 300, 0, 60); placeAt(b, 305, 0, 40);
+    placeAt(a, 300, 0, 60); placeAt(b, 300 + 5 * Physics.CAR_SCALE, 0, 40); // 5 m apart at real car size
     g.update();                                           // contact, verdict 2 s away
     Object.assign(a, { finished: true, finishTime: 100 }); Object.assign(b, { finished: true, finishTime: 101 });
     g.update();

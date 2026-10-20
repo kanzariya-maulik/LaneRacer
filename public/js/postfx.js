@@ -1,7 +1,7 @@
 // The post-processing chain for a level: its `effects` list (quality.js) turned into one three.js RenderPipeline.
 // Browser only (WebGPURenderer). An effect that fails to build is dropped with a warning; the race goes on.
 import * as THREE from 'three/webgpu';
-import { pass, mrt, output, normalView, velocity, metalness, roughness, convertToTexture, vec2, vec4, uv, float, length, smoothstep, step, mix, min, renderOutput } from 'three/tsl';
+import { pass, mrt, output, normalView, velocity, metalness, roughness, convertToTexture, vec2, vec4, uv, float, length, smoothstep, step, mix, min, renderOutput, saturation, toneMappingExposure } from 'three/tsl';
 import { ao } from 'three/addons/tsl/display/GTAONode.js';
 import { gaussianBlur } from 'three/addons/tsl/display/GaussianBlurNode.js';
 import { ssr } from 'three/addons/tsl/display/SSRNode.js';
@@ -50,13 +50,17 @@ export function buildPost(renderer, scene, camera, effects) {
         return vec4(c.rgb.add(r.rgb.mul(r.a)), c.a);
     });
     let glow = null;
-    // Threshold above the HDR sky's own brightness: only sun glints, floodlights and lamps bloom, not the whole sky
-    // The physical sky's sun disc is thousands of times brighter than the scene: fed to the bloom as it is, its glow
-    // covered half the screen facing the sun. Capped, it glows round the sun only (as a camera or the eye does)
+    // Bloom judges the exposed image, as a camera does: only what is far brighter than the sky glows (sun, glints,
+    // floodlight lamps). Judged on raw HDR at a fixed threshold, the day sky's horizon band (brighter than 3 before a 0.4
+    // exposure) glowed over every tree and wall as a milky veil, while the night lamps never reached it.
+    // The physical sky's sun disc is thousands of times brighter than the scene: capped, it glows round the sun only
     const BLOOM_CAP = 8;
-    tryFx('bloom', (c) => { glow = own(bloom(vec4(min(c.rgb, float(BLOOM_CAP)), c.a), 0.2, 0.4, 3.0)); return c.add(glow); });
+    tryFx('bloom', (c) => { glow = own(bloom(vec4(min(c.rgb.mul(toneMappingExposure), float(BLOOM_CAP)), c.a), 0.25, 0.4, 5)); return c.add(glow.div(toneMappingExposure)); });
     tryFx('lensflare', (c) => (glow ? c.add(own(lensflare(glow, { threshold: 4, ghostAttenuationFactor: 25 }))) : c));
     tryFx('vignette', (c) => vec4(c.rgb.mul(float(1).sub(smoothstep(0.45, 1.0, length(uv().sub(0.5)).mul(1.4)).mul(0.35))), c.a));
+
+    // Grade (every level): ACES pulls bright colours toward white; a touch more saturation brings grass, sky and liveries back
+    color = vec4(saturation(color.rgb, 1.15), color.a);
 
     // Temporal AA works on linear colour (tone mapping after); else the spatial AA works on the tone-mapped image
     if (fx.has('traa') || fx.has('taau')) {

@@ -37,14 +37,19 @@ test('carModels: markers in the car frame (x forward, y left, z up), one request
     assert.ok(a.near && a.far && a.head && a.wheelPos);
 });
 
-test('carModels: each car gets its own materials (a ghost fades only that car)', async () => {
+test('carModels: cars of a team share materials (shaders built once); a ghost swaps to a shared see-through copy', async () => {
     const a = await C.loadTeamCar('testteam2', () => Promise.resolve(fakeGltf()));
     const mats = (g) => { const m = []; g.traverse((o) => o.isMesh && m.push(o.material)); return m; };
     const g1 = C.cloneForCar(a, 45), g2 = C.cloneForCar(a, 45);
     assert.ok(g1.isLOD && g1.levels.length === 2 && g1.levels[1].distance === 45);
-    const m1 = mats(g1), m2 = mats(g2);
-    assert.ok(m1.length === 2 && m2.length === 2);
-    for (const m of m1) assert.ok(!m2.includes(m) && !mats(a.near).includes(m));
+    assert.deepStrictEqual(mats(g1), mats(g2), 'shared, not cloned per car');
+    const solid = mats(g1);
+    C.setGhost(g1, true);
+    for (const m of mats(g1)) assert.ok(m.transparent && m.opacity === 0.5 && !solid.includes(m));
+    assert.deepStrictEqual(mats(g2), solid, 'the other car stays solid');
+    assert.strictEqual(C.ghostOf(solid[0]), C.ghostOf(solid[0]), 'one ghost copy per material: no shader build per toggle');
+    C.setGhost(g1, false);
+    assert.deepStrictEqual(mats(g1), solid);
 });
 
 test('carModels: Low draws the far model only', () => {

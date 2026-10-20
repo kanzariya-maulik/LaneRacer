@@ -3,6 +3,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 const { driveLap } = require('./helpers/lineBot');
+const { CAR_SCALE } = require('../src/game/Physics');
 
 for (const id of ['monza', 'monaco', 'spa']) {
     test(`${id}: High help laps no faster than the real limit and at most 6 % slower, and stays on the road`, () => {
@@ -26,9 +27,9 @@ for (const id of ['monza', 'monaco', 'spa']) {
 }
 
 test('High help still makes every corner 1 m either side of the racing line (Spa) and on worn tyres (Monaco)', () => {
-    for (const offsetM of [-1, 1]) { // half a car off the line: at real width, 2 m is over the kerb
+    for (const offsetM of [-CAR_SCALE, CAR_SCALE]) { // half a car off the line: twice that is over the kerb
         const r = driveLap('spa', '100,100', { driver: 'flat', offsetM });
-        assert.ok(r.finished && r.off === 0 && r.walls === 0, `${offsetM} m off the line: off ${r.off}, walls ${r.walls}`);
+        assert.ok(r.finished && r.off === 0 && r.walls === 0, `${offsetM.toFixed(2)} m off the line: off ${r.off}, walls ${r.walls}`);
     }
     const w = driveLap('monaco', '100,100', { driver: 'flat', worn: true });
     assert.ok(w.finished && w.off === 0 && w.walls === 0, `worn tyres: off ${w.off}, walls ${w.walls}`);

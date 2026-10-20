@@ -73,6 +73,6 @@ test('front wheels steer anti-Ackermann as an F1 car: the inner wheel turns less
 
 test('cars drawn and collided at CAR_SCALE of real size (a touch smaller beside the track), the hitbox the same', async () => {
     const Physics = (await import('../public/js/sim/physics.js')).default;
-    assert.ok(Physics.CAR_SCALE >= 0.85 && Physics.CAR_SCALE < 1, `${Physics.CAR_SCALE}`);
-    assert.ok(Math.abs(Physics.CAR_HALF_LENGTH_M - 2.74 * Physics.CAR_SCALE) < 1e-9 && Math.abs(Physics.CAR_HALF_WIDTH_M - 1.0 * Physics.CAR_SCALE) < 1e-9);
+    assert.ok(Physics.CAR_SCALE >= 0.7 && Physics.CAR_SCALE < 1, `${Physics.CAR_SCALE}`);
+    assert.ok(Math.abs(Physics.CAR_HALF_LENGTH_M - 2.815 * Physics.CAR_SCALE) < 1e-9 && Math.abs(Physics.CAR_HALF_WIDTH_M - 1.0 * Physics.CAR_SCALE) < 1e-9);
 });

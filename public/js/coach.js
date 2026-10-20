@@ -4,7 +4,7 @@ import Physics from './sim/physics.js';
 export const GAP_S = 4, SHOW_S = 2.5;
 const TIP_MAX = 3, QUIET_AFTER = 3, STEWARD_HOLD_S = 4, CONTACT_QUIET_S = 5;
 const MERGE_M = 60, WINDOW_M = 150, WIDE_AFTER_M = 30, EARLY_M = 20, SLOW_K = 0.85, APEX_M = 2, ENTRY_K = 0.4, BRAKE_ON = 0.2, HOLD_S = 0.15, BACK_M = 5, APEX_ZONE_M = 5;
-const TOW_ON = 0.3, TOW_S = 1, SIDE_M = 100, CAR_M = 5.5, CONTACT_M = 1.2 * CAR_M;
+const TOW_ON = 0.3, TOW_S = 1, SIDE_M = 100, CAR_M = 2 * Physics.CAR_HALF_LENGTH_M, CONTACT_M = 1.2 * CAR_M;
 
 const lapM = (t) => t.cum[t.path.length] / t.scale;
 const heading = (P, i) => { const n = P.length, a = P[i], b = P[(i + 1) % n]; return Math.atan2(b.y - a.y, b.x - a.x); };
@@ -113,7 +113,7 @@ export function createCoach(corners, t, rl, opts = {}) {
         const cos = Math.cos(f.angle), sin = Math.sin(f.angle);
         for (const o of f.near) {
             const dx = o.x - f.x, dy = o.y - f.y, ahead = (dx * cos + dy * sin) / t.scale, lat = (-dx * sin + dy * cos) / t.scale;
-            if (Math.abs(ahead) < 1.5 * CAR_M && Math.abs(lat) >= 1.5 && Math.abs(lat) <= 5) return lat;
+            if (Math.abs(ahead) < 1.5 * CAR_M && Math.abs(lat) >= 1.5 * Physics.CAR_SCALE && Math.abs(lat) <= 5 * Physics.CAR_SCALE) return lat; // alongside: within a car width or so
         }
         return null;
     };

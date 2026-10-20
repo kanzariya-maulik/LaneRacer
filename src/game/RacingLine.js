@@ -1,10 +1,11 @@
 // Racing line: minimum-curvature path within the track edges, and the speed the car carries along it.
 // Speeds are the car's real limit (no help grip, full braking), so red starts where a good driver brakes.
 const { C } = require('./CarPhysics');
+const Physics = require('./Physics');
 const { DOWN, MAX_SAFE, safeSpeeds } = require('./Assist');
 
 const PASSES = 2000;     // smoothing passes (~100-160 ms per track)
-const MARGIN_M = 1.5;    // keep this far inside the track edge
+const MARGIN_M = Physics.CAR_HALF_WIDTH_M + 0.5; // car centre this far inside the white line: its half width + 0.5 m
 
 // Unit normals, same convention as offsetPoints in game3d.js: (x − ty·o, y + tx·o)
 function normals(P) {
@@ -103,4 +104,4 @@ function compute(t) {
     return { offset, speed: prof.speed.map((v) => Math.floor(v * 10) / 10), phase: prof.phase, limit, lapS: Math.round(prof.lap * 10) / 10 };
 }
 
-module.exports = { compute, profile, linePoints, curvatures, latMax };
+module.exports = { compute, profile, linePoints, curvatures, latMax, MARGIN_M };

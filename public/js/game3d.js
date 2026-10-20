@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { buildCar, buildSteeringWheel, liveryTexture as carLivery, WHEEL_RADIUS } from './carModel.js';
 import { WHEELS } from './carShape.js';
-import { loadTeamCar, cloneForCar, detailFor, loadParts } from './carModels.js';
+import { loadTeamCar, cloneForCar, detailFor, loadParts, setGhost, fetchModel, parseModel } from './carModels.js';
 import { VIEW_NAMES, VIEW_FOV, EYE_TILT, CHASE, nextView, viewOf, onboard, wheelAngle, toThree, eyeFor, wheelPosFor, frontSteer } from './views.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
@@ -85,6 +85,10 @@ backend = renderer.backend.isWebGPUBackend ? 'webgpu' : 'webgl2';
 reversed = renderer.reversedDepthBuffer;
 let level = resolveLevel(choice, store.get('lanrace.quality.auto'), backend);
 let Q = LEVELS[level];
+// The track's photo textures (18 MB over all of them): fetched and decoded now, in the lobby. Requested only when a race
+// built its world, a friend's link delivered them through the first laps, each upload (and its mean-colour pass)
+// freezing the race for 80-170 ms
+setTimeout(() => loadTrackTextures(level), 0);
 window.lanraceQuality = { choice, level, backend };
 // Reading each shader's error log forces the GPU driver to finish compiling it there and then (a 2 s stall at a session's
 // start in profiles); errors are a developer concern, the console still shows the backend's own
@@ -135,7 +139,7 @@ const skyScene = new THREE.Scene();
 skyScene.add(daySky);
 const skyCube = new THREE.CubeRenderTarget(512, { type: THREE.HalfFloatType });
 const skyCam = new THREE.CubeCamera(1, 1000, skyCube);
-renderer.toneMapping = THREE.NeutralToneMapping; // keeps base colours; AgX greyed the whole scene
+renderer.toneMapping = THREE.ACESFilmicToneMapping; // filmic S-curve (toe + shoulder): deep blacks, rolled highlights. Neutral has no toe: the whole frame sat in milky mid-grey
 let currentSky = null;
 function applySky(sky) {
     currentSky = sky;
@@ -151,13 +155,20 @@ function applySky(sky) {
     stars.visible = !!sky.stars;
     stars.geometry.setDrawRange(0, Math.round(STARS * (sky.stars || 0)));
     // Haze only near the horizon (60% of the fog distance): from 500 m it washed the track out. Night fades into the dark sooner
-    if (scene.fog) scene.fog.near = sky.stars !== undefined ? 1500 : Q.fog * 0.6;
+    // Night: floodlights reach the track and its verges only; beyond ~40 m everything sinks into the dark (the fog is the
+    // night horizon colour), as on a TV picture of Singapore or Bahrain, instead of trees lit daylight-green to the horizon
+    if (scene.fog) Object.assign(scene.fog, sky.stars !== undefined ? { near: 40 * scaleOf(), far: Math.min(Q.fog, 300 * scaleOf()) } : { near: Q.fog * 0.6, far: Q.fog });
     const el = (sky.elevation * Math.PI) / 180, az = (sky.azimuth * Math.PI) / 180, r = 1900;
     Object.assign(SUN_OFF, { x: r * Math.cos(el) * Math.sin(az), y: r * Math.sin(el), z: r * Math.cos(el) * Math.cos(az) });
     // The cascades take the light's direction from sun → target
     sun.position.set(SUN_OFF.x, SUN_OFF.y, SUN_OFF.z);
     sun.target.position.set(0, 0, 0);
     sun.updateMatrixWorld(); sun.target.updateMatrixWorld();
+    // Night: floodlights stand on both sides of the track, so a car is lit from all round; with the one key light every
+    // face turned from it was black. The far-side bank: opposite bearing, no shadows, a bit weaker. Day: the sky fills
+    fill.color.set(sky.sun);
+    fill.intensity = sky.stars !== undefined ? sky.power * 0.6 : 0;
+    fill.position.set(-SUN_OFF.x, SUN_OFF.y, -SUN_OFF.z);
     const isDay = sky.stars === undefined;
     skyDome.visible = !isDay;
     if (isDay) {
@@ -169,13 +180,16 @@ function applySky(sky) {
         scene.background = skyCube.texture;
     }
     // Outdoors the sun outshines the sky fill several times over; weaker, it leaves no visible shadows (night: floodlights as set)
-    if (isDay) sun.intensity = sky.power * 3;
+    if (isDay) sun.intensity = sky.power * 3.6;
     renderer.toneMappingExposure = sky.exposure ?? 1;
     // Sky light now comes from the environment map: the hemisphere light is only a small fill where there is one
     // Daylight: the sky lights the shade at about a quarter of the sun (real ratio ~3-5:1); at 0.12 the shadow side of
     // every car was black. Above ~0.45 the scene goes flat and milky
-    hemi.intensity = sky.hemi * (Q.envMap && isDay ? 0.6 : 1); // night: the dark dome gives no fill, keep the hemisphere
-    scene.environmentIntensity = isDay ? 0.3 : 0.45; // night: the floodlit room (envTexture) on paint and asphalt
+    // Key/fill as a film set: daylight sun ~100k lux against ~20k from the sky (about 5:1). The sky's fill comes from the
+    // environment map (blue from above, directional, with reflections); the flat hemisphere light only lifts the shade a
+    // little: as the main fill it lit every face alike and the frame went flat
+    hemi.intensity = sky.hemi * (Q.envMap ? (isDay ? 0.25 : 0.6) : 1);
+    scene.environmentIntensity = isDay ? 0.35 : 0.6; // night: the floodlit room (envTexture): highlights on paint, as on TV
     envTex?.dispose(); envTex = null;
     scene.environment = Q.envMap ? envTexture() : null;
     // The post chain follows the level and the sky (sun glare is day-only); buildWorld always calls this after applyLevel
@@ -194,6 +208,8 @@ const SUN_OFF = { x: 600, y: 1800, z: 400 }; // sun position relative to the sha
 sun.shadow.bias = -0.0004;
 sun.shadow.normalBias = 0;
 scene.add(sun, sun.target);
+const fill = new THREE.DirectionalLight(0xffffff, 0); // night: the far bank of floodlights (applySky)
+scene.add(fill);
 let activeView = 'chase', onboardCar = null, steeringWheel = null; // onboardCar: the car whose T-cam/cockpit is in use
 
 // Shadows, fog, draw distance and resolution limits for a level (applied when a track is built)
@@ -1158,11 +1174,11 @@ function buildScenery(t, scen, theme) {
     // Marshal posts: small orange huts behind the barrier
     add(new THREE.BoxGeometry(2.2 * scale, 2.6 * scale, 2.2 * scale), mat(0xf08a24), scen.posts.map((p) => ({ x: p.x, y: 1.3 * scale + groundY(p.x, p.y), z: p.y, angle: -p.angle })));
 
-    // Night: floodlight towers behind the barrier, their lamp banks glowing (unlit material, seen from afar, not fogged)
+    // Night: floodlight towers behind the barrier, their lamp banks glowing (unlit, HDR bright so they bloom, not fogged)
     if (night && scen.floodlights.length) {
         const at = (f, up, toward) => ({ x: f.x + Math.sin(f.angle) * f.side * toward, y: up + groundY(f.x, f.y), z: f.y - Math.cos(f.angle) * f.side * toward, angle: -f.angle });
         add(new THREE.CylinderGeometry(0.3 * scale, 0.45 * scale, 24 * scale, seg(5, 8)), mat(0x7d838a), scen.floodlights.map((f) => at(f, 12 * scale, 0)));
-        add(new THREE.BoxGeometry(5 * scale, 1.6 * scale, 0.7 * scale), new THREE.MeshBasicMaterial({ color: 0xf2f5ff, fog: false }), scen.floodlights.map((f) => at(f, 24 * scale, 1.2 * scale)));
+        add(new THREE.BoxGeometry(5 * scale, 1.6 * scale, 0.7 * scale), new THREE.MeshBasicMaterial({ color: new THREE.Color(0xf2f5ff).multiplyScalar(12), fog: false }), scen.floodlights.map((f) => at(f, 24 * scale, 1.2 * scale)));
     }
 
     if (scen.landmark) g.add(buildLandmark(scen.landmark));
@@ -1475,7 +1491,9 @@ function buildWorld(t) {
     // Photo materials (trackMaterials.js); the ground splat reads the same surface grid the physics drives on, with one grid
     // value per paint colour
     const tex = loadTrackTextures(level), sgrid = prepareTrack(t).grid, sandy = theme.land === 'desert', stripeDir = t.start.angle;
-    const vergeMat = groundMaterial(tex, t.build, scale, sgrid, { base: sandy ? 'sand' : 'grass', target: sandy ? null : land.verge, stripeDir });
+    // Night: race floodlights (Singapore ~3,000 lux) light the track; the verges beside it catch less, so they sit darker
+    // than the asphalt instead of glowing daylight green under a black sky
+    const vergeMat = groundMaterial(tex, t.build, scale, sgrid, { base: sandy ? 'sand' : 'grass', target: sandy ? null : land.verge, stripeDir, dim: night ? 0.55 : 1 });
     const ground = new THREE.Mesh(groundGeo(GROUND_COARSE, coarse), groundMaterial(tex, t.build, scale, null, { // the land beyond: no surface grid
         base: sandy ? 'sand' : theme.land === 'city' ? 'concrete' : 'grass', target: sandy || theme.land === 'city' ? null : land.ground[0],
         dim: night ? 0.3 : 1, stripeDir })); // night: the land beyond the floodlit verges falls away into the dark
@@ -1682,12 +1700,9 @@ function makeCar(id) {
         model.traverse((o) => {
             if (!o.isMesh) return;
             o.castShadow = true;
-            o.material = o.material.clone(); // per-car materials so ghost opacity doesn't leak to other cars
-            if (o.material.name === 'livery') {
-                o.material.map = map;
-                o.material.color.set(0xffffff);
-                o.material.needsUpdate = true;
-            }
+            o.material = teamMaterial(`${level}:${lp.teamId}`, o.material, (m) => { // one per team: shaders built once
+                if (m.name === 'livery') { m.map = map; m.color.set(0xffffff); }
+            });
         });
         for (const name of ['wheel_FL', 'wheel_FR', 'wheel_RL', 'wheel_RR']) {
             const w = model.getObjectByName(name);
@@ -1746,8 +1761,7 @@ function realCar(asset, teamId, wheels) {
         driver.add(carParts.helmet.clone(), carParts.shoulders.clone());
         driver.traverse((o) => {
             if (!o.isMesh) return;
-            o.material = o.material.clone();
-            if (o.material.name === 'helmet_paint' || o.material.name === 'suit') o.material.color.set(colour);
+            o.material = teamMaterial(teamId, o.material, (m) => { if (m.name === 'helmet_paint' || m.name === 'suit') m.color.set(colour); });
             o.castShadow = true;
         });
         driver.position.set(...toThree(asset.head));
@@ -1818,12 +1832,7 @@ function updateCars(dt) {
         const ghost = !!s.ghost && id !== clientState.me;
         if (ghost !== car.ghost) {
             car.ghost = ghost;
-            car.root.traverse((o) => {
-                if (!o.material || o.isSprite) return;
-                o.material.transparent = ghost;
-                o.material.opacity = ghost ? 0.5 : 1;
-                o.material.needsUpdate = true; // transparency changes the shader; only runs when ghost flips
-            });
+            setGhost(car.root, ghost); // swaps to see-through copies made once: flipping `transparent` rebuilt every car's shaders
         }
     }
 }
@@ -1883,16 +1892,57 @@ let wheelBatch = null; // [{ mesh: InstancedMesh }] per wheel sub-mesh, built fr
 // arrived are rebuilt with it. Here, below everything the callbacks touch: the module's top-level awaits let them run early.
 const teamAssets = {}; // teamId → CarAsset, once loaded
 let carParts = null; // real tyres per compound and the driver's helmet; until then the procedural tyre and no driver
+// The files download at page load (bytes only), each parsed and put on the cars only while no one is driving (lobby,
+// results): parsing a car (geometry, texture decode) and rebuilding its team's cars froze a race for 80-200 ms each time,
+// which a friend's slow link spread through the first laps
+const quiet = () => !['QUALIFYING', 'COUNTDOWN', 'RACE'].includes(clientState.status);
+let pendingModels = [];
 fetch('teams.json').then((r) => r.json()).then((list) => {
-    for (const t of list) loadTeamCar(t.id).then((a) => { if (a) { teamAssets[t.id] = a; for (const id in cars) if (cars[id].teamId === t.id) dropCar(id); } });
+    for (const t of list) {
+        fetchModel(`models/cars/${t.id}.glb`).then((buf) => pendingModels.push(() => loadTeamCar(t.id, () => parseModel(buf)).then((a) => {
+            if (!a) return;
+            teamAssets[t.id] = a;
+            for (const id in cars) if (cars[id].teamId === t.id) dropCar(id);
+        }))).catch(() => {}); // no file: the procedural car
+    }
 });
-loadParts().then((p) => {
-    if (!p) return;
-    carParts = p;
-    for (const m of wheelBatch || []) m.removeFromParent();
-    wheelBatch = null;
-    for (const id in cars) dropCar(id); // rebuilt with drivers
-});
+Promise.all(['models/tyre.glb', 'models/helmet.glb'].map((u) => fetchModel(u).then((b) => [u, b]))).then((files) => {
+    const bufs = Object.fromEntries(files);
+    pendingModels.push(() => loadParts((u) => parseModel(bufs[u])).then((p) => {
+        if (!p) return;
+        carParts = p;
+        for (const m of wheelBatch || []) m.removeFromParent();
+        wheelBatch = null;
+        for (const id in cars) dropCar(id); // rebuilt with drivers
+    }));
+}).catch(() => {});
+function flushModels() { // every frame: cheap unless a model is waiting and no one is driving
+    if (pendingModels.length && quiet()) for (const f of pendingModels.splice(0)) f();
+}
+// One material per team (and level) for each of the model's: the team's cars share it
+const teamMats = new Map();
+function teamMaterial(key, m, paint) {
+    let byMat = teamMats.get(key);
+    if (!byMat) teamMats.set(key, (byMat = new Map()));
+    let t = byMat.get(m);
+    if (!t) { t = m.clone(); paint(t); byMat.set(m, t); }
+    return t;
+}
+// Every team's car shaders, solid and ghost, near and far, built in the background at session start: none mid-race
+function warmCars() {
+    const group = new THREE.Group();
+    for (const [teamId, asset] of Object.entries(teamAssets)) {
+        for (const ghost of [false, true]) {
+            const m = realCar(asset, teamId, []);
+            m.traverse((o) => { if (o.isLOD) for (const l of o.levels) l.object.visible = true; });
+            if (ghost) setGhost(m, true);
+            group.add(m);
+        }
+    }
+    group.scale.setScalar(scale * CAR_SCALE);
+    group.updateMatrixWorld(true);
+    renderer.compileAsync(group, camera, scene).catch((e) => console.warn('car warm-up', e));
+}
 const TYRE_BATCHES = ['S', 'M', 'H', 'rim'];
 function updateWheelBatch() {
     if (carParts) return updateTyreBatch();
@@ -2594,6 +2644,7 @@ function updateSound(dt) {
 function frame(now) {
     const dt = Math.min((now - last) / 1000, 0.1);
     last = now;
+    flushModels();
     frameMs.push(dt * 1000);
     if (frameMs.length > 120) frameMs.shift();
     if (clientState.status === 'LOBBY') { // engines and wind fade out in the lobby; nothing drawn: frames come at the display's rate
@@ -2728,6 +2779,7 @@ window.initGameVisuals = () => {
     buildWorld(clientState.trackData);
     singlePass(scene);
     freeze(world);
+    warmCars();
     // No shader warm-up: renderer.compileAsync took ~22 s on Monza (the 1.5 s wait for it only left the screen blank, then
     // the first draw compiled everything anyway, ~1 s); the world is drawn at once, under the start lights
     simStep(false); // resend what's held when a new session starts
@@ -2755,7 +2807,7 @@ async function recoverRenderer(info) {
     window.lanraceQuality.backend = backend;
     renderer.onDeviceLost = recoverRenderer;
     renderer.debug.checkShaderErrors = false;
-    renderer.toneMapping = THREE.NeutralToneMapping;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
     if (window.lanraceDebug) window.lanraceDebug.renderer = renderer;
     const lower = stepDown(level);
     maxLevel = lower; // later sessions stay at most here (buildWorld re-resolves the level from storage)

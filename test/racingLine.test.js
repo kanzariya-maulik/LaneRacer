@@ -11,7 +11,7 @@ for (const id of Track.TRACK_IDS) {
     test(`${id}: racing line stays on track and within grip`, () => {
         const t = tracks[id], rl = t.racingLine, n = t.path.length;
         assert.ok(rl && rl.offset.length === n && rl.speed.length === n && rl.phase.length === n);
-        const m = 1.5 * t.scale - 0.06; // inside the real white lines, + rounding (offset + = driver's right)
+        const m = RL.MARGIN_M * t.scale - 0.06; // inside the real white lines, + rounding (offset + = driver's right)
         rl.offset.forEach((o, i) => assert.ok(o <= t.edgeR[i] - m && o >= -(t.edgeL[i] - m), `point ${i} offset ${o} past the white line`));
         const k = RL.curvatures(RL.linePoints(t.path, rl.offset), t.scale);
         rl.speed.forEach((v, i) => {

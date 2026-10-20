@@ -1,6 +1,6 @@
 // Drives a local LanRace race in Chrome over the DevTools protocol: screenshots per view, fps, console errors.
 // Uses its own server on PORT 3299 (never the user's 3232) and kills only what it started.
-// node scripts/browser-check.mjs --track monza --level high --time day --views chase,tcam,cockpit --out <dir> [--headed] [--fps 10] [--lose] [--webgl] [--logdepth] [--at countdown] [--eval <js run before screenshots>] [--spots <json: [{ name, pos: [x, y, z], look: [x, y, z] }]>] [--bots <n>] [--cpuprofile <file>] [--vsync] [--team <name>] [--credits]
+// node scripts/browser-check.mjs --track monza --level high --time day --views chase,tcam,cockpit --out <dir> [--headed] [--fps 10] [--lose] [--webgl] [--logdepth] [--at countdown] [--eval <js run before screenshots>] [--spots <json: [{ name, pos: [x, y, z], look: [x, y, z] }]>] [--bots <n>] [--cpuprofile <file>] [--vsync] [--team <name>] [--credits] [--after <js printed after the fps wait>] [--mbps <n>] [--lobby <s>]
 import { spawn, execSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -45,6 +45,10 @@ try {
         if (d.method === 'Runtime.exceptionThrown') errors.push((d.params.exceptionDetails.exception?.description || d.params.exceptionDetails.text).slice(0, 300));
     };
     await send('Runtime.enable'); await send('Page.enable');
+    if (arg('mbps')) { // a slower link, as friends on WiFi: --mbps 20 (download), 5 ms latency
+        await send('Network.enable'); await send('Network.setCacheDisabled', { cacheDisabled: true }); // a friend's first load
+        await send('Network.emulateNetworkConditions', { offline: false, latency: 5, downloadThroughput: (Number(arg('mbps')) * 1e6) / 8, uploadThroughput: (Number(arg('mbps')) * 1e6) / 8 });
+    }
     await send('Page.navigate', { url: `http://localhost:${PORT}/?stats=1${webgl ? '&webgl' : ''}${logdepth ? '&logdepth' : ''}` });
     await until(`document.readyState === 'complete'`);
     await until(`location.port === '${PORT}' && document.readyState === 'complete' && !!document.getElementById('graphics-select')`);
@@ -62,6 +66,7 @@ try {
         await until(`document.querySelectorAll('.team-card').length > 0`);
         await evalJs(`[...document.querySelectorAll('.team-card')].find((c) => c.title.toLowerCase().includes(${JSON.stringify(String(arg('team')).toLowerCase())}))?.click(); true`);
     }
+    if (arg('lobby')) await wait(Number(arg('lobby')) * 1000); // time in the lobby before joining (downloads run meanwhile)
     await evalJs(`document.getElementById('username').value = 'Check'; document.getElementById('btn-join').click(); true`);
     await until(`!document.getElementById('host-settings').classList.contains('hidden')`);
     await evalJs(`(() => { const set = (id, v) => { const e = document.getElementById(id); e.value = v; e.dispatchEvent(new Event('change', { bubbles: true })); e.dispatchEvent(new Event('input', { bubbles: true })); };
@@ -88,6 +93,8 @@ try {
     const backend = await evalJs(`window.lanraceQuality?.backend || 'webgl'`);
     let fps = null;
     if (fpsSecs) { const s = []; for (let i = 0; i < fpsSecs; i++) { await wait(1000); s.push(await evalJs('window.lanraceFps')); } fps = Math.round(s.reduce((a, b) => a + b) / s.length); }
+    const after = arg('after', null); // run after the fps wait, its value printed (e.g. a frame-time recorder's findings)
+    if (after) console.log(JSON.stringify({ after: await evalJs(after) }));
     for (const v of views) {
         for (let i = 0; i < 3 && (await evalJs(`window.lanraceView || 'chase'`)) !== v; i++) { await key('v', 'KeyV', 86); await wait(600); }
         await wait(400);

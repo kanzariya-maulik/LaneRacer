@@ -196,27 +196,28 @@ function fade(out, state, renderT) {
 }
 
 const SNAP_M = 5;   // corrections this big snap (reset, teleport) instead of fading
+const PRESENT_TAU_S = RECOVER_S / 5; // a correction's leftover decays e-fold in this long: ~95% gone in 60 ms, all of it in RECOVER_S
 const prior = {};   // scratch: where the previous update would put the car now
 
 // Car idx at the present server time (Rocket League style): dead-reckoned forward from its newest update along the arc,
 // so it's drawn where the server collides it. When a newer update arrives, the difference between the old and new
-// projection fades out over RECOVER_S instead of popping. out/state are per-car objects the caller keeps.
+// projection is kept as an offset that decays with time. (A linear fade restarted by every packet never ran out at
+// 60 Hz: each packet's few cm piled up into a metre off the server position, and WiFi bunching made cars surge.)
+// out/state are per-car objects the caller keeps.
 export function samplePresent(buf, serverT, idx, out = {}, state = {}, scale = 6) {
     let a = null, ta = 0;
     for (let k = buf.snaps.length - 1; k >= 0 && !a; k--) { a = buf.snaps[k].cars.get(idx) || null; ta = buf.snaps[k].t; }
     if (!a) return null;
     arc(a, serverT - ta, scale, out);
-    if (state.src && state.src !== a) {
+    const d = Math.exp(-Math.max(0, serverT - (state.lt ?? serverT)) / PRESENT_TAU_S);
+    let ox = (state.ox || 0) * d, oy = (state.oy || 0) * d, oa = (state.oa || 0) * d;
+    if (state.src && state.src !== a) { // drawn so far at prior + offset: keep that spot, fade toward the new projection
         arc(state.src, serverT - state.srcT, scale, prior);
-        const k = state.blend > 0 ? state.blend / RECOVER_S : 0; // fold any fade still running into the new one
-        const ox = prior.x + (state.ox || 0) * k - out.x, oy = prior.y + (state.oy || 0) * k - out.y;
-        if (Math.hypot(ox, oy) < SNAP_M * scale) {
-            state.ox = ox; state.oy = oy;
-            state.oa = Math.atan2(Math.sin(prior.angle - out.angle), Math.cos(prior.angle - out.angle)) + (state.oa || 0) * k;
-            state.blend = RECOVER_S;
-        } else state.blend = 0;
-        state.lt = serverT;
+        ox += prior.x - out.x; oy += prior.y - out.y;
+        oa += Math.atan2(Math.sin(prior.angle - out.angle), Math.cos(prior.angle - out.angle));
+        if (Math.hypot(ox, oy) >= SNAP_M * scale) ox = oy = oa = 0;
     }
-    state.src = a; state.srcT = ta;
-    return fade(out, state, serverT);
+    Object.assign(state, { src: a, srcT: ta, lt: serverT, ox, oy, oa });
+    out.x += ox; out.y += oy; out.angle += oa;
+    return out;
 }

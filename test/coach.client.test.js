@@ -3,7 +3,8 @@ const { test, before } = require('node:test');
 const assert = require('node:assert');
 const Track = require('../src/game/Track');
 let C;
-before(async () => { C = await import('../public/js/coach.js'); });
+let K; // car scale: distances below are for a real-size car
+before(async () => { C = await import('../public/js/coach.js'); K = (await import('../public/js/sim/physics.js')).default.CAR_SCALE; });
 
 // A 1000 m straight "lap" (scale 1): braking 400–449 (80 → 31 m/s), corner 450–499 at 30 m/s
 function strip(rot = 0) {
@@ -214,12 +215,12 @@ test('a track-limits steward card does not silence the wide verdict; contact sti
 });
 
 test('a near miss without a steward card skips the corner', () => {
-    assert.strictEqual(run(fresh(), { nearF: (s) => [{ x: s + 5, y: 3 }] }).length, 0, '5.8 m away');
-    assert.strictEqual(run(fresh(), { nearF: (s) => [{ x: s + 5, y: 4.9 }] }).length, 1, '7 m away is not contact');
+    assert.strictEqual(run(fresh(), { nearF: (s) => [{ x: s + 5 * K, y: 3 * K }] }).length, 0, '5.8 m away at real size');
+    assert.strictEqual(run(fresh(), { nearF: (s) => [{ x: s + 5 * K, y: 4.9 * K }] }).length, 1, '7 m away at real size is not contact');
 });
 
 test('off-line side by side is not scolded; too fast in still is', () => {
-    const side = (s) => [{ x: s + 5, y: -4.9 }]; // alongside on the straight, 9 m from the off-line car
+    const side = (s) => [{ x: s + 5 * K, y: -4.9 * K }]; // alongside on the straight (real-size metres × K)
     assert.deepStrictEqual(texts(run(fresh(), { lat: 3, nearF: side })), ['Perfect corner']);
     assert.deepStrictEqual(texts(run(fresh(), { vMinK: 0.7, nearF: side })), ['Perfect corner']);
     assert.deepStrictEqual(texts(run(fresh(), { wide: true, nearF: side })), ['Too fast in — missed the apex']);
