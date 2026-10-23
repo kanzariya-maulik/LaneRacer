@@ -2,7 +2,7 @@
 // (−2.52 m), wheel to wheel (±1.0 m). Its middle sits ahead of the car's origin (between the axles), so it is offset forward.
 // Every car is drawn and collides at CAR_SCALE of its real size: real-size cars looked too big beside the track and its
 // surroundings (game3d.js scales the models, wheels, drivers and cameras by the same factor)
-const CAR_SCALE = 0.72;
+const CAR_SCALE = 0.75;
 const CAR_HALF_LENGTH_M = 2.815 * CAR_SCALE;
 const CAR_CENTER_OFFSET_M = 0.295 * CAR_SCALE;
 const CAR_HALF_WIDTH_M = 1.0 * CAR_SCALE;

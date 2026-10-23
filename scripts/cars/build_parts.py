@@ -9,7 +9,8 @@ from build import ROOT, log, meshes, world_bbox, import_model, tris, decimated_c
 
 OUT = os.path.join(ROOT, 'public', 'models')
 MODELS = json.load(open(os.path.join(ROOT, 'scripts', 'cars', 'models.json')))
-TYRES = {'SOFT_TYRE': 'tyre_S', 'MEDIUM_TYRE': 'tyre_M', 'HARD_TYRE': 'tyre_H'}
+# The pack's soft and hard materials are named the wrong way round: HARD_TYRE carries the red (Soft) sidewall, SOFT_TYRE the white
+TYRES = {'HARD_TYRE': 'tyre_S', 'MEDIUM_TYRE': 'tyre_M', 'SOFT_TYRE': 'tyre_H'}
 
 
 def shrink_images(px):

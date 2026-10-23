@@ -1,6 +1,6 @@
 // Drives a local LanRace race in Chrome over the DevTools protocol: screenshots per view, fps, console errors.
 // Uses its own server on PORT 3299 (never the user's 3232) and kills only what it started.
-// node scripts/browser-check.mjs --track monza --level high --time day --views chase,tcam,cockpit --out <dir> [--headed] [--fps 10] [--lose] [--webgl] [--logdepth] [--at countdown] [--eval <js run before screenshots>] [--spots <json: [{ name, pos: [x, y, z], look: [x, y, z] }]>] [--bots <n>] [--cpuprofile <file>] [--vsync] [--team <name>] [--credits] [--after <js printed after the fps wait>] [--mbps <n>] [--lobby <s>] [--quali full|short|oneshot (default off)] [--consoleprofile <file: what the page's console.profile() records>]
+// node scripts/browser-check.mjs --track monza --level high --time day --views chase,tcam,cockpit --out <dir> [--headed] [--fps 10] [--lose] [--webgl] [--logdepth] [--at countdown] [--eval <js run before screenshots>] [--spots <json: [{ name, pos: [x, y, z], look: [x, y, z] }]>] [--bots <n>] [--cpuprofile <file>] [--vsync] [--team <name>] [--credits] [--after <js printed after the fps wait>] [--mbps <n>] [--lobby <s>] [--init <js run once the page loads, before joining>] [--quali full|short|oneshot (default off)] [--consoleprofile <file: what the page's console.profile() records>]
 import { spawn, execSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -69,6 +69,7 @@ try {
         await evalJs(`[...document.querySelectorAll('.team-card')].find((c) => c.title.toLowerCase().includes(${JSON.stringify(String(arg('team')).toLowerCase())}))?.click(); true`);
     }
     if (arg('lobby')) await wait(Number(arg('lobby')) * 1000); // time in the lobby before joining (downloads run meanwhile)
+    if (arg('init')) await evalJs(arg('init'));
     await evalJs(`document.getElementById('username').value = 'Check'; document.getElementById('btn-join').click(); true`);
     await until(`!document.getElementById('host-settings').classList.contains('hidden')`);
     await evalJs(`(() => { const set = (id, v) => { const e = document.getElementById(id); e.value = v; e.dispatchEvent(new Event('change', { bubbles: true })); e.dispatchEvent(new Event('input', { bubbles: true })); };
