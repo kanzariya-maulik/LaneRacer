@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { buildCar, buildSteeringWheel, liveryTexture as carLivery, WHEEL_RADIUS } from './carModel.js';
 import { WHEELS } from './carShape.js';
-import { loadTeamCar, cloneForCar, detailFor, loadParts, setGhost, fetchModel, parseModel } from './carModels.js';
+import { loadTeamCar, cloneForCar, detailFor, loadParts, setGhost, ghostOf, fetchModel, parseModel } from './carModels.js';
 import { VIEW_NAMES, VIEW_FOV, EYE_TILT, CHASE, nextView, viewOf, onboard, wheelAngle, toThree, eyeFor, wheelPosFor, frontSteer } from './views.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
@@ -154,10 +154,9 @@ function applySky(sky) {
     hemi.color.copy(top).lerp(new THREE.Color(0xffffff), 0.5);
     stars.visible = !!sky.stars;
     stars.geometry.setDrawRange(0, Math.round(STARS * (sky.stars || 0)));
-    // Haze only near the horizon (60% of the fog distance): from 500 m it washed the track out. Night fades into the dark sooner
-    // Night: floodlights reach the track and its verges only; beyond ~40 m everything sinks into the dark (the fog is the
-    // night horizon colour), as on a TV picture of Singapore or Bahrain, instead of trees lit daylight-green to the horizon
-    if (scene.fog) Object.assign(scene.fog, sky.stars !== undefined ? { near: 40 * scaleOf(), far: Math.min(Q.fog, 300 * scaleOf()) } : { near: Q.fog * 0.6, far: Q.fog });
+    // Haze only near the horizon (60% of the fog distance): from 500 m it washed the track out. Night alike: a close dark fog
+    // hid the floodlit track ahead
+    if (scene.fog) Object.assign(scene.fog, { near: Q.fog * 0.6, far: Q.fog });
     const el = (sky.elevation * Math.PI) / 180, az = (sky.azimuth * Math.PI) / 180, r = 1900;
     Object.assign(SUN_OFF, { x: r * Math.cos(el) * Math.sin(az), y: r * Math.sin(el), z: r * Math.cos(el) * Math.cos(az) });
     // The cascades take the light's direction from sun → target
@@ -192,6 +191,10 @@ function applySky(sky) {
     scene.environmentIntensity = isDay ? 0.35 : 0.6; // night: the floodlit room (envTexture): highlights on paint, as on TV
     envTex?.dispose(); envTex = null;
     scene.environment = Q.envMap ? envTexture() : null;
+    roomEnv?.dispose(); roomEnv = null;
+    carDay = isDay;
+    carEnv = !isDay && Q.envMap ? roomEnvTexture() : null;
+    lightCars();
     // The post chain follows the level and the sky (sun glare is day-only); buildWorld always calls this after applyLevel
     // Sun glare is day-only; AO and SSR misread logarithmic depth (WebGL2 without clip control): noise all over the grass
     const effects = Q.effects.filter((e) => (isDay || e !== 'lensflare') && (!renderer.logarithmicDepthBuffer || (e !== 'ao' && e !== 'ssr')));
@@ -904,7 +907,7 @@ function updateCrews(dt) {
         if (c.id === null) continue;
         const p = gs[c.id], box = p.box, phase = p.stopPhase || '', h = pitY(box.x, box.y);
         if (!c.spots || c.spotsFor !== box) {
-            c.spots = crew17(box, scale * CAR_SCALE, td.pit.trackSide); // round the (smaller) car c.spotsFor = box; c.marks = tMarks(box, scale);
+            c.spots = crew17(box, scale * CAR_SCALE, td.pit.trackSide); c.spotsFor = box; c.marks = tMarks(box, scale); // round the (smaller) car
             c.mesh.material.color.set(teamInfo[p.teamId]?.chatColor || '#888888');
             c.group.position.set(c.spots[16].idle.x, h, c.spots[16].idle.y); c.group.rotation.y = -box.angle;
             c.brake.rotation.y = c.go.rotation.y = facing(box.angle) + box.angle; // net yaw = facing(): toward the arriving car
@@ -1664,19 +1667,41 @@ function blobShadow(strength = 1) {
     return m;
 }
 
+// Night: the cars, and only they, reflect three's RoomEnvironment, a floodlit room of bright panels: the highlights on
+// paint that make a night race look like TV. On the asphalt the same panels showed as a headlight-like band ahead, so
+// the set keeps envTexture's even glow. Day: no own map, the cars reflect the sky like everything else
+// Day: the models' near-mirror paint (roughness 0.1-0.2) showed the sky as navy blobs on dark cars (the black W14 worst):
+// satin by day; night keeps the paint as modelled (its look under the floodlit room is the one wanted)
+const DAY_PAINT = { roughnessMap: null, metalnessMap: null, roughness: 0.4, metalness: 0 };
+let roomEnv = null, carEnv = null, carDay = true;
+function roomEnvTexture() {
+    const pmrem = new THREE.PMREMGenerator(renderer), room = new RoomEnvironment();
+    roomEnv = pmrem.fromScene(room, 0, 0.1, 1000).texture;
+    pmrem.dispose(); room.dispose();
+    return roomEnv;
+}
+function lightCars() {
+    for (const a of Object.values(teamAssets)) for (const o of [a.near, a.far]) o.traverse((x) => {
+        const s = x.material;
+        if (!x.isMesh || (s.envMap === carEnv && s.userData.day === carDay)) return;
+        const modelled = (s.userData.paint ||= { roughnessMap: s.roughnessMap, metalnessMap: s.metalnessMap, roughness: s.roughness, metalness: s.metalness });
+        for (const m of [s, ghostOf(s)]) Object.assign(m, carDay ? DAY_PAINT : modelled, { envMap: carEnv, envMapIntensity: 0.6, needsUpdate: true });
+        s.userData.day = carDay;
+    });
+}
+
 // The session's sky as a reflection/ambient map (PMREM), built once per sky
 let envTex = null;
 function envTexture() {
     if (envTex) return envTex;
-    // Night: what a car reflects under a floodlight rig is bright light panels all round, not the black sky (from the
-    // dark dome every car was a black shape): three's RoomEnvironment, a neutral room lit by panels
-    const s = skyDome.visible ? new RoomEnvironment() : skyScene;
+    // Night: an even, dim floodlit glow all round, not the black sky (from the dark dome every car was a black shape).
+    // Not three's RoomEnvironment: its bright ceiling panels showed on the asphalt ahead as a headlight-like band
+    const s = skyDome.visible ? Object.assign(new THREE.Scene(), { background: new THREE.Color(0x707880) }) : skyScene;
     // Without the sun disc: the sun light lights the scene already, a disc blurred into the map would add it twice
     daySky.showSunDisc.value = 0;
     const pmrem = new THREE.PMREMGenerator(renderer);
     envTex = pmrem.fromScene(s, 0, 0.1, 1000).texture;
     pmrem.dispose(); // its blur targets and materials; the env texture stays
-    if (s !== skyScene) s.dispose();
     daySky.showSunDisc.value = 1;
     return envTex;
 }
@@ -1902,6 +1927,7 @@ fetch('teams.json').then((r) => r.json()).then((list) => {
         fetchModel(`models/cars/${t.id}.glb`).then((buf) => pendingModels.push(() => loadTeamCar(t.id, () => parseModel(buf)).then((a) => {
             if (!a) return;
             teamAssets[t.id] = a;
+            lightCars();
             for (const id in cars) if (cars[id].teamId === t.id) dropCar(id);
         }))).catch(() => {}); // no file: the procedural car
     }
@@ -1917,7 +1943,18 @@ Promise.all(['models/tyre.glb', 'models/helmet.glb'].map((u) => fetchModel(u).th
     }));
 }).catch(() => {});
 function flushModels() { // every frame: cheap unless a model is waiting and no one is driving
-    if (pendingModels.length && quiet()) for (const f of pendingModels.splice(0)) f();
+    if (!quiet()) return;
+    for (const f of pendingModels.splice(0)) f();
+    uploadTextures();
+}
+// Textures copied to the GPU while no one is driving: left to the first draw of a session, the copies (track photos and
+// liveries, 2048 px) held the screen black for ~0.8 s at every start
+const uploaded = new WeakSet();
+function uploadTextures() {
+    const up = (t) => { if (t?.isTexture && t.image?.width && !uploaded.has(t)) { renderer.initTexture(t); uploaded.add(t); } };
+    for (const m of Object.values(loadTrackTextures(level))) for (const k in m) up(m[k]);
+    const models = [...Object.values(teamAssets).flatMap((a) => [a.near, a.far]), ...(carParts ? [...Object.values(carParts.tyres), carParts.helmet, carParts.shoulders] : [])];
+    for (const o of models) o.traverse((x) => { for (const m of [].concat(x.material || [])) for (const k in m) up(m[k]); });
 }
 // One material per team (and level) for each of the model's: the team's cars share it
 const teamMats = new Map();

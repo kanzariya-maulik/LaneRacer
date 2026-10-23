@@ -84,7 +84,7 @@ export function asphaltMaterial(tex, build, sc, { pit = false, rubber = null } =
         const col = lap.div(L.colM).floor(), su = col.mul(L.colW).add(lat.add(SKID.latM).div(SKID.texLat)).div(L.width), sv = lap.sub(col.mul(L.colM)).div(L.colM);
         const skid = texture(rubber.skids, vec2(su, sv)).r.mul(SKID.cap);
         color = color.mul(float(1).sub(g.mul(RUBBER.maxDark).add(skid).min(RUBBER.totalDark)));
-        rough = rough.sub(g.mul(RUBBER.smooth)).sub(skid.mul(0.3)).max(0.2);
+        rough = rough.sub(g.mul(RUBBER.smooth)).sub(skid.mul(0.3)).max(0.55); // laid rubber is smoother, never a mirror of the sky
     }
     if (!pit) for (const q of (build?.asphalt?.patchesM || []).slice(0, 8)) {
         const lap = attribute('track', 'vec2').x, edge = noise(p, 0.6).mul(1.5); // ragged ends
@@ -135,7 +135,7 @@ export function groundMaterial(tex, build, sc, grid, { base = 'grass', target = 
 export function kerbMaterial(tex, stripes, sc) {
     const p = metres(sc), K = antiTiled(tex.kerb_paint, p), lum = K.flat.dot(vec3(0.3, 0.59, 0.11));
     const color = texture(stripes, uv().mul(vec2(1, stripes.repeat.y))).rgb.mul(lum.clamp(0.75, 1.1)).mul(0.85);
-    return standard({ colorNode: color, roughnessNode: K.rough.mul(0.8), normalNode: normalMap(K.nor), metalness: 0 });
+    return standard({ colorNode: color, roughnessNode: K.rough.max(0.6), normalNode: normalMap(K.nor), metalness: 0 });
 }
 
 // White lines and painted run-off: paint over the asphalt's grain, a little worn

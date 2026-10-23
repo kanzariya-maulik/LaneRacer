@@ -1,6 +1,6 @@
 // Drives a local LanRace race in Chrome over the DevTools protocol: screenshots per view, fps, console errors.
 // Uses its own server on PORT 3299 (never the user's 3232) and kills only what it started.
-// node scripts/browser-check.mjs --track monza --level high --time day --views chase,tcam,cockpit --out <dir> [--headed] [--fps 10] [--lose] [--webgl] [--logdepth] [--at countdown] [--eval <js run before screenshots>] [--spots <json: [{ name, pos: [x, y, z], look: [x, y, z] }]>] [--bots <n>] [--cpuprofile <file>] [--vsync] [--team <name>] [--credits] [--after <js printed after the fps wait>] [--mbps <n>] [--lobby <s>]
+// node scripts/browser-check.mjs --track monza --level high --time day --views chase,tcam,cockpit --out <dir> [--headed] [--fps 10] [--lose] [--webgl] [--logdepth] [--at countdown] [--eval <js run before screenshots>] [--spots <json: [{ name, pos: [x, y, z], look: [x, y, z] }]>] [--bots <n>] [--cpuprofile <file>] [--vsync] [--team <name>] [--credits] [--after <js printed after the fps wait>] [--mbps <n>] [--lobby <s>] [--quali full|short|oneshot (default off)] [--consoleprofile <file: what the page's console.profile() records>]
 import { spawn, execSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -42,9 +42,11 @@ try {
         const text = () => d.params.args.map((a) => a.value ?? a.description).join(' ').slice(0, 300);
         if (d.method === 'Runtime.consoleAPICalled' && d.params.type === 'error') errors.push(text());
         if (d.method === 'Runtime.consoleAPICalled' && d.params.type === 'warning') warnings.push(text());
+        if (d.method === 'Profiler.consoleProfileFinished' && arg('consoleprofile')) writeFileSync(arg('consoleprofile'), JSON.stringify(d.params.profile)); // console.profile() in the page
         if (d.method === 'Runtime.exceptionThrown') errors.push((d.params.exceptionDetails.exception?.description || d.params.exceptionDetails.text).slice(0, 300));
     };
     await send('Runtime.enable'); await send('Page.enable');
+    if (arg('consoleprofile')) { await send('Profiler.enable'); await send('Profiler.setSamplingInterval', { interval: 200 }); }
     if (arg('mbps')) { // a slower link, as friends on WiFi: --mbps 20 (download), 5 ms latency
         await send('Network.enable'); await send('Network.setCacheDisabled', { cacheDisabled: true }); // a friend's first load
         await send('Network.emulateNetworkConditions', { offline: false, latency: 5, downloadThroughput: (Number(arg('mbps')) * 1e6) / 8, uploadThroughput: (Number(arg('mbps')) * 1e6) / 8 });
@@ -70,12 +72,12 @@ try {
     await evalJs(`document.getElementById('username').value = 'Check'; document.getElementById('btn-join').click(); true`);
     await until(`!document.getElementById('host-settings').classList.contains('hidden')`);
     await evalJs(`(() => { const set = (id, v) => { const e = document.getElementById(id); e.value = v; e.dispatchEvent(new Event('change', { bubbles: true })); e.dispatchEvent(new Event('input', { bubbles: true })); };
-        set('setting-track', ${JSON.stringify(track)}); set('setting-time', ${JSON.stringify(time)}); set('setting-quali', 'off'); set('setting-laps', '1'); if (${JSON.stringify(arg('bots', null))}) { set('setting-ai', '1'); set('setting-ai-count', ${JSON.stringify(arg('bots', '0'))}); }
+        set('setting-track', ${JSON.stringify(track)}); set('setting-time', ${JSON.stringify(time)}); set('setting-quali', ${JSON.stringify(arg('quali', 'off'))}); set('setting-laps', '1'); if (${JSON.stringify(arg('bots', null))}) { set('setting-ai', '1'); set('setting-ai-count', ${JSON.stringify(arg('bots', '0'))}); }
         return true; })()`);
     await wait(500);
     await evalJs(`document.getElementById('btn-start').click(); true`);
     if (arg('at', 'race') === 'countdown') { await until(`typeof clientState !== 'undefined' && clientState.status === 'COUNTDOWN'`, 120000); await wait(1500); }
-    else { await until(`typeof clientState !== 'undefined' && clientState.status === 'RACE' && window.lanraceFps > 0`, 120000); await wait(3000); } // shaders warm, first frames settled
+    else { await until(`typeof clientState !== 'undefined' && ['RACE', 'QUALIFYING'].includes(clientState.status) && window.lanraceFps > 0`, 120000); await wait(3000); } // shaders warm, first frames settled
     // drive forward so the scene moves (motion blur, shadows following)
     await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'w', code: 'KeyW', windowsVirtualKeyCode: 87 });
     if (lose) { // three ignores device loss with reason 'destroyed': a real reset is simulated through onDeviceLost

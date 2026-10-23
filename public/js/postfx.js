@@ -59,8 +59,8 @@ export function buildPost(renderer, scene, camera, effects) {
     tryFx('lensflare', (c) => (glow ? c.add(own(lensflare(glow, { threshold: 4, ghostAttenuationFactor: 25 }))) : c));
     tryFx('vignette', (c) => vec4(c.rgb.mul(float(1).sub(smoothstep(0.45, 1.0, length(uv().sub(0.5)).mul(1.4)).mul(0.35))), c.a));
 
-    // Grade (every level): ACES pulls bright colours toward white; a touch more saturation brings grass, sky and liveries back
-    color = vec4(saturation(color.rgb, 1.15), color.a);
+    // Grade (every level): ACES pulls bright colours toward white; a touch of saturation brings them back (more turned grass neon)
+    color = vec4(saturation(color.rgb, 1.05), color.a);
 
     // Temporal AA works on linear colour (tone mapping after); else the spatial AA works on the tone-mapped image
     if (fx.has('traa') || fx.has('taau')) {
