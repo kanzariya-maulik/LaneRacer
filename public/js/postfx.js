@@ -1,7 +1,7 @@
 // The post-processing chain for a level: its `effects` list (quality.js) turned into one three.js RenderPipeline.
 // Browser only (WebGPURenderer). An effect that fails to build is dropped with a warning; the race goes on.
 import * as THREE from 'three/webgpu';
-import { pass, mrt, output, normalView, velocity, metalness, roughness, convertToTexture, vec2, vec4, uv, float, length, smoothstep, step, mix, min, renderOutput, saturation, toneMappingExposure } from 'three/tsl';
+import { pass, mrt, output, normalView, velocity, metalness, roughness, convertToTexture, vec2, vec4, uv, float, length, smoothstep, step, mix, min, renderOutput, saturation, toneMappingExposure, uniform } from 'three/tsl';
 import { ao } from 'three/addons/tsl/display/GTAONode.js';
 import { gaussianBlur } from 'three/addons/tsl/display/GaussianBlurNode.js';
 import { ssr } from 'three/addons/tsl/display/SSRNode.js';
@@ -59,8 +59,9 @@ export function buildPost(renderer, scene, camera, effects) {
     tryFx('lensflare', (c) => (glow ? c.add(own(lensflare(glow, { threshold: 4, ghostAttenuationFactor: 25 }))) : c));
     tryFx('vignette', (c) => vec4(c.rgb.mul(float(1).sub(smoothstep(0.45, 1.0, length(uv().sub(0.5)).mul(1.4)).mul(0.35))), c.a));
 
-    // Grade (every level): ACES pulls bright colours toward white; a touch of saturation brings them back (more turned grass neon)
-    color = vec4(saturation(color.rgb, 1.05), color.a);
+    // Grade (every level): ACES pulls bright colours toward white; saturation brings them back. Per sky (applySky): night 1.05
+    const sat = uniform(1.05);
+    color = vec4(saturation(color.rgb, sat), color.a);
 
     // Temporal AA works on linear colour (tone mapping after); else the spatial AA works on the tone-mapped image
     if (fx.has('traa') || fx.has('taau')) {
@@ -78,6 +79,7 @@ export function buildPost(renderer, scene, camera, effects) {
     pipe.outputNode = color;
     return {
         effects: used,
+        saturation: sat,
         render: () => pipe.render(),
         setScale: (s) => { scenePass.setResolutionScale(s); if (aoNode) aoNode.resolutionScale = s * AO_RES; },
         // RenderPipeline.dispose() frees only its quad material (r186): the passes' render targets are freed here

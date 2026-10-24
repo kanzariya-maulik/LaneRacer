@@ -141,6 +141,9 @@ const skyCube = new THREE.CubeRenderTarget(512, { type: THREE.HalfFloatType });
 const skyCam = new THREE.CubeCamera(1, 1000, skyCube);
 renderer.toneMapping = THREE.ACESFilmicToneMapping; // filmic S-curve (toe + shoulder): deep blacks, rolled highlights. Neutral has no toe: the whole frame sat in milky mid-grey
 let currentSky = null;
+// Day: the blue sky fill greys the colours under ACES (red kerbs pink, grass grey-green); night is right at 1.05
+const DAY_SATURATION = 1.2;
+let gradeSat = 1.05;
 function applySky(sky) {
     currentSky = sky;
     const top = new THREE.Color(sky.top), hor = new THREE.Color(sky.horizon), c = new THREE.Color(), p = skyDome.geometry.attributes.position, col = skyDome.geometry.attributes.color;
@@ -179,7 +182,7 @@ function applySky(sky) {
         scene.background = skyCube.texture;
     }
     // Outdoors the sun outshines the sky fill several times over; weaker, it leaves no visible shadows (night: floodlights as set)
-    if (isDay) sun.intensity = sky.power * 3.6;
+    if (isDay) sun.intensity = sky.power * 4.1;
     renderer.toneMappingExposure = sky.exposure ?? 1;
     // Sky light now comes from the environment map: the hemisphere light is only a small fill where there is one
     // Daylight: the sky lights the shade at about a quarter of the sun (real ratio ~3-5:1); at 0.12 the shadow side of
@@ -188,7 +191,9 @@ function applySky(sky) {
     // environment map (blue from above, directional, with reflections); the flat hemisphere light only lifts the shade a
     // little: as the main fill it lit every face alike and the frame went flat
     hemi.intensity = sky.hemi * (Q.envMap ? (isDay ? 0.25 : 0.6) : 1);
-    scene.environmentIntensity = isDay ? 0.35 : 0.6; // night: the floodlit room (envTexture): highlights on paint, as on TV
+    // Day 0.25: at 0.35 the blue sky fill tinted the asphalt lavender, the kerbs pink and the grass grey (the sun, 4.1x, keeps
+    // the light level). Night: the floodlit room (envTexture): highlights on paint, as on TV
+    scene.environmentIntensity = isDay ? 0.25 : 0.6;
     envTex?.dispose(); envTex = null;
     scene.environment = Q.envMap ? envTexture() : null;
     roomEnv?.dispose(); roomEnv = null;
@@ -203,6 +208,7 @@ function applySky(sky) {
         post = buildPost(renderer, scene, camera, effects);
         post.key = effects.join();
     }
+    post.saturation.value = gradeSat = isDay ? DAY_SATURATION : 1.05;
     post.setScale(res.ratio);
 }
 const sun = new THREE.DirectionalLight(0xffffff, 2.2);
@@ -1330,7 +1336,13 @@ function buildBridge(b, t) {
     solidMesh(berm, 0x5f9e35);
 }
 
-const LINE_RGB = { green: new THREE.Color('#22c55e'), yellow: new THREE.Color('#facc15'), red: new THREE.Color('#ef4444') };
+// The F1 games' line: short chevrons at an even pitch, green → amber → red blended along the lap, unlit and lifted by
+// 1/exposure (the post chain tone-maps it with the scene: by day at 0.48 the green came out dark), fading in a few metres
+// ahead of the car and out in the distance
+const LINE_RGB = { green: new THREE.Color('#2bd96b'), yellow: new THREE.Color('#ffb21f'), red: new THREE.Color('#ff3b3b') };
+const CHEV_PITCH_M = 3, CHEV_LEN_M = 1.6, CHEV_HALF_W_M = 0.6, LINE_ALPHA = 0.85;
+const FADE_IN_M = [3, 12], FADE_OUT_M = [220, 320]; // metres ahead: under the car → full; far → gone
+const ramp = (m, [a, b]) => Math.min(1, Math.max(0, (m - a) / (b - a)));
 
 function buildRacingLine(t) {
     line = null;
@@ -1342,32 +1354,40 @@ function buildRacingLine(t) {
     if (coachOn) coachIntro = false;
     coachIdx = null;
     if (!rl) return;
-    const P = t.path, n = P.length, w = 0.5 * scale, y = 0.75;
+    const P = t.path, n = P.length, y = 0.75;
     const L = P.map((p, i) => {
         const a = P[(i - 1 + n) % n], b = P[(i + 1) % n], len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
         return { x: p.x - ((b.y - a.y) / len) * rl.offset[i], y: p.y + ((b.x - a.x) / len) * rl.offset[i] };
     });
-    // One chevron per segment, pointing along the lap: 4 triangles = 12 vertices
-    const pos = new Float32Array(n * 36), H = heights(P);
+    // Chevrons per path segment (segments run 5-10 m): `seg[i]` is segment i's first chevron, `frac` where along it each sits
+    const seg = new Int32Array(n + 1);
+    for (let i = 0; i < n; i++) seg[i + 1] = seg[i] + Math.max(1, Math.round(Math.hypot(L[(i + 1) % n].x - L[i].x, L[(i + 1) % n].y - L[i].y) / scale / CHEV_PITCH_M));
+    const count = seg[n], frac = new Float32Array(count), pos = new Float32Array(count * 36), H = heights(P);
+    const w = CHEV_HALF_W_M * scale, cl = CHEV_LEN_M * scale;
     for (let i = 0; i < n; i++) {
-        const a = L[i], b = L[(i + 1) % n], len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+        const a = L[i], b = L[(i + 1) % n], len = Math.hypot(b.x - a.x, b.y - a.y) || 1, k = seg[i + 1] - seg[i];
         const tx = (b.x - a.x) / len, ty = (b.y - a.y) / len, h0 = H[i], h1 = H[(i + 1) % n];
-        const at = (f, s) => ({ x: a.x + tx * len * f - ty * w * s, y: a.y + ty * len * f + tx * w * s, h: h0 + (h1 - h0) * f });
-        const BL = at(0, 1), BR = at(0, -1), NOTCH = at(0.35, 0), FL = at(0.6, 1), FR = at(0.6, -1), TIP = at(0.95, 0);
-        [BL, FL, NOTCH, FL, TIP, NOTCH, TIP, FR, NOTCH, FR, BR, NOTCH].forEach((p, v) => {
-            const k = i * 36 + v * 3;
-            pos[k] = p.x; pos[k + 1] = y + p.h; pos[k + 2] = p.y;
-        });
+        for (let j = 0; j < k; j++) {
+            const c = seg[i] + j, f0 = (j + 0.5) / k - cl / len / 2; // chevron centred in its share of the segment
+            frac[c] = (j + 0.5) / k;
+            // One chevron, pointing along the lap: 4 triangles = 12 vertices
+            const at = (f, sd) => { const d = (f0 + (f * cl) / len) * len; return { x: a.x + tx * d - ty * w * sd, y: a.y + ty * d + tx * w * sd, h: h0 + (h1 - h0) * (d / len) }; };
+            const BL = at(0, 1), BR = at(0, -1), NOTCH = at(0.35, 0), FL = at(0.6, 1), FR = at(0.6, -1), TIP = at(1, 0);
+            [BL, FL, NOTCH, FL, TIP, NOTCH, TIP, FR, NOTCH, FR, BR, NOTCH].forEach((p, v) => {
+                const q = c * 36 + v * 3;
+                pos[q] = p.x; pos[q + 1] = y + p.h; pos[q + 2] = p.y;
+            });
+        }
     }
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(pos.slice(), 3));
-    g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 36), 3));
-    const mesh = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.75, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true,
+    g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(count * 48), 4)); // rgba: the alpha fades
+    const mesh = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, toneMapped: false, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true,
         polygonOffset: true, polygonOffsetFactor: depthBias(-3, reversed), polygonOffsetUnits: depthBias(-6, reversed) }));
     mesh.renderOrder = 1;        // over the tyre marks
     mesh.frustumCulled = false;  // hidden segments collapse to the origin, so the bounds are meaningless
     world.add(mesh);
-    line = { mesh, full: pos, mask: cornerMask(rl.phase, t.cum, scale), rl, n };
+    line = { mesh, full: pos, seg, frac, mask: cornerMask(rl.phase, t.cum, scale), rl, n };
     applyLineMode();
     colourLine();
 }
@@ -1378,33 +1398,40 @@ function applyLineMode() {
     const p = line.mesh.geometry.attributes.position;
     for (let i = 0; i < line.n; i++) {
         const show = lineMode === 'full' || (lineMode === 'corners' && line.mask[i]);
-        for (let k = i * 36; k < i * 36 + 36; k++) p.array[k] = show ? line.full[k] : 0;
+        for (let k = line.seg[i] * 36; k < line.seg[i + 1] * 36; k++) p.array[k] = show ? line.full[k] : 0;
     }
     p.needsUpdate = true;
 }
 
-// Base colours by phase; within 250 m ahead, from your own speed
+// Base colours by phase; within 250 m ahead, from your own speed. Each chevron blends its segment's colour into the next's
+const segCol = [], mix = new THREE.Color();
 function colourLine() {
     if (!line) return;
     const gs = clientState.gameState, me = gs && gs[clientState.me], racing = !!me && !isSpectator();
     line.mesh.visible = lineMode !== 'off' && !(racing && me.inPit);
     if (!line.mesh.visible) { lineIdx = null; line.baseDone = false; return; } // re-found from scratch when the line comes back
-    if (!racing && line.baseDone) return; // spectators see fixed base colours: written once
-    const t = clientState.trackData, rl = line.rl, c = line.mesh.geometry.attributes.color;
+    if (!racing && line.baseDone) return; // spectators see fixed base colours, no fade: written once
+    const t = clientState.trackData, rl = line.rl, c = line.mesh.geometry.attributes.color, n = line.n;
     let from = null, v = 0;
     if (racing) {
         lineIdx = trackIndex(t.path, me.x, me.y, lineIdx, t.width);
         from = lineIdx;
         v = Math.abs(me.speed) / scale;
     }
-    for (let i = 0; i < line.n; i++) {
-        const col = LINE_RGB[segmentColor(rl.phase[i], rl.speed[i], v, from === null ? null : aheadM(t.cum, from, i, scale))];
-        for (let k = i * 36; k < i * 36 + 36; k += 3) { c.array[k] = col.r; c.array[k + 1] = col.g; c.array[k + 2] = col.b; }
+    const ahead = (i) => (from === null ? null : aheadM(t.cum, from, i, scale)), gain = 1 / renderer.toneMappingExposure;
+    for (let i = 0; i < n; i++) segCol[i] = LINE_RGB[segmentColor(rl.phase[i], rl.speed[i], v, ahead(i))];
+    for (let i = 0; i < n; i++) {
+        const a0 = ahead(i), segM = from === null ? 0 : aheadM(t.cum, i, (i + 1) % n, scale);
+        for (let k = line.seg[i]; k < line.seg[i + 1]; k++) {
+            const f = line.frac[k], m = a0 === null ? null : a0 + f * segM;
+            mix.copy(segCol[i]).lerp(segCol[(i + 1) % n], f).multiplyScalar(gain);
+            const alpha = LINE_ALPHA * (m === null ? 1 : ramp(m, FADE_IN_M) * (1 - ramp(m, FADE_OUT_M)));
+            for (let q = k * 48; q < k * 48 + 48; q += 4) { c.array[q] = mix.r; c.array[q + 1] = mix.g; c.array[q + 2] = mix.b; c.array[q + 3] = alpha; }
+        }
     }
     c.needsUpdate = true;
     line.baseDone = !racing;
 }
-
 
 function buildWorld(t) {
     applyLevel(capLevel(resolveLevel(store.get('lanrace.quality') || 'auto', store.get('lanrace.quality.auto'), backend), maxLevel));
@@ -2713,7 +2740,7 @@ function frame(now) {
             post?.dispose();
             post = postFellBack ? null : buildPost(renderer, scene, camera, LEVELS.low.effects);
             post?.setScale(res.ratio);
-            if (post) post.key = 'fallback';
+            if (post) { post.key = 'fallback'; post.saturation.value = gradeSat; }
             postFellBack = true;
         }
         if (worldUndrawn) { worldUndrawn = false; socket.emit('world_drawn'); } // the server holds the start lights for this
