@@ -97,3 +97,33 @@ test('21 bots race 6 laps of Monza: everyone classified, every bot pitted onto a
     assert.ok(legal >= 0.8 * ran.length, `compound rule: ${legal}/${ran.length}`);
     assert.ok(ms / n < 4, `tick ${(ms / n).toFixed(2)} ms`);
 });
+
+test('a bot behind cars that never move (stalled, AFK, still loading) goes around them and finishes', () => {
+    const humans = [{ id: 'a', username: 'A', teamId: 'ferrari', color: '#ff0000' }, { id: 'b', username: 'B', teamId: 'haas', color: '#ffffff' }];
+    for (const level of ['easy', 'medium', 'hard', 'pro']) {
+        const bots = fillGrid(humans, level, 7).slice(2, 4);
+        const io = { emit() {}, volatile: { emit() {} } };
+        const g = new Game(io, [...humans, ...bots], Track.load('monza'), { maxLaps: 1, qualifying: false, tyreWear: true, collisions: true, ghostStart: true, rng: rngOf(1) }, () => {});
+        g.update(); g.release();
+        for (let k = 0; k < 60 * 150; k++) g.update();
+        for (const bot of bots) assert.ok(g.players[bot.id].finished && !g.players[bot.id].dnf, `${level} ${bot.id} stuck at lap ${g.players[bot.id].lap}`);
+    }
+});
+
+// Every circuit: a bot called in makes its stop. Spa's lane leaves right after the final chicane (the track turns 84° in the
+// last 40 m): the assist steered for the mouth at the lane's own speed, ran wide at 23 m/s into the wall and sat there
+for (const id of Track.TRACK_IDS) {
+    test(`${id}: a bot called into the pits reaches its box`, () => {
+        const g = new Game({ emit() {}, volatile: { emit() {} } }, fillGrid([], 'pro', 3, 1), Track.load(id), { maxLaps: 3, qualifying: false, tyreWear: true, collisions: true, formationLap: false }, () => {});
+        const p = Object.values(g.players)[0];
+        g.update(); g.release();
+        let called = false, k = 0;
+        for (; k < 60 * 240 && p.stop?.phase !== 'service'; k++) {
+            g.update();
+            const d = g.toEntryM(p);
+            if (!called && g.time > 20 && d < 1200 && d > 600) { g.setBoxCall(p.id, true); called = true; }
+        }
+        assert.ok(called, 'never called in');
+        assert.strictEqual(p.stop?.phase, 'service', `no stop: lap ${p.lap}, ${g.toEntryM(p).toFixed(0)} m to the entry, ${(p.speed / g.track.scale).toFixed(1)} m/s`);
+    });
+}

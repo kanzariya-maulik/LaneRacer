@@ -80,6 +80,10 @@
 }
 .session-summary span:first-child { color: var(--text); border-color: var(--line-strong); background: rgba(255, 255, 255, 0.1); }
 .lobby-ping { font-size: 0.74rem; font-weight: 600; letter-spacing: 0.14em; color: var(--dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+#lobby-screen .ping-val { font-weight: 700; color: var(--muted); }
+#lobby-screen .ping-val[data-level="good"] { color: var(--go); }
+#lobby-screen .ping-val[data-level="fair"] { color: var(--amber); }
+#lobby-screen .ping-val[data-level="bad"] { color: #ff4d4d; }
 .lb-tool {
     display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 6px;
     border: 1px solid var(--line-strong); background: rgba(255, 255, 255, 0.05); color: var(--text);

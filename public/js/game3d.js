@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { buildCar, buildSteeringWheel, liveryTexture as carLivery, WHEEL_RADIUS } from './carModel.js';
 import { WHEELS } from './carShape.js';
+import { modelsReady, Settle, backgroundPipelines, guardHeldTargets } from './readiness.js';
 import { loadTeamCar, cloneForCar, detailFor, loadParts, setGhost, ghostOf, fetchModel, parseModel } from './carModels.js';
 import { VIEW_NAMES, VIEW_FOV, EYE_TILT, CHASE, nextView, viewOf, onboard, wheelAngle, toThree, eyeFor, wheelPosFor, frontSteer } from './views.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -17,10 +18,10 @@ import { placeScenery, seedOf, vergeReach, terrainHeights, terrainGround, skirtD
 import { heightAt, pathHeights } from './sim/elevation.js';
 import { buildTrackGeometry } from './trackMesh.js';
 import { loadTrackTextures, asphaltMaterial, groundMaterial, kerbMaterial, paintMaterial } from './trackMaterials.js';
-import { buildBarriers } from './barriers.js';
+import { buildBarriers, instancedMesh } from './barriers.js';
 import { rubberProfile, rubberLevel, SkidLayer } from './rubber.js';
 import { uniform } from 'three/tsl';
-import { prepareTrack } from './sim/drive.js';
+import { prepareTrack, slotFrame, FORM_SETTLE_M, FORM_SNAP_M } from './sim/drive.js';
 import { themeOf, LANDS, SKIES, nightOf } from './themes.js';
 import { SnapshotBuffer, RenderClock, sample, samplePresent, decodeFlags } from './netsync.js';
 import { decodeFast } from './netcodec.js';
@@ -32,7 +33,7 @@ import { nextHarder } from './sim/tyres.js';
 import { Gearbox, shiftLights } from './audio/gearbox.js';
 import { estimateLoad } from './audio/mix.js';
 import * as Sound from './audio/audio.js';
-import { gapText, driverCode, lapDelta, stepFollow, watchTarget, inDrsZone, drsHint, liveSectors, resultCells, sectorClass, lastLapClass } from './timing.js';
+import { gapText, lapDelta, stepFollow, watchTarget, inDrsZone, drsHint, liveSectors, resultCells, sectorClass, lastLapClass } from './timing.js';
 import { cornersOf, createCoach, pastLine, SHOW_S } from './coach.js';
 import { MODES, segmentColor, cornerMask, aheadM, trackIndex, nextMode } from './racingline.js';
 import { distToPath, pitLayout, tMarks, wallStands, pickerOpen, cardText, crew17, BOX_M, COMPOUND_COLORS } from './pitLayout.js';
@@ -67,10 +68,13 @@ const choice = store.get('lanrace.quality') || 'auto';
 // 20 km (onboard views draw in one pass); a WebGL2 without EXT_clip_control can't reverse depth: logarithmic depth instead
 let renderer, backend, reversed;
 const FORCE_WEBGL = new URLSearchParams(location.search).has('webgl'); // ?webgl: test the WebGL2 fallback on a WebGPU browser
+let pipes = { pending: 0, during: (draw) => draw() }; // frames' pipelines compile in the background (readiness.js backgroundPipelines)
 async function createRenderer({ logDepth = false } = {}) {
     const r = new THREE.WebGPURenderer({ canvas, antialias: false, powerPreference: 'high-performance', forceWebGL: FORCE_WEBGL,
         reversedDepthBuffer: !logDepth, logarithmicDepthBuffer: logDepth });
     await r.init();
+    pipes = backgroundPipelines(r); // no frame ever waits for a shader to compile
+    guardHeldTargets(r); // no draw inherits a compile's held target/outputs
     return r;
 }
 // Probed on a throwaway canvas: disposing a renderer loses its canvas's context, so the game's canvas gets one renderer
@@ -272,6 +276,7 @@ let towerMode = 'interval'; // timing tower gap column: 'interval' (car ahead) o
 function toggleTower() {
     towerMode = towerMode === 'interval' ? 'leader' : 'interval';
     document.getElementById('tt-mode').textContent = towerMode.toUpperCase();
+    window.showBanner?.(`GAPS: ${towerMode === 'interval' ? 'TO THE CAR AHEAD' : 'TO THE LEADER'}`, true);
     lastTower = 0; // redraw on the next HUD tick
 }
 document.getElementById('tt-head').addEventListener('click', toggleTower);
@@ -752,7 +757,7 @@ function flat(w, d, color, opacity = 1) {
 
 // Many copies of one mesh in one draw call; p: { x, y (height), z, angle, sx, sy, sz, color }
 function instanced(geometry, material, placements) {
-    const m = new THREE.InstancedMesh(geometry, material, Math.max(1, placements.length));
+    const m = instancedMesh(geometry, material, placements.length);
     const o = new THREE.Object3D();
     placements.forEach((p, i) => {
         o.position.set(p.x, p.y ?? 0, p.z);
@@ -824,6 +829,38 @@ function buildBoxRing(box, name, col) {
     world.add(g);
     return { g, ring, box };
 }
+// Formation lap: your own grid slot outlined in your team colour once you're back at the grid (Game.updateFormation)
+let gridRing = null;
+function updateGridRing(me) {
+    const on = !!(clientState.status === 'FORMATION' && me?.grid && me.form && me.form.phase !== 'drive');
+    if (gridRing && (gridRing.parent !== world || gridRing.userData.key !== `${me?.grid?.x},${me?.grid?.y}`)) { disposeRing({ g: gridRing }); gridRing = null; }
+    if (!on) { if (gridRing) gridRing.visible = false; return; }
+    if (!gridRing) {
+        const g = me.grid, h = pitY(g.x, g.y), L = 6.4 * scale, W = 2.8 * scale, lw = 0.25 * scale;
+        const bar = (w, d, x, z) => { const q = new THREE.PlaneGeometry(w, d); q.rotateX(-Math.PI / 2); q.translate(x, 0, z); return q; };
+        gridRing = new THREE.Mesh(mergeGeometries([bar(L, lw, 0, W / 2), bar(L, lw, 0, -W / 2), bar(lw, W, L / 2, 0), bar(lw, W, -L / 2, 0)]),
+            new THREE.MeshBasicMaterial({ color: teamInfo[me.teamId]?.chatColor || '#f4f5f7', transparent: true, toneMapped: false }));
+        gridRing.position.set(g.x, 0.92 + h, g.y);
+        gridRing.rotation.y = -g.angle;
+        gridRing.userData.key = `${g.x},${g.y}`;
+        world.add(gridRing);
+    }
+    gridRing.visible = true;
+    gridRing.material.opacity = me.form.phase === 'held' ? 1 : 0.6 + 0.4 * Math.sin(performance.now() / 180);
+}
+// Stop gauge above the dash: your grid position, a bar that fills as the mark nears, green inside it, red past it
+function updateFormGauge(me) {
+    const el = $('form-gauge'), f = me?.form, on = !!(clientState.status === 'FORMATION' && f && f.phase !== 'drive' && me.grid);
+    el.classList.toggle('hidden', !on);
+    if (!on) return;
+    const car = predictor?.car || me, { a, d } = slotFrame(car, me.grid, scale), held = f.phase === 'held';
+    $('fg-pos').textContent = `P${me.rank}`;
+    $('fg-dist').textContent = held ? 'IN POSITION' : `${d.toFixed(1)} m`;
+    el.style.setProperty('--fill', held ? 1 : Math.max(0, Math.min(1, 1 - d / FORM_SETTLE_M)));
+    el.classList.toggle('ok', held || d <= FORM_SNAP_M);
+    el.classList.toggle('over', !held && a > FORM_SNAP_M);
+    el.classList.toggle('held', held);
+}
 function disposeRing(c) {
     world?.remove(c.g);
     c.g.traverse((o) => { o.geometry?.dispose(); const m = o.material; if (m) { m.map?.dispose(); m.dispose(); } });
@@ -856,8 +893,8 @@ function humanGeometry() {
 function newCrew() {
     humanGeo ||= humanGeometry();
     tyreGeo ||= new THREE.TorusGeometry(0.3 * scale, 0.12 * scale, 6, 10).rotateX(Math.PI / 2);
-    const mesh = new THREE.InstancedMesh(humanGeo, new THREE.MeshStandardMaterial({ color: 0xffffff }), 17);
-    const tyres = new THREE.InstancedMesh(tyreGeo, new THREE.MeshStandardMaterial({ color: 0xffffff }), 8);
+    const mesh = instancedMesh(humanGeo, new THREE.MeshStandardMaterial({ color: 0xffffff }), 17);
+    const tyres = instancedMesh(tyreGeo, new THREE.MeshStandardMaterial({ color: 0xffffff }), 8);
     const dark = new THREE.Color(0x222222);
     for (let k = 0; k < 4; k++) tyres.setColorAt(k, dark); // old tyres dark; the new ones' band colour is set per car
     for (let k = 4; k < 8; k++) tyres.setColorAt(k, dark);
@@ -1443,15 +1480,18 @@ function buildWorld(t) {
     scale = t.scale;
     // Quali → race on the same track: keep the world (rebuilding recompiles every shader and stalls the lights);
     // only the cars and the racing line are per session
+    // Cars first, whatever happens to the world: their meshes share the cached team models' geometry (cloneForCar), so only
+    // their own material clones and name tags are freed. Disposing that geometry with the old world broke every later session
+    // on a new track: the next cars drew from destroyed GPU buffers and the canvas froze on the old track's last frame
+    for (const id in cars) {
+        cars[id].root.traverse((o) => {
+            if (!o.material) return;
+            if (o.isSprite) o.material.map?.dispose();
+            o.material.dispose();
+        });
+        dropCar(id);
+    }
     if (world && world.userData.trackId === t.id && world.userData.level === level && world.userData.night === night) {
-        for (const id in cars) {
-            cars[id].root.traverse((o) => { // per-car material clones and name-tag textures (liveries are shared)
-                if (!o.material) return;
-                if (o.isSprite) o.material.map?.dispose();
-                o.material.dispose();
-            });
-            dropCar(id);
-        }
         if (line) { world.remove(line.mesh); line.mesh.geometry.dispose(); line.mesh.material.dispose(); }
         buildRacingLine(t);
         skid?.clear(); // a new session: a clean track
@@ -1618,7 +1658,7 @@ function buildWorld(t) {
         const lo = md.map((q, i) => q.lo * S - H[i] - 0.3 * scale), hi = md.map((q, i) => q.hi * S - H[i] + ROAD_DRAW_Y);
         world.add(wall(md, 0, hi.map((v, i) => v - lo[i]), keep, solid('#a29d92'), lo));
         world.add(wall(md, 0, 1 * scale, keep, alternate('#d62828', '#f2f2f2'), hi));
-        if (Q.scenery >= 0.5) world.add(wall(md, 0, 3 * scale, keep, fence, hi.map((v) => v + 1 * scale), { opacity: 0.22 }));
+        if (Q.scenery >= 0.5) world.add(wall(md, 0, 3 * scale, keep, solid(0x9aa3ad), hi.map((v) => v + 1 * scale), { opacity: 0.22 })); // the bridge parapets' catch-fence grey
     }
 
     if (t.tunnels && t.tunnels.length) world.add(buildTunnels(t, rp, up, G.lap));
@@ -1659,14 +1699,17 @@ function nameTag(text, color) {
     const c = document.createElement('canvas');
     c.width = 256; c.height = 64;
     const g = c.getContext('2d');
-    g.fillStyle = 'rgba(0,0,0,0.35)';
-    g.beginPath(); g.roundRect(16, 14, 224, 36, 18); g.fill();
+    // F1 broadcast tag: a dark plate, the team tick, the name in wide caps; sized to the name, centred
+    g.font = '700 26px Saira, Outfit, Arial';
+    const name = text.toUpperCase(), w = Math.min(232, g.measureText(name).width + 34), x = 128 - w / 2;
+    g.fillStyle = 'rgba(9,11,15,0.78)';
+    g.fillRect(x, 14, w, 36);
     g.fillStyle = color;
-    g.font = 'bold 30px Outfit, Arial';
-    g.textAlign = 'center';
+    g.fillRect(x + 8, 20, 4, 24);
+    g.fillStyle = '#f4f5f7';
     g.textBaseline = 'middle';
-    g.fillText(text, 128, 33);
-    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false, transparent: true }));
+    g.fillText(name, x + 20, 33, w - 26);
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false, transparent: true, fog: false, toneMapped: false }));
     s.scale.set(2.5 * scale, 0.6 * scale, 1);
     s.position.y = 2.0 * scale;
     s.renderOrder = 10;
@@ -1956,14 +1999,15 @@ let carParts = null; // real tyres per compound and the driver's helmet; until t
 // a quick start) still replaces the procedural car before lights out
 const quiet = () => !['QUALIFYING', 'RACE'].includes(clientState.status);
 let pendingModels = [];
+const failedTeams = new Set(); // no model file (or it didn't parse): the procedural car is final, nothing to wait for
 fetch('teams.json').then((r) => r.json()).then((list) => {
     for (const t of list) {
         fetchModel(`models/cars/${t.id}.glb`).then((buf) => pendingModels.push(Object.assign(() => loadTeamCar(t.id, () => parseModel(buf)).then((a) => {
-            if (!a) return;
+            if (!a) { failedTeams.add(t.id); return; }
             teamAssets[t.id] = a;
             lightCars();
             for (const id in cars) if (cars[id].teamId === t.id) dropCar(id);
-        }), { team: t.id }))).catch(() => {}); // no file: the procedural car
+        }), { team: t.id }))).catch(() => failedTeams.add(t.id)); // no file: the procedural car
     }
 });
 Promise.all(['models/tyre.glb', 'models/helmet.glb'].map((u) => fetchModel(u).then((b) => [u, b]))).then((files) => {
@@ -2001,24 +2045,85 @@ function teamMaterial(key, m, paint) {
     if (!t) { t = m.clone(); paint(t); byMat.set(m, t); }
     return t;
 }
-// The grid's car shaders, solid and ghost, near and far, built at session start: none mid-race. One car a frame: all
-// teams in one go held the page ~1.3 s here and ~5 s on a 4x slower laptop (Chrome's "Page Unresponsive")
-let warmRun = 0, worldUndrawn = false;
-async function warmCars() {
-    const run = ++warmRun, onGrid = new Set(Object.values(clientState.gameState || {}).map((p) => p.teamId));
-    for (const [teamId, asset] of Object.entries(teamAssets)) {
-        if (onGrid.size && !onGrid.has(teamId)) continue;
-        for (const ghost of [false, true]) {
-            await new Promise(requestAnimationFrame);
-            if (run !== warmRun) return; // a newer session started
-            const m = realCar(asset, teamId, []);
-            m.traverse((o) => { if (o.isLOD) for (const l of o.levels) l.object.visible = true; });
-            if (ghost) setGhost(m, true);
-            m.scale.setScalar(scale * CAR_SCALE);
-            m.updateMatrixWorld(true);
-            await renderer.compileAsync(m, camera, scene).catch((e) => console.warn('car warm-up', e));
-        }
+// Ready for the start (readiness.js): the grid's real cars in, every pipeline compiled, the GPU keeping up; only then is the
+// server told (world_drawn), which holds the formation lap and the lights for it. Compiled through the post chain's scene
+// pass (its target and outputs: compiling against the canvas made pipelines the race never used), with nothing culled,
+// both detail levels shown and every car in both its solid and ghost paint, so nothing new is built mid-race
+let readyRun = 0;
+const nextFrame = () => new Promise(requestAnimationFrame);
+async function precompile(extra = [], keep = () => true) { // extra: car roots outside `cars` (the lobby's one car per team), ghost paint too; keep: false stops it
+    const shown = [], culled = [];
+    scene.traverse((o) => {
+        if (o.frustumCulled) { culled.push(o); o.frustumCulled = false; }
+        if (o.isLOD) for (const l of o.levels) { shown.push([l.object, l.object.visible]); l.object.visible = true; }
+    });
+    const compile = () => {
+        if (!post?.compile) return renderer.compileAsync(scene, camera);
+        const parts = []; // everything drawable whose parents are all shown
+        const walk = (o) => { if (!o.visible) return; if (o.isMesh || o.isLine || o.isPoints || o.isSprite) parts.push(o); for (const c of o.children) walk(c); };
+        walk(scene);
+        return post.compile(parts, keep);
+    };
+    try {
+        await compile();
+        if (!keep()) return;
+        const flip = [...Object.values(cars).filter((c) => c.model), ...extra.map((root) => ({ root, ghost: false }))];
+        for (const c of flip) setGhost(c.root, !c.ghost);
+        try { await compile(); } finally { for (const c of flip) setGhost(c.root, c.ghost); }
+    } finally {
+        for (const o of culled) o.frustumCulled = true;
+        for (const [o, v] of shown) o.visible = v;
     }
+}
+async function getReady() {
+    const run = ++readyRun, alive = () => run === readyRun;
+    const gridTeams = () => Object.values(clientState.gameState || {}).map((p) => p.teamId);
+    const t0 = performance.now();
+    // the models parse one a frame while no one drives; then the cars are rebuilt with them on the next frames
+    while (alive() && performance.now() - t0 < 25000 && !(modelsReady({ gridTeams: gridTeams(), loaded: new Set(Object.keys(teamAssets)), failed: failedTeams, parts: !!carParts })
+        && Object.keys(clientState.gameState || {}).every((id) => cars[id]?.asset || failedTeams.has(cars[id]?.teamId)))) await nextFrame();
+    if (!alive()) return;
+    await prebuilding; // a lobby prebuild still compiling: its pipelines are this world's; two compiles at once fight over the target
+    if (!alive()) return;
+    try { await precompile([], alive); } catch (e) { console.warn('precompile', e); }
+    const settle = new Settle({ quickMs: 50, need: 5, maxMs: 20000 });
+    let last = performance.now();
+    while (alive() && !settle.ready) { await nextFrame(); const now = performance.now(); settle.frame(now - last, pipes.pending); last = now; }
+    if (!alive()) return;
+    if (settle.gaveUp) console.warn('ready: frames never got quick, going anyway');
+    socket.emit('world_drawn'); // the server holds the formation lap and the start lights for this
+}
+// Lobby: each browser builds the chosen track's world and compiles every pipeline (world, one car per team, solid and ghost)
+// while everyone waits. On a cold shader cache that's ~20-30 s of GPU work: in the race it froze the screen through the lights.
+// The race start keeps this world (buildWorld: same track, level and light), so getReady finds it all compiled
+let prebuilding = Promise.resolve(), prebuilt = null, prebuildWant = null, prebuildAt = 0, primePost = false;
+function lobbyPrebuild(now) {
+    const s = clientState.settings || {}, key = `${s.trackId}|${s.timeOfDay}|${store.get('lanrace.quality') || 'auto'}`;
+    if (key !== prebuildWant) { prebuildWant = key; prebuildAt = now; } // the host still choosing: wait until it stays put
+    if (key === prebuilt || now - prebuildAt < 1500 || !s.trackId) return;
+    prebuilt = key;
+    prebuilding = prebuilding.then(async () => {
+        const t = await new Promise((r) => socket.timeout(5000).emit('track_data', s.trackId, (err, d) => r(err ? null : d)));
+        if (!t || clientState.status !== 'LOBBY') return; // no retry: the race builds it anyway
+        buildWorld(t); singlePass(scene); freeze(world);
+        const built = world, keep = () => clientState.status === 'LOBBY' && world === built; // the race (or another track) took over: stop
+        const t0 = performance.now(); // the models still parsing (one a frame): the teams not in yet compile in the race
+        while (performance.now() - t0 < 20000 && keep()
+            && !modelsReady({ gridTeams: Object.keys(teamInfo), loaded: new Set(Object.keys(teamAssets)), failed: failedTeams, parts: !!carParts })) await nextFrame();
+        if (!keep()) return;
+        const temp = Object.entries(teamAssets).map(([teamId, asset]) => {
+            const root = new THREE.Group(), model = realCar(asset, teamId, []);
+            model.scale.setScalar(scale * CAR_SCALE);
+            root.add(model);
+            root.position.y = -1e4; // never seen if the race starts mid-compile
+            singlePass(root);
+            scene.add(root); // not the world: tearing that down frees its geometry, which these share with every race car
+            return root;
+        });
+        // removed, never disposed: freeing their materials would drop the pipelines they just compiled
+        try { await precompile(temp, keep); } finally { for (const r of temp) scene.remove(r); }
+        primePost = keep(); // the post chain's passes and the shadow maps compile on their first draw: one hidden draw starts them
+    }).catch((e) => console.warn('lobby prebuild', e));
 }
 const TYRE_BATCHES = ['S', 'M', 'H', 'rim'];
 function updateWheelBatch() {
@@ -2028,7 +2133,7 @@ function updateWheelBatch() {
         const parts = [];
         carTemplate.getObjectByName('wheel_FL')?.traverse((o) => { if (o.isMesh) parts.push(o); });
         wheelBatch = parts.map((part) => {
-            const mesh = new THREE.InstancedMesh(part.geometry, part.material, 4 * 24);
+            const mesh = instancedMesh(part.geometry, part.material, 4 * 24);
             mesh.frustumCulled = false;
             mesh.castShadow = true; // tyres shadow the track like the body does
             mesh.count = 0;
@@ -2062,7 +2167,7 @@ function updateWheelBatch() {
 // The real tyres (tyre.glb): one draw per compound (their own sidewall markings) and one for the rims
 function updateTyreBatch() {
     wheelBatch ||= TYRE_BATCHES.map((k) => {
-        const part = carParts.tyres[k], mesh = new THREE.InstancedMesh(part.geometry, part.material, 4 * 24);
+        const part = carParts.tyres[k], mesh = instancedMesh(part.geometry, part.material, 4 * 24);
         mesh.frustumCulled = false;
         mesh.castShadow = true;
         mesh.count = 0;
@@ -2170,7 +2275,7 @@ function renderShowroom(dt) {
     renderer.toneMappingExposure = 0.9;
     const fx = still ? [] : ['bloom', 'vignette', 'smaa'], key = fx.join();
     if (key !== show.postKey) { show.post?.dispose(); show.post = fx.length ? buildPost(renderer, show.scene, cam, fx) : null; show.postKey = key; }
-    try { show.post ? show.post.render() : renderer.render(show.scene, cam); }
+    try { pipes.during(() => show.post ? show.post.render() : renderer.render(show.scene, cam)); }
     catch (e) { console.warn('showroom: post failed, plain render', e); show.post?.dispose(); show.post = null; show.postKey = 'none'; }
 }
 
@@ -2273,9 +2378,13 @@ window.showQualiResults = (list) => {
     const pole = list[0]?.bestLap;
     for (const r of list) {
         const lp = driverOf(r.id);
-        const li = document.createElement('li');
-        const gap = r.position > 1 && r.bestLap !== null && pole !== null ? `  +${(r.bestLap - pole).toFixed(3)}` : '';
-        li.textContent = `P${r.position}  ${lp ? lp.username : '—'}${driverTags(lp) ? ' · ' + driverTags(lp) : ''}  ${r.bestLap === null ? 'no time' : fmtTime(r.bestLap)}${gap}`;
+        const li = document.createElement('li'), span = (cls, text = '') => Object.assign(document.createElement('span'), { className: cls, textContent: text });
+        if (r.id === clientState.me) li.className = 'me';
+        const team = span('rr-team');
+        team.style.background = teamInfo[lp?.teamId]?.chatColor || '#888';
+        const gap = r.position > 1 && r.bestLap !== null && pole !== null ? `+${(r.bestLap - pole).toFixed(3)}` : '';
+        li.append(span('rr-pos', r.position), team, span('rr-name', `${lp ? lp.username : '—'}${driverTags(lp) ? ' · ' + driverTags(lp) : ''}`),
+            span('rr-time' + (r.bestLap === null ? ' dnf' : ''), r.bestLap === null ? 'NO TIME' : fmtTime(r.bestLap)), span('rr-gap', gap));
         ol.appendChild(li);
     }
 };
@@ -2316,7 +2425,7 @@ $('rr-close').addEventListener('click', () => $('race-results').classList.add('h
 // Host session control: Esc or the HUD's HOST button opens it; a pause shows its card to everyone
 let hostPanel = false, restartArmedUntil = 0;
 const amHost = () => !!clientState.me && clientState.hostId === clientState.me;
-const inSession = () => ['QUALIFYING', 'COUNTDOWN', 'RACE'].includes(clientState.status);
+const inSession = () => ['QUALIFYING', 'COUNTDOWN', 'FORMATION', 'RACE'].includes(clientState.status);
 function renderSessionPanel() {
     const paused = !!clientState.paused && !clientState.resuming && inSession(), host = amHost() && inSession(); // the count hides it
     $('hud-host').classList.toggle('hidden', !host);
@@ -2333,7 +2442,7 @@ function renderSessionPanel() {
     if (!host) return;
     const pause = $('hc-pause'), armed = performance.now() < restartArmedUntil;
     pause.textContent = paused ? 'Resume' : 'Pause';
-    pause.disabled = !['QUALIFYING', 'RACE'].includes(clientState.status); // not during the start lights
+    pause.disabled = !canPause(); // not during the start lights
     pause.title = pause.disabled ? 'Pausing is possible once the lights are out' : '';
     $('hc-restart').textContent = armed ? 'Confirm restart' : 'Restart session';
     $('hc-restart').classList.toggle('armed', armed);
@@ -2354,7 +2463,7 @@ function renderSessionPanel() {
 }
 window.renderSessionPanel = renderSessionPanel;
 // Opening it pauses the session for everyone (once the lights are out); closing it (Esc, ✕, Resume) resumes
-const canPause = () => ['QUALIFYING', 'RACE'].includes(clientState.status);
+const canPause = () => ['QUALIFYING', 'FORMATION', 'RACE'].includes(clientState.status);
 function toggleHostPanel() {
     if (!amHost() || !inSession()) return;
     const held = clientState.paused && !clientState.resuming;
@@ -2434,7 +2543,6 @@ const STOPWATCH = document.querySelector('#fl-card .stopwatch').outerHTML;
 // Driver help badges: B = braking help (Low or High), S = steering help
 const helpTags = (a) => (a ? `${a.brake > 0 ? 'B' : ''}${a.steer > 0 ? 'S' : ''}` : '');
 const driverTags = (lp) => (lp?.isBot ? 'AI' : helpTags(lp?.assist)); // AI drivers say so instead of their help levels
-const codeOf = (id) => { const lp = driverOf(id); return lp ? driverCode(lp.username) : '---'; };
 
 // F1 TV-style purple card when anyone sets the session's fastest lap
 let flTimer;
@@ -2481,19 +2589,23 @@ function updateHUD(withTower = true) {
 
     const ghostOn = !!(racing && clientState.status === 'RACE' && me.ghost && clientState.settings?.collisions !== false);
     if (ghostOn !== hudGhost) { hudGhost = ghostOn; $('ghost-tag').classList.toggle('hidden', !ghostOn); }
-    $('hud-total').innerText = Object.keys(gs).length;
     // Finished and watching: say whose car is on screen and how to switch
     const w = watchingAfterFinish(), wo = $('watch-overlay');
     wo.classList.toggle('hidden', !w);
     if (w) $('watch-name').textContent = driverOf(spectateId)?.username || '';
-    $('hud-rank').innerText = racing ? me.rank : '--';
     $('hud-lap').innerText = racing ? lapLabel(me.lap) : '--';
+    $('hud-rank').innerText = racing ? me.rank : '--';
+    $('hud-total').innerText = Object.keys(gs).length;
+    $('hud').style.setProperty('--team', teamInfo[driverOf(clientState.me)?.teamId]?.chatColor || '#f4f5f7'); // your team underlines your timing box
+    const formation = clientState.status === 'FORMATION';
+    $('tt-session').textContent = formation ? 'FORMATION LAP' : clientState.status === 'QUALIFYING' || clientState.status === 'QUALI_RESULTS' ? 'QUALIFYING' : 'RACE';
+    document.querySelector('.tt-lap').classList.toggle('hidden', formation);
     $('hud-laps').textContent = racing && clientState.status !== 'QUALIFYING' ? `/${clientState.settings.maxLaps}` : '';
     $('hud-speed').innerText = racing ? kmh(me.speed) : '--';
 
     // Own lap times: purple while it's the session fastest, green once beaten (still your personal best)
     const curEl = $('lt-current');
-    curEl.innerText = racing ? fmtTime(me.curLap) : '--';
+    curEl.innerText = racing && clientState.status !== 'FORMATION' ? fmtTime(me.curLap) : '--'; // the formation lap is untimed
     curEl.classList.toggle('t-red', !!racing && me.lapValid === false);
     const lastEl = $('lt-last');
     const deleted = !!racing && me.lastValid === false;
@@ -2501,20 +2613,15 @@ function updateHUD(withTower = true) {
     const lastCls = racing ? lastLapClass(me.lastLap, me.bestLap, clientState.fastestLap?.time, deleted) : '';
     for (const c of ['t-red', 't-purple', 't-green']) lastEl.classList.toggle(c, c === lastCls);
     $('lt-best').innerText = racing ? fmtTime(me.bestLap) : '--';
+    $('tb-best').classList.toggle('hidden', !racing || me.bestLap === null); // rows appear once there's a time, as in the F1 game
+    $('tb-last').classList.toggle('hidden', !racing || me.lastLap === null);
     const delta = racing && !deleted ? lapDelta(me.lastLap, me.bestLap) : null;
     $('lt-delta').textContent = delta ? delta.text : '';
     $('lt-delta').className = delta ? delta.cls : '';
     for (let i = 0; i < 3; i++) {
         const el = $(`sec-${i + 1}`), s = racing ? clientState.mySectors[i] : null;
-        el.children[1].textContent = s ? s.time.toFixed(3) : `S${i + 1}`;
         el.className = `sec ${s ? sec(s) : ''}`;
-        const best = clientState.sessionBest[i]; // purple sector: the session's best and who holds it
-        el.lastElementChild.textContent = best === null ? '' : `${best.toFixed(3)} ${codeOf(clientState.sessionBestIds[i])}`;
     }
-    const fl = clientState.fastestLap;
-    $('lt-fl').textContent = fl ? fmtTime(fl.time) : '--';
-    $('lt-fl-who').textContent = fl ? codeOf(fl.id) : '';
-    document.querySelector('.lt-fl').classList.toggle('hidden', !fl); // no empty row until someone has set a lap
 
     // Session bar
     const sess = clientState.session;
@@ -2527,6 +2634,7 @@ function updateHUD(withTower = true) {
         const lap = racing ? me.lap : leader ? leader.lap : 0;
         if (!racing) bar = `LAP ${lapLabel(lap)}/${clientState.settings.maxLaps}`; // racing: it's in the LAP box
     }
+    if (clientState.status === 'FORMATION' && clientState.formation?.endsAt) bar = `GRID FORMING · ${fmtClock(clientState.formation.endsAt - Date.now())}`;
     $('session-bar').textContent = bar;
     $('pit-limiter').classList.toggle('hidden', !(racing && me.limiter));
     const wear = predictor?.car?.wear ?? 0;
@@ -2547,12 +2655,13 @@ function updateHUD(withTower = true) {
     if (pickKey !== hudPick) {
         hudPick = pickKey;
         const t = cardText({ compound: comp, next, fitted });
-        $('tyre-card').classList.toggle('hidden', spectator);
+        // The wear ring lives in the dash; this card only opens for a stop (or holds the BOX button on touch screens)
+        $('tyre-card').classList.toggle('hidden', spectator || !(open || me?.boxCall || (document.body.classList.contains('touch') && clientState.status === 'RACE')));
         $('tc-tyre').className = `tc-tyre tyre-${comp}${wearPct < 20 ? ' worn' : ''}`;
         $('tc-tyre').style.setProperty('--wear', wearPct);
         $('tc-tyre').firstElementChild.textContent = comp;
-        $('tc-wear').textContent = `${wearPct} %`;
-        $('tc-next').textContent = me?.boxCall ? `${me.boxCall === 'next' ? 'BOX NEXT LAP' : 'BOX THIS LAP'} · ${t.next}` : t.next;
+        $('tc-wear').textContent = `${wearPct}%`;
+        $('tc-next').textContent = me?.boxCall ? `${me.boxCall === 'next' ? 'BOX NEXT LAP' : 'BOX THIS LAP'} · ${t.next}` : ''; // the plan only matters once you call the stop
         $('tc-box').classList.toggle('hidden', clientState.status !== 'RACE' || spectator);
         $('tc-box').classList.toggle('on', !!me?.boxCall);
         $('tc-pick').classList.toggle('hidden', !open);
@@ -2591,6 +2700,8 @@ function updateHUD(withTower = true) {
     if ($('pit-banner').textContent !== bt) $('pit-banner').textContent = bt;
     $('pit-banner').classList.toggle('hidden', !bannerOn);
     updateBoxRing(me, racing, toEntryM);
+    updateGridRing(racing ? me : null);
+    updateFormGauge(racing ? me : null);
     $('drs-badge').className = !racing ? 'drs-off' : me.drs ? 'drs-open' : me.drsAvailable ? 'drs-avail' : 'drs-off';
     let hint = '';
     if (racing && clientState.trackData) {
@@ -2623,7 +2734,7 @@ function updateHUD(withTower = true) {
     // Qualifying: session clock and the knocked-out chip
     const qc = clientState.qualiClock, inQuali = clientState.status === 'QUALIFYING' && !!qc;
     const onTimed = me?.lapStart !== null && me?.lapStart !== undefined;
-    const runState = !racing || me?.qualiOut || qc?.qphase === 'flag' || qc?.format === 'oneshot' ? '' : onTimed ? ' · PUSH LAP' : me?.inPit ? ' · PIT LANE' : ' · OUT LAP';
+    const runState = !racing || me?.qualiOut || qc?.qphase === 'flag' || qc?.format === 'oneshot' ? '' : onTimed ? ' · PUSH LAP' : me?.inPit ? '' : ' · OUT LAP'; // in the pit lane the limiter slab says so
     const clockStr = inQuali ? clockText({ ...qc, endsInMs: clockLeftMs(qc, performance.now()) }, { onTimedLap: onTimed }) + runState : '';
     if (clockStr !== hudQClock) {
         hudQClock = clockStr;
@@ -2641,23 +2752,22 @@ function updateHUD(withTower = true) {
         ol.innerHTML = '';
         const sorted = Object.entries(gs).filter(([id]) => driverOf(id)).sort((a, b) => a[1].rank - b[1].rank);
         const rows = sorted.map(([, p]) => ({ gap: p.gap, lapsDown: p.lapsDown || 0 }));
-        const codes = sorted.map(([id]) => driverCode(driverOf(id).username));
         const el = (tag, cls, text = '') => Object.assign(document.createElement(tag), { className: cls, textContent: text });
-        // Top 10, or top 9 plus your own row when you're further back
-        const mine = sorted.findIndex(([id]) => id === clientState.me);
-        const shown = mine >= 10 ? [...sorted.keys()].slice(0, 9).concat(mine) : [...sorted.keys()].slice(0, 10);
-        shown.forEach((i, n) => {
+        // The F1 game's tower: the five cars around you (the top five when you're spectating)
+        const mine = Math.max(0, sorted.findIndex(([id]) => id === clientState.me)), from = Math.max(0, Math.min(mine - 2, sorted.length - 5));
+        const shown = [...sorted.keys()].slice(from, from + 5);
+        shown.forEach((i) => {
             const [id, p] = sorted[i];
             const lp = driverOf(id);
-            const li = el('li', (id === clientState.me ? 'me' : '') + (n > 0 && i !== shown[n - 1] + 1 ? ' gapline' : ''));
+            const li = el('li', id === clientState.me ? 'me' : '');
             const team = el('span', 'tt-team');
             team.style.background = teamInfo[lp.teamId]?.chatColor || '#888';
             // Three-letter code like the TV graphic, unless two drivers share it
-            const name = el('span', 'tt-name', codes.indexOf(codes[i]) !== codes.lastIndexOf(codes[i]) ? lp.username.slice(0, 8) : codes[i]);
+            const name = el('span', 'tt-name', lp.username); // full names: only five rows, so there's room
             li.append(el('span', 'tt-pos', p.rank), team, name);
             if (p.inPit && !quali) li.append(el('span', 'tt-tag', 'PIT'));
-            if (p.compound) li.append(el('span', `tt-tyre tyre-${p.compound}`, `${p.compound}${p.stops ? ' ' + p.stops : ''}`));
-            const tags = driverTags(lp); if (tags) li.append(el('span', 'tt-tag help', tags));
+            if (p.compound) li.append(el('span', `tt-tyre tyre-${p.compound}`, p.compound)); // the letter alone fits the ring
+            if (p.compound && p.stops) li.append(el('span', 'tt-stops', p.stops));
             if (p.penalty) li.append(el('span', 'tt-tag pen', `+${p.penalty}s`));
             if (!quali && p.boxCall) li.append(el('span', 'tt-tag box', 'BOX'));
             if (quali && p.qualiOut) { li.classList.add('out'); li.append(el('span', 'tt-tag out', 'OUT')); }
@@ -2717,12 +2827,15 @@ function drawMinimap() {
             .forEach((p, i) => (i ? mm.lineTo(mx(p.x), my(p.y)) : mm.moveTo(mx(p.x), my(p.y))));
         mm.stroke();
     }
-    mm.strokeStyle = 'rgba(255,255,255,0.85)';
-    mm.lineWidth = 4;
     mm.lineJoin = 'round';
     mm.beginPath();
     t.path.forEach((p, i) => (i ? mm.lineTo(mx(p.x), my(p.y)) : mm.moveTo(mx(p.x), my(p.y))));
     mm.closePath();
+    mm.strokeStyle = 'rgba(0,0,0,0.55)'; // no plate behind the map: a dark under-stroke keeps the line legible on any sky
+    mm.lineWidth = 8;
+    mm.stroke();
+    mm.strokeStyle = 'rgba(255,255,255,0.9)';
+    mm.lineWidth = 3.5;
     mm.stroke();
 
     for (const id in gs) {
@@ -2820,6 +2933,8 @@ function frame(now) {
         lobbyMs.push(dt * 1000);
         if (lobbyMs.length > 120) lobbyMs.shift();
         Sound.update(silentFrame);
+        if (clientState.status === 'LOBBY') lobbyPrebuild(now);
+        if (primePost && post) { primePost = false; try { pipes.during(() => post.render()); } catch (e) { console.warn('prime post', e); } } // drawn over by the showroom
         renderShowroom(dt);
         return;
     }
@@ -2836,7 +2951,7 @@ function frame(now) {
     skyDome.scale.setScalar(camera.far * 0.9);
     if (paused) Sound.update(silentFrame); else updateSound(dt);
     if (post || postFellBack) { // the first draw of a world compiles its shaders there and then (~1 s, under the start lights)
-        try { post ? post.render() : renderer.render(scene, camera); }
+        try { pipes.during(() => post ? post.render() : renderer.render(scene, camera)); }
         catch (e) { // a chain that fails here: the Low chain once, then no post-processing at all; the race goes on
             console.warn(postFellBack ? 'postfx: Low chain failed too, plain render' : 'postfx: chain failed, Low chain instead', e);
             post?.dispose();
@@ -2845,7 +2960,6 @@ function frame(now) {
             if (post) { post.key = 'fallback'; post.saturation.value = gradeSat; }
             postFellBack = true;
         }
-        if (worldUndrawn) { worldUndrawn = false; socket.emit('world_drawn'); } // the server holds the start lights for this
     }
 
     if (now - lastHud > 66) { // HUD and minimap at 15 Hz, timing tower at 4 Hz
@@ -2892,6 +3006,12 @@ function frame(now) {
     }
 }
 
+window.syncForm = () => {
+    const me = clientState.gameState?.[clientState.me];
+    if (me) predictor?.setForm({ form: me.form ?? null, grid: me.grid ?? null });
+};
+window.onFormation = (d) => { if (d.phase === 'start') window.showBanner?.('FORMATION LAP', true); };
+
 window.syncTyres = () => {
     const me = clientState.gameState?.[clientState.me];
     if (me) predictor?.setTyres({ compound: me.compound, wearPerM: me.wearPerM });
@@ -2935,6 +3055,7 @@ window.initGameVisuals = () => {
     // New session: predict from the new grid (reset on our first entry); spectators never get one, so never predict
     predictor = new Predictor(clientState.trackData, clientState.gameState?.[clientState.me]?.assist || 'off');
     predictor.box = clientState.gameState?.[clientState.me]?.box || null; // the pit stop guide drives into it
+    window.syncForm(); // the formation lap's grid slot (and phase, for a late joiner)
     predictor.gripEvo = clientState.status === 'QUALIFYING' ? clientState.qualiClock?.evo : undefined;
     clearInterval(qbTimer); document.getElementById('quali-break')?.classList.add('hidden'); koPos = null; hudQClock = null;
     hudBox = null; boxConfirmAt = 0; boxPick = null;
@@ -2950,10 +3071,7 @@ window.initGameVisuals = () => {
     buildWorld(clientState.trackData);
     singlePass(scene);
     freeze(world);
-    warmCars();
-    worldUndrawn = true;
-    // No shader warm-up: renderer.compileAsync took ~22 s on Monza (the 1.5 s wait for it only left the screen blank, then
-    // the first draw compiled everything anyway, ~1 s); the world is drawn at once, under the start lights
+    getReady(); // the world is drawn at once (under the start lights); the server waits until this browser is really ready
     simStep(false); // resend what's held when a new session starts
 };
 renderer.setAnimationLoop(frame);

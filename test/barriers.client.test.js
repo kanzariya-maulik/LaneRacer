@@ -43,3 +43,15 @@ test('monza: the road height is looked up once per barrier point, not per piece 
     assert.ok(calls <= t.build.barriers.reduce((a, w) => a + w.pts.length, 0), `${calls} road lookups`);
     for (const q of P['armco:post']) assert.ok(q.y0 <= Math.min(0, (q.x + q.z) * 0.001) + 1e-6, 'posts still stand on the lower of road and ground');
 });
+
+// three r186 puts a small InstancedMesh's matrices in a uniform array named after its node id (NodeBuffer_<id>): every mesh
+// then had its own shader, never shared or found in the browser's shader cache (37 pipelines compiled at each race start).
+// Past the 64 KB uniform limit it reads them as vertex attributes: one shader for every mesh of a material
+test('instancedMesh: matrices as attributes (no per-mesh shader), drawing only the copies asked for', async () => {
+    const THREE = await import('three');
+    for (const n of [0, 1, 17, 96, 3000]) {
+        const m = B.instancedMesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial(), n);
+        assert.ok(m.instanceMatrix.count * 16 * 4 > 65536, `${n}: still a uniform array`);
+        assert.strictEqual(m.count, n);
+    }
+});

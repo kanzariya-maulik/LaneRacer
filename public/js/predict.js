@@ -58,9 +58,16 @@ export class Predictor {
         if (this.car) Object.assign(this.car, this.tyres);
     }
 
+    // Formation lap phase and grid slot from the server's meta: the predicted car settles, snaps and holds like the server's
+    setForm({ form, grid }) {
+        this.formState = { form, grid };
+        if (this.car) Object.assign(this.car, this.formState);
+    }
+
     reset(e) {
         this.car = { assist: this.assist, box: this.box };
         if (this.tyres) Object.assign(this.car, this.tyres);
+        if (this.formState) Object.assign(this.car, this.formState);
         this.load(e);
         this.prev = { x: this.car.x, y: this.car.y, angle: this.car.angle };
         this.pending = [];

@@ -147,3 +147,14 @@ test('track evolution: the predictor scales grip like the server (gripEvo from q
     pr.load(e);
     assert.ok(Math.abs(pr.car.tyreGrip - gripOf('S', 0.2)) < 1e-12);
 });
+
+test('setForm copies the formation phase and grid slot onto the predicted car and survives reset', () => {
+    const t = Track.load('monza'), pr = new P.Predictor(t), slot = t.startPositions[0];
+    const e = [0, slot.x, slot.y, slot.angle, 0, 0, 0];
+    pr.reset(e);
+    const form = { phase: 'approach', half: true }, grid = { x: slot.x, y: slot.y, angle: slot.angle };
+    pr.setForm({ form, grid });
+    assert.deepStrictEqual([pr.car.form, pr.car.grid], [form, grid]);
+    pr.reset(e);
+    assert.deepStrictEqual([pr.car.form, pr.car.grid], [form, grid]);
+});

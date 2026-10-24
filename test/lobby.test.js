@@ -148,3 +148,10 @@ test('effectiveAssist: the host\'s levels when fixed, otherwise the driver\'s ow
     assert.deepStrictEqual(lobby.effectiveAssist({ help: { mode: 'fixed', steer: 100, brake: 50 } }, own), { steer: 1, brake: 0.5 });
     assert.deepStrictEqual(lobby.effectiveAssist({}, own), own);
 });
+
+test('sanitizeSettings keeps formationLap booleans and ignores other types', () => {
+    const lobby = require('../src/lobby');
+    const base = { formationLap: true };
+    assert.strictEqual(lobby.sanitizeSettings(base, { formationLap: false }, ['monza']).formationLap, false);
+    assert.strictEqual(lobby.sanitizeSettings(base, { formationLap: 'no' }, ['monza']).formationLap, true);
+});

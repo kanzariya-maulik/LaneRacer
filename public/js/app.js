@@ -23,6 +23,7 @@ const setAi = document.getElementById('setting-ai');
 const setAiLevel = document.getElementById('setting-ai-level');
 const setAiCount = document.getElementById('setting-ai-count');
 const setGhost = document.getElementById('setting-ghost');
+const setFormation = document.getElementById('setting-formation');
 const setTyres = document.getElementById('setting-tyres');
 const setPenalties = document.getElementById('setting-penalties');
 const setTime = document.getElementById('setting-time');
@@ -345,6 +346,7 @@ function emitSettings() {
         qualiFormat: setQuali.value,
         collisions: setCollisions.value === '1',
         ghostStart: setGhost.value === '1',
+        formationLap: setFormation.value === '1',
         tyreWear: setTyres.value === '1',
         contactPenalties: setPenalties.value === '1',
         aiDrivers: setAi.value === '1',
@@ -358,6 +360,7 @@ setLaps.addEventListener('change', emitSettings);
 setQuali.addEventListener('change', emitSettings);
 setCollisions.addEventListener('change', emitSettings);
 setGhost.addEventListener('change', emitSettings);
+setFormation.addEventListener('change', emitSettings);
 setTyres.addEventListener('change', emitSettings);
 setPenalties.addEventListener('change', emitSettings);
 setAi.addEventListener('change', emitSettings);
@@ -473,6 +476,7 @@ window.updateSettingsUI = () => {
     document.querySelectorAll('.quali-only').forEach((el) => el.classList.toggle('hidden', !clientState.settings.qualifying));
     setCollisions.value = clientState.settings.collisions === false ? '0' : '1';
     setGhost.value = clientState.settings.ghostStart === false ? '0' : '1';
+    setFormation.value = clientState.settings.formationLap === false ? '0' : '1';
     setTyres.value = clientState.settings.tyreWear === false ? '0' : '1';
     setPenalties.value = clientState.settings.contactPenalties === false ? '0' : '1';
     setAi.value = clientState.settings.aiDrivers ? '1' : '0';
@@ -491,7 +495,7 @@ window.updateSettingsUI = () => {
     const track = setTrack.selectedOptions[0]?.textContent || s.trackId;
     const quali = { full: 'Full · Q1 / Q2 / Q3', short: 'Short', oneshot: 'One-shot', off: 'Off' }[s.qualiFormat ?? (s.qualifying ? 'short' : 'off')];
     const time = s.timeOfDay === 'night' ? 'Night' : 'Day';
-    const rows = [['Track', track], ['Time', time], ['Laps', s.maxLaps], ['Qualifying', quali], ['Collisions', s.collisions === false ? 'Off' : (s.contactPenalties === false ? 'On, no penalties' : 'On, penalties') + (s.ghostStart !== false ? ', ghost start' : '')], ['Tyre wear', s.tyreWear === false ? 'Off' : 'On'],
+    const rows = [['Track', track], ['Time', time], ['Laps', s.maxLaps], ['Qualifying', quali], ['Collisions', s.collisions === false ? 'Off' : (s.contactPenalties === false ? 'On, no penalties' : 'On, penalties') + (s.ghostStart !== false ? ', ghost start' : '')], ['Tyre wear', s.tyreWear === false ? 'Off' : 'On'], ['Formation lap', s.formationLap === false ? 'Off' : 'On'],
         ['Driver help', help.mode === 'fixed' ? `Same for all: braking ${{ 0: 'Off', 50: 'Low', 100: 'High' }[help.brake]}, steering ${help.steer ? 'On' : 'Off'}` : 'Each driver chooses']];
     const plate = document.getElementById('track-plate');
     plate.replaceChildren(Object.assign(document.createElement('b'), { textContent: track }),
@@ -546,7 +550,8 @@ window.handleStatusChange = (status) => {
     cdOverlay.classList.add('hidden');
     results.classList.toggle('hidden', status !== 'QUALI_RESULTS');
 
-    if (status === 'COUNTDOWN') {
+    if (status === 'FORMATION') lights.classList.add('hidden'); // the lights come back once the grid has formed
+    else if (status === 'COUNTDOWN') {
         lights.classList.remove('hidden');
         lights.querySelectorAll('.light').forEach(l => l.classList.remove('on'));
     } else if (status === 'FINISHED' && !clientState.raceResults) { // the classification replaces the FINISH! banner

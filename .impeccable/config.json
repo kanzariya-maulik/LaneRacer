@@ -1,0 +1,23 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "design-system-color",
+        "value": "*",
+        "files": [
+          "src/game/Game.js"
+        ],
+        "createdAt": "2026-10-24T14:11:21.527Z",
+        "reason": "User confirmed: server chat-message colours, not page design"
+      },
+      {
+        "rule": "design-system-font-size",
+        "value": "17px",
+        "createdAt": "2026-10-24T14:11:21.573Z",
+        "reason": "User confirmed 17px is intentional: HUD base size clamp ceiling"
+      }
+    ]
+  }
+}

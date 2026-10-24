@@ -81,6 +81,23 @@ export function buildPost(renderer, scene, camera, effects) {
         effects: used,
         saturation: sat,
         render: () => pipe.render(),
+        // Pipelines the scene pass will draw, compiled off the main thread with the pass's own target and outputs (compiling
+        // against the canvas makes different pipelines: the race still built its own on first sight). three's compileAsync
+        // compiles one pipeline at a time (~38 s on a cold cache), so the objects go `parallel` at once. Its shaders are built
+        // later, asynchronously, against whatever target and outputs the renderer has then: they stay set until it's done,
+        // and frames drawn meanwhile clear them for themselves (renderFrame), or the post quad was built against them
+        // Every object's pipeline for the scene pass, 8 at a time. three builds their shaders against the renderer's target
+        // and outputs across its awaits, so they stay set until the last is done (readiness.js guardHeldTargets keeps every
+        // other draw clear of them meanwhile). keep() false: no more are started
+        compile: async (objects, keep = () => true, parallel = 8) => {
+            const queue = [...objects], rt = renderer.getRenderTarget(), m = renderer.getMRT();
+            const one = () => { const o = keep() && queue.shift(); return o ? renderer.compileAsync(o, camera, scene).catch(() => {}).then(one) : Promise.resolve(); };
+            scenePass.setup({ renderer }); // samples and buffer type are set on the first render: before it they'd compile other pipelines
+            renderer.setRenderTarget(scenePass.renderTarget);
+            renderer.setMRT(scenePass.getMRT());
+            renderer.compileHold = { rt: scenePass.renderTarget, mrt: scenePass.getMRT() };
+            try { await Promise.all(Array.from({ length: Math.min(parallel, queue.length) }, one)); } finally { renderer.compileHold = null; renderer.setRenderTarget(rt); renderer.setMRT(m); }
+        },
         setScale: (s) => { scenePass.setResolutionScale(s); if (aoNode) aoNode.resolutionScale = s * AO_RES; },
         // RenderPipeline.dispose() frees only its quad material (r186): the passes' render targets are freed here
         dispose: () => { pipe.dispose(); for (const n of owned) n.dispose?.(); },

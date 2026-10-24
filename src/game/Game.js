@@ -41,10 +41,14 @@ const BOX_NEXT_M = 200, BOX_MISS_M = 50; // box call: closer than this to the en
 const GUIDE_MAX_S = 6; // not parked by then: the car is driven out without a service (never stranded)
 const LANE_MAX_S = 60, OFF_LANE_S = 1; // driven this long (wedged), or shoved out of the lane this long: the driver gets it back
 const STALL_S = 5, STALL_M = 1;        // lane/out: not this much further along the lane in this long (wedged): the driver gets it back
+// Formation lap (startFormation): the rest of the grid has this long once the first human is held on their slot, and the
+// whole lap ends by FORMATION_MAX_S whatever happens; then anyone still out is put on their slot
+const FORMATION_WAIT_S = 30, FORMATION_MAX_S = 180, FORMATION_HALF = [0.35, 0.65], FORMATION_PASS_M = 2; // further ahead than this = an overtake
+const FORMATION_BOT_PARK_M = 250, FORMATION_BOT_DEC = 5; // bots: from this far behind their slot, steer onto its line and brake to stop on it
 const STOP_CODE = { guide: 1, service: 2, hold: 3, lane: 4, out: 5, wait: 6 };
 
 const FLAGS = { inPit: 1, limiter: 2, drs: 4, drsAvailable: 8, finished: 16, lapValid: 32, ghost: 64 };
-const META_FIELDS = ['lap', 'checkpoint', 'rank', 'gap', 'lapsDown', 'lastLap', 'bestLap', 'lapStart', 'bestLapSectors', 'lastValid', 'penalty', 'compound', 'nextCompound', 'stops', 'compoundsUsed', 'wearPerM', 'lastStop', 'segBest', 'qualiOut', 'boxCall', 'isBot'];
+const META_FIELDS = ['lap', 'checkpoint', 'rank', 'gap', 'lapsDown', 'lastLap', 'bestLap', 'lapStart', 'bestLapSectors', 'lastValid', 'penalty', 'compound', 'nextCompound', 'stops', 'compoundsUsed', 'wearPerM', 'lastStop', 'segBest', 'qualiOut', 'boxCall', 'isBot', 'form', 'grid'];
 const META_EVERY = 6; // ticks: info updates at 10 Hz
 const r1 = (v) => Math.round(v * 10) / 10;
 
@@ -79,6 +83,10 @@ class Game {
         this.time = 0;                     // race clock (s), starts at lights out
         this.clock = 0;                    // session clock (s) for client interpolation, never frozen
         this.frozen = mode === 'race';     // race: lights still on — cars can move, but that's a jump start
+        this.formation = null;             // formation lap in progress: { startedAt, firstHeldAt } (session clock s)
+        this.onFormationDone = null;       // socketManager: start the lights
+        // A formation lap comes first (host setting, humans on the grid): until it's over the grid isn't the start, so no jump starts
+        this.wantsFormation = mode === 'race' && settings.formationLap !== false && players.some((p) => !p.isBot);
         this.ticker = null;
         this.winnerCount = 0;
         this.bestSectors = [null, null, null]; // live session bests (purple): completed valid laps + laps still valid
@@ -108,6 +116,7 @@ class Game {
                 servicedLap: -1, pitVisits: 0, servicedVisit: -1, wasInLane: false,
                 limits: 0, penalty: 0, offLimits: false, finishTime: null,
                 lastSafeX: slot.x, lastSafeY: slot.y, gridX: slot.x, gridY: slot.y, jumpStart: false, reacted: false,
+                grid: mode === 'race' ? { x: slot.x, y: slot.y, angle: slot.angle } : null, form: null, // formation lap: own slot, phase
                 drs: false, drsAvailable: false, drsEligible: [], tow: 0, lapS: null,
                 ...(() => {
                     const compound = Tyres.isCompound(p.compound) ? p.compound : 'M';
@@ -345,7 +354,7 @@ class Game {
     setNextCompound(id, c) {
         const p = this.players[id];
         if (!p || !Tyres.isCompound(c)) return;
-        const grid = this.mode === 'race' && this.frozen;
+        const grid = this.mode === 'race' && this.frozen && !this.formation; // formation lap: fitted back on the grid (endFormation)
         const parked = this.mode === 'quali' && p.stop?.phase === 'wait';
         if (!grid && !parked) { p.nextCompound = c; return; }
         p.compound = c;
@@ -471,7 +480,9 @@ class Game {
 
     // Moved off the grid slot before lights out: +5 s, once
     checkJumpStart(p) {
-        if (p.input.throttle > 0) p.throttledEarly = true; // only the driver's own throttle counts, not a shunt from behind
+        // Only the driver's own throttle counts, not a shunt from behind; after a formation lap, only once they've lifted
+        // (a foot left down while parked on the slot isn't a jump start)
+        if (p.input.throttle > 0) { if (p.throttleArmed !== false) p.throttledEarly = true; } else p.throttleArmed = true;
         if (p.jumpStart || !p.throttledEarly || Math.hypot(p.x - p.gridX, p.y - p.gridY) <= JUMP_MOVE_M * this.track.scale) return;
         p.jumpStart = true;
         p.penalty += JUMP_PENALTY_S;
@@ -509,6 +520,7 @@ class Game {
         const ctx = { game: this, track: this.track, cars, time: this.time, frozen: this.frozen, mode: this.mode, dt: this.dt, rng: this.rng, toEntryM: (p) => this.toEntryM(p) };
         for (const p of cars) {
             if (!p.isBot) continue;
+            if (this.formation) { p.input = this.formationBot(p, ctx); continue; }
             BotStrategy.tick(p, ctx);
             p.input = BotDriver.drive(p, ctx);
         }
@@ -558,9 +570,10 @@ class Game {
                 const p = this.players[id];
                 if (p.finished) continue; // finished race cars and parked quali cars stay put
                 this.drive(p);
+                if (this.formation) { this.updateFormation(p); continue; } // no stops, timing or jump starts on the formation lap
                 this.updateStop(p);
                 if (this.mode === 'race' && !this.frozen) this.checkBoxMissed(p);
-                if (this.frozen) this.checkJumpStart(p);
+                if (this.frozen && !this.wantsFormation) this.checkJumpStart(p);
                 else {
                     if (this.mode === 'race' && !p.reacted && p.input.throttle > 0) this.reaction(p);
                     this.checkLapProgress(p);
@@ -572,6 +585,7 @@ class Game {
                     for (let j = i + 1; j < ids.length; j++) {
                         const a = this.players[ids[i]], b = this.players[ids[j]];
                         if (a.finished || b.finished || a.ghost || b.ghost) continue;
+                        if (a.inPit && b.inPit) continue; // the pit lane: the game drives both (pit assist), so no contact and no blame
                         const hit = Physics.carOverlap(a, b, this.track.scale);
                         if (!hit) continue;
                         this.noteContact(a, b, hit); // before the bump changes their speeds
@@ -580,6 +594,7 @@ class Game {
                 }
             }
             if (this.mode === 'race') this.judgeIncidents();
+            if (this.formation) this.formationTick();
         }
 
         // A parked or disconnected-in-spirit car can't hold everyone on track forever
@@ -619,7 +634,7 @@ class Game {
     }
     setBoxCall(id, on) {
         const p = this.players[id];
-        if (!p || this.mode !== 'race' || !this.track.pit || p.finished || p.inPit) return;
+        if (!p || this.mode !== 'race' || !this.track.pit || p.finished || p.inPit || this.formation) return; // no stops on the formation lap
         p.boxCall = on ? (this.toEntryM(p) < BOX_NEXT_M ? 'next' : 'this') : null;
         p.boxMissedLap = null;
     }
@@ -725,7 +740,9 @@ class Game {
     updateRanks() {
         const list = Object.values(this.players);
         if (!list.length) return;
-        const ranked = this.mode === 'quali' ? this.qualiRankPlayers(list) : Game.rankPlayers(list, this.track.checkpoints);
+        const ranked = this.mode === 'quali' ? this.qualiRankPlayers(list)
+            : this.formation ? [...list].sort((a, b) => this.index[a.id] - this.index[b.id]) // formation lap: grid order, overtakes don't count
+            : Game.rankPlayers(list, this.track.checkpoints);
         const leader = ranked[0];
         const cpCount = this.track.checkpoints.length;
         ranked.forEach((p, i) => {
@@ -742,6 +759,102 @@ class Game {
                 if (p.gap !== null && ahead !== null && p.gap < ahead) p.gap = ahead;
             }
         });
+    }
+
+    // Formation lap: every car drives one untimed lap as a ghost (no wear, no stops, no penalties), then parks on its own
+    // slot (Drive.gridSettle / snap / held). The race stays frozen throughout; endFormation resets everything for lap 1
+    startFormation() {
+        this.formation = { startedAt: this.clock, firstHeldAt: null };
+        for (const p of Object.values(this.players)) {
+            Object.assign(p, { form: { phase: 'drive', half: false }, ghost: true, formWearPerM: p.wearPerM, wearPerM: 0, boxCall: null });
+            delete p.bot; // bot driver state from the grid (its turn-1 start hold) would park it for the first seconds
+        }
+    }
+
+    // One car's phase after it moved: drive → approach (lap done, slot near) → snap (stopped on the mark) → held
+    updateFormation(p) {
+        const f = p.form, t = this.track, sc = t.scale;
+        if (!f) return;
+        // Distance down the formation lap, unwrapped across the line (starts negative: the grid is behind it); not in meta
+        const total = t.cum[t.path.length], s = p.lapS ?? 0;
+        if (p.formS === undefined) p.formS = s > total / 2 ? s - total : s;
+        else p.formS += ((((s - p.formPrevS) % total) + total * 1.5) % total) - total / 2;
+        p.formPrevS = s;
+        const lap = s / total;
+        if (lap >= FORMATION_HALF[0] && lap <= FORMATION_HALF[1]) f.half = true; // in position only after driving the lap
+        if (!f.half || f.phase === 'held') return;
+        const { d, h } = Drive.slotFrame(p, p.grid, sc), v = Math.abs(p.speed) / sc;
+        if (f.phase === 'drive' && d <= Drive.FORM_SETTLE_M) f.phase = 'approach';
+        else if (f.phase === 'approach' && d > Drive.FORM_SETTLE_M * 1.5) f.phase = 'drive';
+        else if (f.phase === 'approach' && d <= Drive.FORM_SNAP_M && v <= Drive.FORM_SNAP_MS && Math.abs(h) <= Drive.FORM_SNAP_RAD) f.phase = 'snap';
+        else if (f.phase === 'snap' && d <= Drive.FORM_HELD_M && Math.abs(h) <= 0.01) {
+            f.phase = 'held';
+            Object.assign(p, { x: p.grid.x, y: p.grid.y, angle: p.grid.angle, vx: 0, vy: 0, speed: 0 });
+            if (!p.isBot && this.formation.firstHeldAt === null) { // the rest of the grid gets FORMATION_WAIT_S from now
+                this.formation.firstHeldAt = this.clock;
+                this.io.emit('formation', { phase: 'forming', endsInMs: FORMATION_WAIT_S * 1000 });
+            }
+        }
+    }
+
+    // Bots: their race line at formation pace; back at the grid (lap done, slot ahead), onto the slot's line, braking to
+    // stop on the mark (the snap does the rest)
+    formationBot(p, ctx) {
+        const f = p.form;
+        if (!f || f.phase === 'snap' || f.phase === 'held') return { throttle: 0, brake: 0, steer: 0, drs: false };
+        const t = this.track, { a, l } = Drive.slotFrame(p, p.grid, t.scale);
+        if (!f.half || a < -FORMATION_BOT_PARK_M || a > 2 || Math.abs(l) > 30) return BotDriver.drive(p, { ...ctx, frozen: false, formation: true, time: this.clock });
+        const want = a > -0.3 ? 0 : Math.sqrt(2 * FORMATION_BOT_DEC * (-a - 0.3)), more = want - p.speed / t.scale;
+        return { steer: Math.max(-1, Math.min(1, Drive.slotSteer(p, p.grid, t))), throttle: Math.max(0, Math.min(1, more * 0.5)), brake: Math.max(0, Math.min(1, -more * 0.5)), drs: false };
+    }
+
+    // Once a tick: everyone held, the wait after the first human ran out, the cap, or no human left → the lights
+    formationTick() {
+        const f = this.formation, list = Object.values(this.players);
+        if (!f) return;
+        this.formationPasses(list);
+        const done = list.every((p) => p.form?.phase === 'held') || !list.some((p) => !p.isBot)
+            || (f.firstHeldAt !== null && this.clock - f.firstHeldAt >= FORMATION_WAIT_S) || this.clock - f.startedAt >= FORMATION_MAX_S;
+        if (!done) return;
+        this.endFormation();
+        this.onFormationDone?.();
+    }
+
+    // No overtaking on the formation lap: a warning to the driver who passed a car that starts ahead of them, once per
+    // pass (again only after giving the place back). A warning only: the grid order is fixed whatever happens
+    formationPasses(list) {
+        const sc = this.track.scale;
+        for (const p of list) {
+            if (p.isBot || p.formS === undefined) continue;
+            const passed = p.formPassed || (p.formPassed = new Set());
+            for (const q of list) {
+                if (q === p || q.formS === undefined || this.index[q.id] > this.index[p.id]) continue;
+                const ahead = p.formS > q.formS + FORMATION_PASS_M * sc;
+                if (ahead && !passed.has(q.id)) {
+                    passed.add(q.id);
+                    this.io.emit('track_limits', { id: p.id, kind: 'formation_pass', with: q.username });
+                } else if (!ahead && p.formS < q.formS) passed.delete(q.id);
+            }
+        }
+    }
+
+    // Anyone still out goes onto their slot; every car starts lap 1 exactly as a race without a formation lap would
+    endFormation() {
+        this.formation = null;
+        this.wantsFormation = false;
+        for (const p of Object.values(this.players)) {
+            Object.assign(p, { x: p.grid.x, y: p.grid.y, angle: p.grid.angle, vx: 0, vy: 0, speed: 0, steer: 0, lastSafeX: p.grid.x, lastSafeY: p.grid.y,
+                lap: 0, checkpoint: 0, progress: 0, passTimes: { 0: 0 }, lapStart: 0, sectorStart: 0, lastLap: null, sectors: [null, null, null],
+                lapValid: true, lastValid: null, offLimits: false, fromPit: false, limits: 0, wear: 0, wearPerM: p.formWearPerM ?? p.wearPerM,
+                tyreGrip: Tyres.gripOf(p.compound, 0), penalty: 0, jumpStart: false, throttledEarly: false, reacted: false,
+                drs: false, drsAvailable: false, drsEligible: [], tow: 0, stop: null, boxCall: null, inPit: false, limiter: false,
+                ghost: this.settings.ghostStart !== false, form: null, lapS: null, throttleArmed: false });
+            delete p.formWearPerM; delete p.formS; delete p.formPrevS; delete p.formPassed;
+            delete p.bot; // bot driver state from the formation lap (its start hold, its mistakes) starts afresh
+            if (p.nextCompound) this.setNextCompound(p.id, p.nextCompound); // picked during the lap: fitted on the grid
+        }
+        this.incidents = []; this.contacts = new Map(); this.lastDetect = [];
+        this.io.emit('formation', { phase: 'done' });
     }
 
     // Ghost start: cars pass through each other from the grid until past sector 1 of the first lap (or GHOST_MAX_S after

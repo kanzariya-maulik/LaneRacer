@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="css/style.css">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/lobby.css">
+    <link rel="stylesheet" href="css/hud.css">
 </head>
 <body>
 <!-- DIRECTION (lobby). THESIS: the F1 / Forza game menu, played straight: the real 3D car is the screen, menus float over it;
@@ -158,6 +159,12 @@
                                         <option value="0">Contact from lights out</option>
                                     </select>
                                 </label>
+                                <label>Formation lap
+                                    <select id="setting-formation" title="One untimed lap before the lights: every screen finishes loading, then everyone parks on their grid slot">
+                                        <option value="1" selected>On</option>
+                                        <option value="0">Off</option>
+                                    </select>
+                                </label>
                                 <label>Driver help
                                     <select id="setting-help" title="Same for all: every car drives with the help levels you pick">
                                         <option value="choose" selected>Each driver chooses</option>
@@ -272,34 +279,30 @@
         
         <!-- HUD -->
         <div id="hud">
+            <!-- F1 game layout: tower top left, timing box top right, dash bottom centre, map bottom left, menu bottom right -->
             <div id="hud-top">
-                <div class="hud-stat"><span class="hs-label">POS</span><span class="hs-big" id="hud-rank">1</span><span class="hs-small">/<span id="hud-total">1</span></span></div>
-                <div class="hud-stat"><span class="hs-label">LAP</span><span class="hs-big" id="hud-lap">1</span><span class="hs-small" id="hud-laps"></span></div>
-                <div class="hud-stat"><span class="hs-label">PING</span><span class="ping-val" id="hud-ping">—</span><span class="hs-small">ms</span></div>
-                <button id="hud-host" class="hud-stat hud-host hidden" title="Session control (Esc)"><span class="hs-label">HOST</span><span class="hc-icon" aria-hidden="true"></span></button>
+                <button id="hud-host" class="hud-host hidden" title="Pause / session control (Esc)" aria-label="Session control"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></button>
             </div>
-            <!-- One dash card, bottom right: shift lights; gear | speed | DRS; lap time; last / best; sectors; fastest lap -->
+            <div id="timing-box">
+                <div id="sector-panel">
+                    <div class="sec" id="sec-1"><i></i><span>S1</span></div>
+                    <div class="sec" id="sec-2"><i></i><span>S2</span></div>
+                    <div class="sec" id="sec-3"><i></i><span>S3</span></div>
+                </div>
+                <div class="tb-main"><span class="tb-pos"><b id="hud-rank">1</b> / <span id="hud-total">1</span></span><span id="lt-current">--</span></div>
+                <div class="tb-row" id="tb-best"><span class="lt-label">BEST</span><span id="lt-best">--</span></div>
+                <div class="tb-row" id="tb-last"><span class="lt-label">PREVIOUS</span><span id="lt-delta"></span><span id="lt-last">--</span></div>
+            </div>
             <div id="hud-bottom">
+                <div id="form-gauge" class="hidden"><span id="fg-pos">P1</span><div class="fg-bar"><i></i></div><span id="fg-dist">0.0 m</span></div>
                 <div id="cluster">
                     <div id="rev-lights"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
                     <div class="cl-main">
-                        <div class="cl-gear"><div id="hud-gear">1</div><small>GEAR</small></div>
-                        <div class="cl-speed"><span id="hud-speed">0</span><small>KM/H</small></div>
-                        <div class="cl-drs"><div id="drs-badge" class="drs-off" title="DRS: press E (gamepad Y) when green">DRS</div><div id="drs-hint"></div></div>
+                        <div class="cl-tyre"><div id="tc-tyre" class="tc-tyre tyre-M"><span>M</span></div><b id="tc-wear">100 %</b></div>
+                        <div class="cl-gear"><div id="hud-gear">1</div><div id="drs-badge" class="drs-off" title="DRS: press E (gamepad Y) when green">DRS</div></div>
+                        <div class="cl-speed"><small>KM/H</small><span id="hud-speed">0</span></div>
                     </div>
-                    <div id="lap-times">
-                        <div class="lt-row lt-now"><span class="lt-label">LAP</span><span id="lt-current">--</span></div>
-                        <div class="lt-pair">
-                            <div class="lt-row"><span class="lt-label">LAST</span><span id="lt-last">--</span><span id="lt-delta"></span></div>
-                            <div class="lt-row"><span class="lt-label">BEST</span><span id="lt-best">--</span></div>
-                        </div>
-                        <div id="sector-panel">
-                            <div class="sec" id="sec-1"><i></i><span>S1</span><em class="sec-best"></em></div>
-                            <div class="sec" id="sec-2"><i></i><span>S2</span><em class="sec-best"></em></div>
-                            <div class="sec" id="sec-3"><i></i><span>S3</span><em class="sec-best"></em></div>
-                        </div>
-                        <div class="lt-row lt-fl"><span class="lt-label"><svg class="stopwatch" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13.5" r="8" fill="none" stroke="currentColor" stroke-width="2.4"/><rect x="9.5" y="1.5" width="5" height="2.6" rx="1" fill="currentColor"/><path d="M12 13.5V8.6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="M18.4 5.6l1.6-1.6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></span><span id="lt-fl-who"></span><span id="lt-fl">--</span></div>
-                    </div>
+                    <div id="drs-hint"></div>
                 </div>
             </div>
             <canvas id="minimap" width="220" height="220"></canvas>
@@ -307,10 +310,9 @@
             <pre id="netstats" class="hidden"></pre>
             <div id="pit-limiter" class="hidden">PIT LIMITER 80</div>
             <div id="box-msg" class="hidden"></div>
-            <div id="pit-banner" class="hidden"></div>
             <button type="button" id="cam-btn" title="Camera: chase, T-cam, cockpit (V)">CAM</button>
             <div id="tyre-card" class="hidden">
-                <div class="tc-head"><div id="tc-tyre" class="tc-tyre tyre-M"><span>M</span></div><div><b id="tc-wear">100 %</b><small id="tc-next">NEXT: H (auto)</small></div></div>
+                <div id="tc-next"></div>
                 <button type="button" id="tc-box" class="hidden" title="Box, box (B)">BOX</button>
                 <div id="tc-pick" class="hidden">
                     <div class="tc-title">PICK YOUR TYRES</div>
@@ -320,15 +322,19 @@
                     <div id="tc-confirm" class="hidden"></div>
                 </div>
             </div>
-            <div id="sector-flash" class="hidden"></div>
-            <div id="race-msg" class="hidden"></div>
             <div id="coach-line" class="hidden"></div>
             <div id="quali-clock" class="hidden"></div>
 <div id="entry-cue" class="hidden"></div>
 <div id="ko-chip" class="hidden"></div>
 <div id="quali-break" class="hidden"><div id="qb-head"></div><ol id="qb-list"></ol><div id="qb-foot"></div></div>
-<div id="steward-card" class="hidden"><b id="sc-head"></b><small id="sc-tip"></small></div>
-            <div id="ghost-tag" class="hidden">GHOST — FIRST CORNERS</div>
+            <!-- Messages stack top centre, so a lap banner, a sector flash and a steward card never cover each other -->
+            <div id="hud-msgs">
+                <div id="ghost-tag" class="hidden">GHOST — FIRST CORNERS</div>
+                <div id="pit-banner" class="hidden"></div>
+                <div id="race-msg" class="hidden"></div>
+                <div id="sector-flash" class="hidden"></div>
+                <div id="steward-card" class="hidden"><b id="sc-head"></b><small id="sc-tip"></small></div>
+            </div>
             <div id="fl-card" class="hidden">
                 <div class="fl-head"><svg class="stopwatch" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13.5" r="8" fill="none" stroke="currentColor" stroke-width="2.4"/><rect x="9.5" y="1.5" width="5" height="2.6" rx="1" fill="currentColor"/><path d="M12 13.5V8.6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="M18.4 5.6l1.6-1.6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg><span>FASTEST LAP</span></div>
                 <div class="fl-body"><span class="fl-team"></span><span class="fl-name"></span><span class="fl-time"></span></div>
@@ -338,9 +344,10 @@
                 <span class="light"></span><span class="light"></span><span class="light"></span><span class="light"></span><span class="light"></span>
             </div>
 
-            <!-- Leaderboard (top right) -->
+            <!-- Timing tower: the session, the lap, the five cars around you -->
             <div id="leaderboard">
-                <div id="tt-head" title="Press T or tap to switch"><span>TIMING</span><span id="tt-mode">INTERVAL</span></div>
+                <div id="tt-head" title="Press T or tap to switch gaps"><span id="tt-session">RACE</span><span id="tt-mode" hidden>INTERVAL</span></div>
+                <div class="tt-lap">LAP <b id="hud-lap">1</b><span id="hud-laps"></span></div>
                 <ol id="leaderboard-list"></ol>
             </div>
         </div>
@@ -373,7 +380,7 @@
 
     <div id="race-results" class="hidden">
         <div class="rr-card">
-            <div class="rr-head"><span class="rr-flag"></span><span class="rr-title">RACE CLASSIFICATION</span><span id="rr-track"></span><button id="rr-close" title="Close">✕</button></div>
+            <div class="rr-head"><span class="rr-flag"></span><span class="rr-title">RACE CLASSIFICATION</span><span id="rr-track"></span><button id="rr-close" title="Close" aria-label="Close"><svg class="x-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg></button></div>
             <div class="rr-cols"><span>POS</span><span></span><span>DRIVER</span><span></span><span>LAPS</span><span>BEST LAP</span><span>PEN</span><span>TIME</span></div>
             <ol id="rr-list"></ol>
             <div class="rr-foot">Times include penalties · <span id="rr-count">back to lobby in 15 s</span></div>
@@ -383,7 +390,7 @@
     <!-- Host session control (Esc / HOST button) and the pause screen everyone sees -->
     <div id="session-panel" class="hidden">
         <div class="rr-card hc-card" role="dialog" aria-labelledby="hc-title">
-            <div class="rr-head"><span class="hc-icon" aria-hidden="true"></span><span class="rr-title" id="hc-title">SESSION CONTROL</span><button id="hc-close" title="Close (Esc)">✕</button></div>
+            <div class="rr-head"><span class="hc-icon" aria-hidden="true"></span><span class="rr-title" id="hc-title">SESSION CONTROL</span><button id="hc-close" title="Close (Esc)" aria-label="Close"><svg class="x-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg></button></div>
             <p id="hc-note" class="hc-note"></p>
             <div id="hc-host">
                 <div class="hc-actions">

@@ -27,7 +27,7 @@ function fakeIo() {
             on(ev, fn) { this.handlers[ev] = fn; },
             emit(ev, data) { this.sent.push([ev, data]); },
             broadcast: { emit() {} },
-            fire(ev, data) { this.handlers[ev]?.(data); },
+            fire(ev, ...args) { this.handlers[ev]?.(...args); },
         };
         io.handlers.connection(s);
         io.clients.push(s);
@@ -46,7 +46,7 @@ function advance(t, ms) {
 function join(io, id, teamId, quali) {
     const s = io.connect(id);
     s.fire('join_lobby', { username: id.toUpperCase(), teamId });
-    if (quali !== undefined) s.fire('update_settings', { trackId: 'monza', maxLaps: 1, qualifying: !!quali, qualiScale: 0.02 }); // short clocks
+    if (quali !== undefined) s.fire('update_settings', { trackId: 'monza', maxLaps: 1, qualifying: !!quali, qualiScale: 0.02, formationLap: false }); // short clocks; formation lap tests opt in
     else s.fire('toggle_ready', true);
     return s;
 }
@@ -67,7 +67,7 @@ test('everyone leaving during countdown cancels it, so a new host gets exactly o
     b.fire('disconnect');
 });
 
-test('lights wait for a slow browser to draw the grid, at most 30 s', (t) => {
+test('lights wait for a slow browser to draw the grid, at most 60 s', (t) => {
     t.mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
     const io = fakeIo();
     setupSocketManager(io, noNet);
@@ -82,7 +82,7 @@ test('lights wait for a slow browser to draw the grid, at most 30 s', (t) => {
 
     a.fire('restart_session'); // b never draws: the start goes ahead without it
     const lit = io.events('lights').length;
-    advance(t, 29000);
+    advance(t, 59000);
     assert.strictEqual(io.events('lights').length, lit, 'lights before the wait ran out');
     advance(t, 2000);
     assert.ok(io.events('lights').length > lit, 'a stuck browser held the start forever');
@@ -379,5 +379,101 @@ test('every connection is told the server boot id, the same for all, so a tab fr
     const boot = (s) => s.sent.find(([ev]) => ev === 'boot')?.[1];
     assert.ok(typeof boot(a) === 'string' && boot(a).length > 0, 'no boot id');
     assert.strictEqual(boot(b), boot(a));
+    a.fire('disconnect'); b.fire('disconnect');
+});
+
+// Formation lap: the host's setting on, one human on the grid
+function formationRace(t, io) {
+    const a = join(io, 'a', 'ferrari', 0);
+    a.fire('update_settings', { formationLap: true });
+    a.fire('start_game');
+    advance(t, 100);
+    return { a, car: () => io.events('game_init').at(-1).players.a };
+}
+// The car back on its slot after the lap: the next tick holds it, and with every car held the formation ends
+const parkOnSlot = (car) => { car.form.half = true; car.form.phase = 'snap'; };
+
+test('formation lap: COUNTDOWN → FORMATION once drawn; the lights start only after it is done', (t) => {
+    t.mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
+    const io = fakeIo();
+    setupSocketManager(io, noNet);
+    const { a, car } = formationRace(t, io);
+    assert.strictEqual(io.events('status_change').at(-1), 'FORMATION');
+    assert.deepStrictEqual(io.events('formation').at(-1), { phase: 'start' });
+    advance(t, 10000);
+    assert.deepStrictEqual(io.events('lights'), [], 'lights during the formation lap');
+    parkOnSlot(car());
+    advance(t, 100);
+    assert.strictEqual(io.events('status_change').at(-1), 'COUNTDOWN');
+    advance(t, 8000);
+    assert.deepStrictEqual(io.events('lights').map((l) => l.count), [1, 2, 3, 4, 5, 0]);
+    assert.strictEqual(io.events('status_change').at(-1), 'RACE');
+    a.fire('update_settings', { formationLap: false });
+    a.fire('disconnect');
+});
+
+test('formation lap: a host restart during it starts a fresh one, and the old one never fires lights', (t) => {
+    t.mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
+    const io = fakeIo();
+    setupSocketManager(io, noNet);
+    const { a, car } = formationRace(t, io);
+    const old = car();
+    a.fire('restart_session');
+    advance(t, 100);
+    assert.strictEqual(io.events('status_change').at(-1), 'FORMATION');
+    parkOnSlot(old); // the old race is stopped: nothing happens
+    advance(t, 1000);
+    assert.strictEqual(io.events('status_change').at(-1), 'FORMATION');
+    parkOnSlot(car());
+    advance(t, 9000);
+    assert.deepStrictEqual(io.events('lights').map((l) => l.count), [1, 2, 3, 4, 5, 0], 'one set of lights');
+    a.fire('update_settings', { formationLap: false });
+    a.fire('disconnect');
+});
+
+test('track_data: a lobby browser can fetch the selected track to build and compile it before the start; unknown ids get nothing', () => {
+    const io = fakeIo();
+    setupSocketManager(io, noNet);
+    const s = io.connect('x');
+    let got = null, bad = 'unset';
+    s.fire('track_data', 'monza', (t) => { got = t; });
+    s.fire('track_data', 'nowhere', (t) => { bad = t; });
+    assert.strictEqual(got?.id, 'monza');
+    assert.ok(got.path.length > 100 && got.startPositions.length >= 20);
+    assert.strictEqual(bad, null);
+    s.fire('track_data', 'monza'); // no callback: ignored, no throw
+    s.fire('disconnect');
+});
+
+test('race over → lobby → a race on another track: the new track is sent and the start waits for every browser again', (t) => {
+    t.mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
+    const io = fakeIo();
+    setupSocketManager(io, noNet);
+    const a = join(io, 'a', 'ferrari', 0), b = join(io, 'b', 'haas');
+    a.fire('update_settings', { trackId: 'monza', maxLaps: 1, qualifying: false, formationLap: false, aiDrivers: true, aiLevel: 'pro', aiCount: 1 });
+    b.fire('toggle_ready', true);
+    a.fire('start_game');
+    assert.strictEqual(io.events('game_init').at(-1).track.id, 'monza');
+    // Nobody here drives: the bot wins, the rest are classified 60 s later, results for 15 s, then the lobby
+    for (let s = 0; s < 400 && !io.events('status_change').includes('FINISHED'); s++) advance(t, 1000);
+    assert.ok(io.events('status_change').includes('FINISHED'), 'the race never finished: ' + io.events('status_change').join(','));
+    advance(t, 15500);
+    const lobby = io.events('lobby_state_sync').at(-1);
+    assert.strictEqual(lobby.status, 'LOBBY');
+
+    a.fire('update_settings', { trackId: 'spa' });
+    b.fire('toggle_ready', true);
+    b.slow = true; // still building Spa (its lobby prebuild was for Monza)
+    const inits = io.events('game_init').length, lit = io.events('lights').length;
+    a.fire('start_game');
+    const init = io.events('game_init').at(-1);
+    assert.strictEqual(io.events('game_init').length, inits + 1);
+    assert.strictEqual(init.track.id, 'spa', 'the new session is on the new track');
+    assert.ok(Object.values(init.players).every((p) => !p.finished && p.lap <= 1), 'nothing carried over from the last race');
+    advance(t, 10000);
+    assert.strictEqual(io.events('lights').length, lit, 'lights before b was ready on the new track');
+    b.fire('world_drawn');
+    advance(t, 1500);
+    assert.ok(io.events('lights').length > lit, 'the start never came after b was ready');
     a.fire('disconnect'); b.fire('disconnect');
 });

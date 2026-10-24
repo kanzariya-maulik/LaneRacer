@@ -11,10 +11,11 @@ const LEVELS = {
 };
 const SPREAD = 0.015; // ±1.5 % pace around the level
 
-// Fictional names only (never real drivers)
-const NAMES = ['Arlo Vance', 'Mika Strand', 'Teo Lindqvist', 'Ravi Sethi', 'Jonah Pryce', 'Luca Ferraro', 'Nils Achterberg',
-    'Owen Hale', 'Kenji Arata', 'Mateo Quiroga', 'Felix Morrow', 'Sami Korhonen', 'Ezra Blackwood', 'Dario Conti', 'Hugo Delmas',
-    'Ilya Petrenko', 'Callum Reid', 'Bruno Talavera', 'Yusuf Demir', 'Anders Holm', 'Leo Marchetti', 'Theo Garnier', 'Rafa Ibarra', 'Max Eklund'];
+// F1 legends (the host asked for them): world champions and greats across the eras, 24 so a full grid never repeats one
+const NAMES = ['Ayrton Senna', 'Alain Prost', 'Michael Schumacher', 'Niki Lauda', 'Juan Manuel Fangio', 'Jim Clark', 'Jackie Stewart',
+    'Nelson Piquet', 'Nigel Mansell', 'Mika Hakkinen', 'Fernando Alonso', 'Sebastian Vettel', 'Lewis Hamilton', 'Kimi Raikkonen',
+    'Graham Hill', 'James Hunt', 'Emerson Fittipaldi', 'Jack Brabham', 'Stirling Moss', 'Gilles Villeneuve', 'Damon Hill',
+    'Jochen Rindt', 'Alberto Ascari', 'Jenson Button'];
 
 // mulberry32: small, fast, good enough for gameplay randomness
 function rngOf(seed) {

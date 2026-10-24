@@ -14,6 +14,7 @@ const LANE_RATE_MS = 3;                                // sideways moves at most
 const PIT_APPROACH_M = 40, PIT_SETUP_M = 300, PIT_DEC = 10; // box called: over to the pit side and down to the limit from PIT_SETUP_M, the pit assist steers in for the last PIT_APPROACH_M
 // Tuned by lap tests (test/botDriver.test.js): steering aim (s of travel, m bounds), steering gain (the grip cap makes the
 // real lock smaller than the geometric one), line speed × base / pace
+const FORMATION_PACE = 0.6; // share of race pace on the formation lap
 const PACE = { base: 1, lookS: 0.25, lookMin: 8, lookMax: 60, gain: 4 };
 
 const lines = new WeakMap();
@@ -76,9 +77,12 @@ function state(p) {
     return p.bot || (p.bot = { idx: null, lane: 0, passSide: 0, defend: 0, defended: false, err: null, prevPhase: 0, followS: 0, press: false, wantPit: false, bog: undefined });
 }
 
+const FRONT_M = 80, FRONT_W = 2.5; // a car this close ahead and this close sideways is in front of me whatever my plan
 const CAR_M = 5.6, PASS_M = 3.5, DEFEND_M = 3, BLUE_M = 3.5; // metres
 const START_AGG = 0.25, START_LATE = 1.03, START_MAX_S = 25; // the run to turn 1: more willing to attack, alongside brakes a touch later; never past 25 s
+const CREEP_MS = 3; // m/s: walking pace round a stopped car
 const PATH_M = 3, ROOM_M = 3.5; // in my path within PATH_M sideways; side by side, never aim closer than ROOM_M // a car this close sideways is in my path (2 m wide car + margin)
+const FOLLOW_DEC_BY = { hard: 11, pro: 14 }, FOLLOW_GAP_BY = { hard: 5, pro: 4 }; // easy / medium keep the cautious defaults
 const FOLLOW_DEC = 8, FOLLOW_GAP_M = 6, AHEAD_M = 400; // cautious braking (cornering eats into it), so look far enough to stop from top speed // m/s² of braking the follow cap allows for (well under the car's limit), metres kept clear
 
 // Cars around me in track terms: f = metres along the lap ahead (+) / behind (−), l = their offset from the centreline
@@ -102,7 +106,9 @@ function scan(p, ctx, v) {
         const e = { o, f, l: oo - mine, off: oo, v: Math.abs(o.speed) / sc };
         if (o === b.passCar) r.target = e;
         if (Math.abs(f) < CAR_M && Math.abs(e.l) < 4) r.alongside = e;
-        const myPath = p.inPit ? Math.abs(e.l) < PATH_M : Math.abs(oo - (t.racingLine.offset[oi] / sc + b.lane)) < PATH_M; // in the lane: its cars
+        // In my path: in the lane my line takes at their point, or physically in front of me now (I may be off my planned lane:
+        // squeezed, rejoining, steering lag — missing those was most of the rear-ends). In the pit lane: its cars
+        const myPath = p.inPit ? Math.abs(e.l) < PATH_M : Math.abs(oo - (t.racingLine.offset[oi] / sc + b.lane)) < PATH_M || (f > CAR_M && f < FRONT_M && Math.abs(e.l) < FRONT_W); // fully ahead: overlapping is alongside
         if (f > 0 && f < AHEAD_M && myPath) { if (!r.ahead || f < r.ahead.f) r.ahead = e; }
         else if (f < 0 && f > -60 && Math.abs(e.l) < 4) {
             if (!r.behind || f > r.behind.f) r.behind = e;
@@ -127,7 +133,11 @@ function racecraft(p, b, ctx, v, here, r, vt) {
             b.passCar = a.o;
         }
         if (b.passSide && ph === 2 && a.f > CAR_M * 0.5) b.passSide = 0; // not alongside by the braking point: back in line
-        cap = Math.sqrt(Math.max(0, a.v * a.v + 2 * FOLLOW_DEC * (a.f - CAR_M - FOLLOW_GAP_M))); // no ramming: can always stop behind it
+        const dec = FOLLOW_DEC_BY[ai.level] ?? FOLLOW_DEC, gap = FOLLOW_GAP_BY[ai.level] ?? FOLLOW_GAP_M; // pros follow closer: they trust their brakes
+        cap = Math.sqrt(Math.max(0, a.v * a.v + 2 * dec * (a.f - CAR_M - gap))); // no ramming: can always stop behind it
+        // Going round a car that's (almost) stopped (stalled, AFK, still loading): creep, don't stop. Held at 0 m/s right behind
+        // it the car can't steer out, and the race never ended
+        if (b.passSide && a.o === b.passCar && a.v < 2) cap = Math.max(cap, CREEP_MS);
         if (a.f < 1.5 * v) b.followS += ctx.dt;
     } else if (!r.target || r.target.f < -CAR_M || r.target.f > AHEAD_M) { b.passSide = 0; b.passCar = null; } // out of my lane isn't done: done once it's behind me
     if (b.passSide) laneT = b.passSide * PASS_M;
@@ -177,6 +187,7 @@ function drive(p, ctx) {
     const here = b.idx;
     let factor = (PACE.base / ai.pace) * Math.sqrt(p.tyreGrip ?? 1);
     if (ctx.mode === 'quali' && p.lapStart === null) factor *= 0.9; // out-lap
+    if (ctx.formation) factor *= FORMATION_PACE; // formation lap: a steady lap, not a race one
     // A mistake at a corner entry, never with someone right there; it lasts until the corner is done (or 2.5 s)
     const phNow = t.racingLine.phase[here];
     if (b.start) { // turn 1: the column hold ends at its braking point (everyone funnels), the attack once it's done

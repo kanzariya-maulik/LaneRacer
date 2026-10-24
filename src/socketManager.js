@@ -8,16 +8,17 @@ const { fillGrid } = require('./game/bots/roster');
 const TRACKS = Track.loadAll(); // throws at startup if track data is missing
 const RESULTS_MS = 8000;
 const FINISH_MS = 15000; // results screen time before everyone returns to the lobby
-// The lights wait at most this long for a slow (or stuck) browser to draw the grid: a laptop 4x slower than an M1 Pro takes
-// ~7 s (track build 2.2 s, first-frame shaders 4.3 s); twice that again still fits
-const DRAWN_WAIT_MS = 30000;
+// The start waits at most this long for a slow (or stuck) browser to be ready (game3d.js getReady): on a cold shader cache,
+// Ultra, a browser that didn't prebuild in the lobby needs ~30-40 s (models, ~100 pipelines, frames settling); at 30 s the
+// start went without it and that screen froze through the lights while everyone else drove off
+const DRAWN_WAIT_MS = 60000;
 
 const state = {
-    status: 'LOBBY', // LOBBY, QUALIFYING, QUALI_RESULTS, COUNTDOWN, RACE, FINISHED
+    status: 'LOBBY', // LOBBY, QUALIFYING, QUALI_RESULTS, COUNTDOWN, FORMATION, RACE, FINISHED
     players: {},
     hostId: null,
     bots: [], // this session's AI drivers (never lobby players)
-    settings: { trackId: 'monza', maxLaps: 3, qualifying: true, qualiFormat: 'full', collisions: true, tyreWear: true, contactPenalties: true, ghostStart: true, timeOfDay: 'day', outLaps: 1, qualiLaps: 2, aiDrivers: false, aiLevel: 'medium', aiCount: 21, help: { mode: 'choose', steer: 100, brake: 100 } }
+    settings: { trackId: 'monza', maxLaps: 3, qualifying: true, qualiFormat: 'full', collisions: true, tyreWear: true, contactPenalties: true, ghostStart: true, formationLap: true, timeOfDay: 'day', outLaps: 1, qualiLaps: 2, aiDrivers: false, aiLevel: 'medium', aiCount: 21, help: { mode: 'choose', steer: 100, brake: 100 } }
 };
 
 let gameInstance = null;
@@ -159,7 +160,7 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
         // Resume: a RESUME_S count for everyone first (cars held), so nobody is caught off guard; pausing again calls it off
         socket.on('pause_session', (on) => {
             const g = gameInstance;
-            if (!isHost() || !g || !['QUALIFYING', 'RACE'].includes(state.status)) return;
+            if (!isHost() || !g || !['QUALIFYING', 'FORMATION', 'RACE'].includes(state.status)) return;
             if (on) {
                 g.resuming = 0;
                 g.paused = true;
@@ -180,7 +181,7 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
             }, RESUME_S * 1000);
         });
         socket.on('restart_session', () => {
-            if (!isHost() || !gameInstance || !['QUALIFYING', 'COUNTDOWN', 'RACE'].includes(state.status)) return;
+            if (!isHost() || !gameInstance || !['QUALIFYING', 'COUNTDOWN', 'FORMATION', 'RACE'].includes(state.status)) return;
             const racers = Object.keys(gameInstance.players).map(driverById).filter(Boolean);
             const quali = gameInstance.mode === 'quali';
             clearTimers(); // the old session's lights must not fire into the new one
@@ -211,6 +212,8 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
             io.emit('player_ready_sync', { id: socket.id, isReady: !!isReady });
         });
 
+        // The lobby builds and compiles the selected track ahead of the start (game3d.js lobbyPrebuild): same data as game_init
+        socket.on('track_data', (id, ack) => { if (typeof ack === 'function') ack(TRACKS[id] || null); });
         socket.on('update_settings', (settings) => {
             if (socket.id !== state.hostId || state.status !== 'LOBBY') return;
             state.settings = lobby.sanitizeSettings(state.settings, settings, Track.TRACK_IDS);
@@ -328,12 +331,23 @@ function startRace(io, grid) {
             io.emit('session', { phase: 'RACE', endsInMs: null });
         }, 5000 + 500 + Math.random() * 2000);
     };
+    // Then the formation lap (host setting, humans on the grid): one untimed lap while every browser finishes loading,
+    // back onto the grid slots, and the lights once Game says the grid has formed
+    const go = () => {
+        onAllDrawn = null;
+        if (gameInstance !== race) return;
+        if (!race.wantsFormation) return lights();
+        setStatus(io, 'FORMATION');
+        race.onFormationDone = () => { if (gameInstance === race) { setStatus(io, 'COUNTDOWN'); lights(); } };
+        race.startFormation();
+        io.emit('formation', { phase: 'start' });
+    };
     notDrawn = new Set(grid.map((p) => p.id).filter((id) => sockets[id]));
-    onAllDrawn = lights;
+    onAllDrawn = go;
     race.start(); // cars are drawn on the grid, frozen until lights out; game_init asks each browser to draw them
-    if (onAllDrawn !== lights) return; // every browser has drawn already
-    if (!notDrawn.size) lights(); // bots only
-    else later(() => onAllDrawn === lights && lights(), DRAWN_WAIT_MS);
+    if (onAllDrawn !== go) return; // every browser has drawn already
+    if (!notDrawn.size) go(); // bots only
+    else later(() => onAllDrawn === go && go(), DRAWN_WAIT_MS);
 }
 
 function finishRace(io) {

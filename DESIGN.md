@@ -46,6 +46,48 @@ colors:
   white-16: "rgba(255, 255, 255, 0.16)"
   white-32: "rgba(255, 255, 255, 0.32)"
   white-55: "rgba(255, 255, 255, 0.55)"
+  # In-race HUD (public/css/hud.css): F1 timing and pit signals, alerts, plates
+  timing-purple: "#a24bf2"
+  timing-yellow: "#ffd400"
+  pit-blue: "#3d8bff"
+  alert-red: "#ff4d4d"
+  fl-time: "#d7b3ff"
+  tyre-medium: "#ffd12e"
+  tyre-hard: "#f2f2f2"
+  hud-plate: "rgba(9, 11, 15, 0.78)"
+  hud-plate-deep: "rgba(9, 11, 15, 0.9)"
+  lamp-hot: "#ff8a80"
+  lamp-red: "#ff1e1e"
+  lamp-deep: "#b30000"
+  lamp-glow: "rgba(255, 30, 30, 0.75)"
+  drs-ink: "#04140c"
+  lamp-off-edge: "#0b0c0f"
+  lamp-off-core: "#26282d"
+  tyre-well: "#0d0f13"
+  flag-black: "#111"
+  white: "#fff"
+  pit-blue-text: "#9cc3ff"
+  shift-red: "#ff2a1e"
+  shift-red-glow: "rgba(255, 42, 30, 0.6)"
+  dev-text: "#d1fae5"
+  dev-text-alt: "#a7f3d0"
+  dev-plate: "rgba(0, 0, 0, 0.6)"
+  dev-plate-deep: "rgba(0, 0, 0, 0.7)"
+  ink-70: "rgba(10, 12, 16, 0.7)"
+  go-glow: "rgba(25, 195, 125, 0.45)"
+  go-glow-strong: "rgba(25, 195, 125, 0.6)"
+  kick-red-line: "rgba(255, 107, 107, 0.55)"
+  white-14: "rgba(255, 255, 255, 0.14)"
+  alert-wash-14: "rgba(255, 77, 77, 0.14)"
+  alert-wash-18: "rgba(255, 77, 77, 0.18)"
+  alert-wash-20: "rgba(255, 77, 77, 0.2)"
+  scrim-25: "rgba(3, 4, 6, 0.25)"
+  pit-blue-wash: "rgba(61, 139, 255, 0.18)"
+  pit-blue-glow: "rgba(61, 139, 255, 0.35)"
+  pit-blue-line: "rgba(61, 139, 255, 0.5)"
+  pit-blue-glow-strong: "rgba(61, 139, 255, 0.7)"
+  plate-85: "rgba(9, 11, 15, 0.85)"
+  plate-92: "rgba(9, 11, 15, 0.92)"
 typography:
   display:
     fontFamily: "Saira, Outfit, system-ui, sans-serif"
@@ -152,12 +194,44 @@ typography:
     fontFamily: "Saira, Outfit, system-ui, sans-serif"
     fontSize: "0.64rem"
     fontWeight: 700
+  hud-countdown:
+    # FINISH! and the start count
+    fontFamily: "Saira, Outfit, system-ui, sans-serif"
+    fontSize: "clamp(5rem, 14vw, 10rem)"
+    fontWeight: 800
+  hud-countdown-resume:
+    # host resume count 3 2 1 GO
+    fontFamily: "Saira, Outfit, system-ui, sans-serif"
+    fontSize: "clamp(7rem, 22vw, 15rem)"
+    fontWeight: 800
+  hud-countdown-label:
+    # GET READY plate
+    fontFamily: "Saira, Outfit, system-ui, sans-serif"
+    fontSize: "clamp(1rem, 2.4vw, 1.6rem)"
+    fontWeight: 800
+  hud-banner-title:
+    # SPECTATING / WATCHING slab
+    fontFamily: "Saira, Outfit, system-ui, sans-serif"
+    fontSize: "1.4rem"
+    fontWeight: 800
+  hud-card-title:
+    # race classification and session control heads
+    fontFamily: "Saira, Outfit, system-ui, sans-serif"
+    fontSize: "1.5rem"
+    fontWeight: 800
 rounded:
   tick: "1px"
   chip: "4px"
   control: "6px"
   panel: "10px"
   pill: "999px"
+  # HUD radii are em so they scale with the window-height HUD font (see HUD)
+  hud-tick: "0.2em"
+  hud-chip: "0.3em"
+  hud-control: "0.35em"
+  hud-plate: "0.6em"
+  hud-pill: "1em"
+  hud-dash: "1.2em"
 spacing:
   gutter: "clamp(16px, 2.2vw, 36px)"
   panel-pad: "18px"
@@ -224,7 +298,7 @@ components:
 
 # Design System: LAN Race
 
-Scope: the lobby (`#lobby-screen`, `public/css/lobby.css`, and the 3D showroom behind it in `public/js/game3d.js`). The in-race HUD in `public/css/style.css` is an older surface with its own look (Outfit, broadcast-style glass). It is out of scope here, and none of its values belong to this system.
+Scope: the lobby (`#lobby-screen`, `public/css/lobby.css`, and the 3D showroom behind it in `public/js/game3d.js`) and the in-race overlays (`#game-screen`, `#race-results`, `#session-panel`, `public/css/hud.css`); see the HUD section.
 
 ## Overview
 
@@ -380,5 +454,19 @@ A Studio Black room with fog from 12 to 30 units, a matte floor, a dark turntabl
 - **Don't** add `backdrop-filter` to panels; the drawer is the only blurred surface.
 - **Don't** introduce a second accent hue, or use green, amber or ping colours as decoration.
 - **Don't** fall back to the web-form lobby of three equal dark cards; the car is the screen.
-- **Don't** bring HUD values (Outfit, the HUD's glass treatment, `style.css` colours) into lobby surfaces.
+- **Don't** use the F1 timing colours (purple, personal-best green, yellow) or the pit blue outside timing and pit states.
+- **Don't** add a HUD readout that repeats one already on screen (position lives in the timing box, ping behind F3).
 - **Don't** put red on borders, headings or panel chrome.
+
+## HUD (in-race overlays)
+
+**North Star: "Edges only, nothing twice."** The race overlays carry the lobby's world onto the track: the same Saira caps, near-black unblurred plates with hairlines, skewed broadcast ticks and team colour for identity. They are an Operate surface read at 300 km/h, so the middle of the screen is the road, and every readout appears once.
+
+- **Placement (the F1 game layout):** timing tower top left (RACE / QUALIFYING, a LAP x / y band, then the five cars around you with full names, ringed tyre letter and gap; T switches gaps, announced by a banner), your timing box top right (S1–S3 strip that fills with timing colours, position / total and the running lap over a team-colour underline, then BEST and PREVIOUS once they exist), the dash bottom centre (tyre wear ring, gear with DRS under it, speed; moves bottom right in the cockpit, clear of the wheel), the plate-less track map bottom left with the pit-stop card and fastest-lap card above it, the host menu ≡ bottom right, the start lights as five round lamps. Messages stack top centre in `#hud-msgs`; the coach line and entry cue sit above the dash. Car name tags are a dark plate with a team tick and the name in caps.
+- **Removed as redundant:** the POS / PING / LAP strip (position lives in the timing box, ping in F3, lap in the tower), AI and help tags in the tower (they stay in the classification), the fastest-lap row and session-best sector times in the dash (the purple card and tower stopwatch say it), the GEAR label, the DRS hint unless DRS can open, the tyre plan until a stop is called, the BOX button for keyboards until called (B), and "PIT LANE" in the session clock (the limiter slab says it).
+- **Sizing:** everything inside `#hud` is em from `font-size: clamp(11px, 1.85vh, 17px)`; `--pad` is fixed at 1.4 of that so every edge inset matches. Radii scale with it (0.2–0.6em), which is why HUD radii are em, not the lobby's px steps.
+- **Message slab:** plate-deep fill, hairline, and a skewed 0.32em tone tick in front: red for trouble, amber for warnings, pit blue for pit and box, green for good news from the stewards, white for neutral confirmations.
+- **Timing colours:** purple session best, green personal best, yellow no improvement, grey invalid; on sector bars, the sector flash, lap times and the tower only.
+- **Formation lap:** the tower head reads FORMATION LAP (no LAP band), the timing box shows no lap time, the session bar counts GRID FORMING · 0:30 once the first human is parked. Back at the grid a stop gauge sits above the dash: `P<n>`, a bar filling toward the mark, the distance left; green inside 1 m, alert red past the mark, IN POSITION when held. The player's own grid slot is outlined in their team colour (flat, unlit, pulsing until held).
+- **Start lights:** the F1 gantry, five black pods of two lamps each.
+- **Full-screen moments:** classification and session panel are lobby plates (0.92) with a white headline, hairline rows, the pos box inverted for you; the countdown label is a white skewed plate.

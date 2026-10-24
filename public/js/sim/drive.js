@@ -130,6 +130,9 @@ export function pitAssist(p, t) {
         const turn = Math.abs(Math.atan2(Math.sin(b - a), Math.cos(b - a)));
         if (turn > 1e-3) want = Math.min(want, Math.sqrt((ASSIST_LAT * CURVE_SPAN_M) / turn + 2 * ASSIST_DEC * d));
     }
+    // ...and for the turn it is steering right now: still on the track, the mouth can come straight out of a corner (Spa: the
+    // track turns 84° in the 40 m before it) that the lane's own bends know nothing about; at the lane's speed it ran wide
+    want = Math.min(want, Math.sqrt(ASSIST_LAT / Math.max(Math.abs(k), 1e-6)));
     if (p.stop?.phase === 'lane') {
         const toGo = Math.max(0, (p.box.s - s) / sc - ASSIST_HANDOVER_M);
         want = Math.min(want, Math.sqrt(ASSIST_ARRIVE_MS * ASSIST_ARRIVE_MS + 2 * ASSIST_DEC * toGo));
@@ -162,10 +165,15 @@ function finalArc(a, l, h, dir, kMax) {
     const arc = arcTo(dir * fx, fy);
     return arc && Math.abs(arc.k) <= kMax ? { dir, k: arc.k, len: arc.len } : null;
 }
+// A car in a slot's frame (a pit box or a grid slot): a = metres along its heading (< 0 short of the mark), l = metres to the
+// side, h = heading error, d = distance
+export function slotFrame(p, slot, sc) {
+    const cb = Math.cos(slot.angle), sb = Math.sin(slot.angle), dx = (p.x - slot.x) / sc, dy = (p.y - slot.y) / sc;
+    const a = dx * cb + dy * sb, l = -dx * sb + dy * cb;
+    return { a, l, h: Math.atan2(Math.sin(p.angle - slot.angle), Math.cos(p.angle - slot.angle)), d: Math.hypot(a, l) };
+}
 export function guideToBox(p, t) {
-    const b = p.box, sc = t.scale, cb = Math.cos(b.angle), sb = Math.sin(b.angle);
-    const dx = (p.x - b.x) / sc, dy = (p.y - b.y) / sc, a = dx * cb + dy * sb, l = -dx * sb + dy * cb, d = Math.hypot(a, l);
-    const h = Math.atan2(Math.sin(p.angle - b.angle), Math.cos(p.angle - b.angle)), v = p.speed / sc;
+    const b = p.box, sc = t.scale, { a, l, h, d } = slotFrame(p, b, sc), v = p.speed / sc;
     // On the mark, or would stop on it braking now (~15 m/s², straight on): stop
     const sd = (v * Math.abs(v)) / 30, sa = a + sd * Math.cos(h), sl = l + sd * Math.sin(h);
     if (d < GUIDE_ON_MARK_M || Math.hypot(sa, sl) < GUIDE_ON_MARK_M) return { steer: 0, throttle: v < -0.05 ? 1 : 0, brake: v > 0.05 ? 1 : 0, drs: false };
@@ -215,8 +223,39 @@ export function guideToBox(p, t) {
         throttle: fwd ? push : hold, brake: fwd ? hold : push, drs: false };
 }
 
+// Formation lap, back at the grid (Game.updateFormation sets p.form.phase). The player always drives: 'approach' only nudges
+// the steering toward the slot's centre line; 'snap' slides a car stopped on its mark the last centimetres; 'held' keeps it
+// there until the lights. Settle: last 50 m, under 80 km/h, at most a third of the lock, fading in as the slot nears
+export const FORM_SETTLE_M = 50, FORM_SETTLE_KMH = 80, FORM_SNAP_M = 1, FORM_SNAP_MS = 1.5, FORM_SNAP_RAD = 0.35, FORM_SNAP_S = 0.5, FORM_HELD_M = 0.02;
+const FORM_NUDGE = 0.35;
+// Steering onto a slot's centre line, aiming a little ahead of the car: an arc to it, as a share of the lock this speed allows
+export function slotSteer(p, slot, t) {
+    const sc = t.scale, v = p.speed / sc, { a, l, h } = slotFrame(p, slot, sc);
+    const L = Math.max(6, Math.abs(a) * 0.5), X = L * Math.cos(h) - l * Math.sin(h), Y = -L * Math.sin(h) - l * Math.cos(h);
+    const k = (2 * Y) / (X * X + Y * Y), lock = (1 + C.ASSIST_STEER * parseAssist(p.assist).steer) * C.MAX_STEER;
+    return Math.atan(k * C.WHEELBASE) / (lock / (1 + Math.abs(v) / C.STEER_FADE));
+}
+export function gridSettle(p, input, t) {
+    const sc = t.scale, v = p.speed / sc;
+    if (p.form?.phase !== 'approach' || Math.abs(v) * 3.6 >= FORM_SETTLE_KMH) return input;
+    const { d } = slotFrame(p, p.grid, sc), want = slotSteer(p, p.grid, t);
+    const nudge = Math.max(-FORM_NUDGE, Math.min(FORM_NUDGE, want)) * Math.max(0, 1 - d / FORM_SETTLE_M);
+    return { ...input, steer: Math.max(-1, Math.min(1, (input.steer || 0) + nudge)) };
+}
+
 export function driveCar(p, input, t, dt) {
     const scale = t.scale, pit = t.pit;
+    const form = p.form?.phase;
+    if (form === 'snap' || form === 'held') {
+        if (form === 'snap') { // eases onto the slot (about FORM_SNAP_S); Game.updateFormation calls it held once there
+            const g = p.grid, k = Math.min(1, dt / (FORM_SNAP_S / 3));
+            p.x += (g.x - p.x) * k; p.y += (g.y - p.y) * k;
+            p.angle += Math.atan2(Math.sin(g.angle - p.angle), Math.cos(g.angle - p.angle)) * k;
+        }
+        p.vx = p.vy = p.speed = 0; p.steer = 0; p.assistBrake = false;
+        return Physics.nearestOnTrack(p.x, p.y, t, p.roadI);
+    }
+    if (form === 'approach') input = gridSettle(p, input, t);
     // Pit stop (Game.updateStop): the game drives — along the lane (pitAssist), onto the mark (guideToBox), parked
     // while the tyres change or a quali car waits; the driver's input is ignored throughout
     const phase = p.stop?.phase;

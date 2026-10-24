@@ -12,6 +12,7 @@ export function stewardText(e) {
         case 'penalty': return { head: `+${e.add} s · Corner cut`, tip: LINE_TIP, tone: 'bad' };
         case 'wide': return { head: 'Wide · lap time not counted', tip: '', tone: 'muted' };
         case 'jump': return { head: `Jump start · +${e.add} s`, tip: 'Wait for all five lights to go out', tone: 'bad' };
+        case 'formation_pass': return { head: 'No overtaking on the formation lap', tip: `Let ${e.with} back past`, tone: 'warn' };
         case 'deleted': return { head: 'Lap deleted · track limits', tip: LINE_TIP, tone: 'warn' };
         default: return null;
     }

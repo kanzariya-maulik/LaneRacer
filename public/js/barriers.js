@@ -89,9 +89,20 @@ function mergedBoxes(list, sc, deep, uvM) {
     return g;
 }
 
+// Every InstancedMesh comes from here. three r186 keeps up to 1024 matrices (64 KB, WebGPU's default uniform limit) in a
+// uniform array named after the mesh's node id: each mesh then gets its own shader, compiled at its first draw and never
+// found in the browser's shader cache (37 pipelines at every race start, stalling the screen). With room for more it reads
+// them as vertex attributes: one shader per material, compiled once. Only `count` copies are drawn
+const ATTRIBUTE_PATH = 65536 / 64 + 1;
+export function instancedMesh(geometry, material, count) {
+    const m = new THREE.InstancedMesh(geometry, material, Math.max(count, ATTRIBUTE_PATH));
+    m.count = count;
+    return m;
+}
+
 // One instanced batch: unit geometry (base at y = 0) scaled per piece
 function batch(geo, mat, list, size, color) {
-    const m = new THREE.InstancedMesh(geo, mat, list.length), o = new THREE.Object3D();
+    const m = instancedMesh(geo, mat, list.length), o = new THREE.Object3D();
     list.forEach((q, i) => {
         o.position.set(q.x, q.y0, q.z);
         o.rotation.set(0, -q.rot, 0);

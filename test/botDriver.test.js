@@ -230,3 +230,42 @@ for (const v0 of [10, 0]) test(`a bot in the Ascari gravel at ${v0} m/s gets bac
     assert.ok(back >= 0, 'still off the road after 15 s');
     assert.strictEqual(hits, 0, 'hit a wall getting out');
 });
+
+// Review (pro bots crashing): most contacts were rear-ends — a car physically right in front, but off the follower's planned
+// lane (squeezed, rejoining, steering lag), wasn't "in my path", so the follow cap never braked for it
+test('a bot brakes for a car physically in front of it even when that car is off its planned lane', () => {
+    const D = require('../src/game/bots/driver'), t = tracks.monza, sc = t.scale, L = D.lineOf(t), here = 40;
+    const at = (metres, lane, speed) => {
+        const j = D.ahead(t, here, metres), q = L.pts[j], N = L.N[j], k = t.path[(j + 1) % t.path.length], ang = Math.atan2(k.y - t.path[j].y, k.x - t.path[j].x);
+        return { x: q.x + N.x * lane * sc, y: q.y + N.y * lane * sc, angle: ang, speed: speed * sc, vx: Math.cos(ang) * speed * sc, vy: Math.sin(ang) * speed * sc, lap: 0, rank: 9 };
+    };
+    // me 3.4 m off the line (squeezed there) but planning the line itself; a slow car 15 m ahead exactly in front of me
+    const me = Object.assign(at(0, 3.4, 25), { id: 'me', ai: { ...fillGrid([], 'pro', 1)[0].ai, mistake: 0 }, tyreGrip: 1, lap: 0, rank: 5 });
+    D.state(me).lane = 0; me.bot.start = null; me.bot.idx = here;
+    const slow = Object.assign(at(15, 3.4, 5), { id: 's' });
+    const r = D.scan(me, { track: t, cars: [me, slow], mode: 'race' }, 25);
+    assert.strictEqual(r.ahead?.o, slow, 'the car in front of me is not seen as ahead');
+    // side by side (overlapping, a metre ahead and 1.9 m across) is alongside, not in front: stopping for it jammed the chicanes
+    const beside = Object.assign(at(1, 3.4 + 1.9, 25), { id: 'beside' });
+    const r2 = D.scan(me, { track: t, cars: [me, beside], mode: 'race' }, 25);
+    assert.notStrictEqual(r2.ahead?.o, beside, 'a car alongside counted as in front');
+});
+
+// Review (pro bots crashing): in a queue every car is "faster" than the one ahead; pulling out into an occupied lane caused
+// the turn-1 pile-ups. A pass starts only into a clear lane
+test('a bot held up by a slower car stays in line while both passing lanes are taken', () => {
+    const D = require('../src/game/bots/driver'), t = tracks.monza, sc = t.scale, L = D.lineOf(t), here = 40;
+    const at = (metres, lane, speed) => { // a car this far down the lap from `here`, `lane` m off the racing line
+        const j = D.ahead(t, here, metres), q = L.pts[j], N = L.N[j], k = t.path[(j + 1) % t.path.length], ang = Math.atan2(k.y - t.path[j].y, k.x - t.path[j].x);
+        return { x: q.x + N.x * lane * sc, y: q.y + N.y * lane * sc, angle: ang, speed: speed * sc, vx: Math.cos(ang) * speed * sc, vy: Math.sin(ang) * speed * sc, lap: 0, rank: 9 };
+    };
+    // the queue: me at 10 m/s, a car 12 m ahead crawling, cars in both passing lanes just behind me
+    const me = Object.assign(at(0, 0, 10), { id: 'me', ai: { ...fillGrid([], 'pro', 1)[0].ai, mistake: 0 }, tyreGrip: 1, lap: 0, rank: 5 });
+    const cars = [me, Object.assign(at(12, 0, 3), { id: 'slow' }), Object.assign(at(-7, 3.5, 11), { id: 'left' }), Object.assign(at(-7, -3.5, 11), { id: 'right' })];
+    const ctx = { track: t, cars, mode: 'race', time: 30, dt: 1 / 60, rng: () => 0.5, frozen: false, toEntryM: () => 1e9 };
+    for (let k = 0; k < 10; k++) D.drive(me, ctx);
+    assert.strictEqual(me.bot.passSide, 0, `pulled out to ${me.bot.passSide}`);
+    cars.splice(2, 2); // the lanes clear: now it goes
+    for (let k = 0; k < 10; k++) D.drive(me, ctx);
+    assert.notStrictEqual(me.bot.passSide, 0);
+});

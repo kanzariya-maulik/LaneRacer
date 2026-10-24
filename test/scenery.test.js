@@ -207,6 +207,26 @@ test('onVerge: true out to the verge edge, false past it', () => {
     }
 });
 
+// The kerb is drawn at road height too: where the verge stops at the white line (a chicane's other leg near, Monza's
+// Rettifilo) a wheel on the kerb took the terrain's height instead, and the car sank into the kerb or rode up over it
+test('onVerge: a wheel on the kerb is on the road surface, wherever the verge ends', () => {
+    for (const id of Track.TRACK_IDS) {
+        const t = Track.load(id);
+        if (!t.z) continue;
+        const P = t.path, n = P.length, vr = { 1: S.vergeReach(t, 1), [-1]: S.vergeReach(t, -1) }, off = [];
+        for (let i = 0; i < n; i++) for (const dir of [1, -1]) {
+            // halfway across the kerb, at the middle of a segment, square to it (the edge can narrow fast: Turn 1 at COTA)
+            const j = (i + 1) % n, kerb = Math.min((dir > 0 ? t.kerbR : t.kerbL)[i], (dir > 0 ? t.kerbR : t.kerbL)[j]);
+            if (!kerb) continue;
+            const a = P[i], b = P[j], h = Math.atan2(b.y - a.y, b.x - a.x), edge = ((dir > 0 ? t.edgeR : t.edgeL)[i] + (dir > 0 ? t.edgeR : t.edgeL)[j]) / 2, o = edge + kerb * 0.5;
+            const q = { x: (a.x + b.x) / 2 - Math.sin(h) * dir * o, y: (a.y + b.y) / 2 + Math.cos(h) * dir * o };
+            if (Math.abs(Physics.nearestOnTrack(q.x, q.y, t).i - i) > 2) continue; // another stretch of road is nearer
+            if (!S.onVerge(t, vr, q.x, q.y)) off.push(`${Math.round(t.cum[i] / t.scale)} m ${dir > 0 ? 'R' : 'L'}`);
+        }
+        assert.deepStrictEqual(off, [], `${id}: kerb off the road surface`);
+    }
+});
+
 test('every circuit has a night: sky darker than its day, light towers to race by, a star field by its real light pollution', async () => {
     const { THEMES, SKIES, NIGHTS, nightOf } = await import('../public/js/themes.js');
     const lum = (hex) => { const n = parseInt(hex.slice(1), 16); return 0.2126 * (n >> 16) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255); };

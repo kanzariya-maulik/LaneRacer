@@ -731,7 +731,7 @@ test('race: a cut lap stays on the board but no longer counts for the fastest la
 
 test('jump start: moving before lights out costs 10 s, once', () => {
     const { events, io: sio } = spy();
-    const g = new Game(sio, [lp('a')], monza, RACE, () => {});
+    const g = new Game(sio, [lp('a')], monza, { ...RACE, formationLap: false }, () => {}); // the lights on the grid (no formation lap first)
     const p = g.players.a;
     p.input = FULL;
     for (let k = 0; k < 60; k++) g.update(); // lights still on
@@ -1357,3 +1357,14 @@ for (const id of Track.TRACK_IDS) {
         }
     });
 }
+
+test('cars in the pit lane never make contact (the game drives them: no penalty for a pit assist bump)', () => {
+    const g = new Game(io, [lp('a'), lp('b')], monza, { ...RACE, formationLap: false }, () => {});
+    g.release();
+    const a = g.players.a, b = g.players.b, m = monza.pit.path[Math.floor(monza.pit.path.length / 2)];
+    for (const p of [a, b]) Object.assign(p, { x: m.x, y: m.y, vx: 0, vy: 0, speed: 0, inPit: true, ghost: false, stop: { phase: 'lane', t: 0, age: 0 } });
+    const prev = Drive.updatePitState; Drive.updatePitState = () => {}; // keep them flagged in the lane for this tick
+    b.x += 1 * monza.scale;
+    try { g.update(); } finally { Drive.updatePitState = prev; }
+    assert.strictEqual(g.contacts.size, 0);
+});

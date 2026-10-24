@@ -278,12 +278,24 @@ function sideOf(P, j, x, y) {
     return -Math.sin(h) * (x - P[j].x) + Math.cos(h) * (y - P[j].y) > 0 ? 1 : -1;
 }
 
-// On the asphalt or its verge (drawn at road height)? Past it the drawn ground is the terrain grid, which can bank down
-// to a lower road (game3d.js puts a car's wheel there on the terrain, not in the air at road height)
+// On the asphalt, its kerb or its verge (all drawn at road height)? Past them the drawn ground is the terrain grid, which
+// can bank down to a lower road (game3d.js puts a car's wheel there on the terrain, not in the air at road height). The
+// kerb counts even where the verge stops at the line (a chicane's other leg near): there a wheel on it took the terrain's
+// height and the car sank into the kerb or rode up over it
 export function onVerge(t, reach, x, y) {
     if (!t.z) return true;
-    const { d, j, k } = nearestSeg(t, x, y), r = reach[sideOf(t.path, j, x, y)], n = t.path.length;
-    return d <= r[j] + (r[(j + 1) % n] - r[j]) * k;
+    const { d, j, k } = nearestSeg(t, x, y), side = sideOf(t.path, j, x, y), r = reach[side], n = t.path.length, m = (j + 1) % n;
+    const lerp = (A) => A[j] + (A[m] - A[j]) * k, edge = side > 0 ? t.edgeR : t.edgeL;
+    return d <= Math.max(lerp(r), lerp(edge) + kerbWidth(t, side > 0 ? 'R' : 'L', j, k));
+}
+// The kerb's width where it's drawn (trackMesh.js: full width from fromM to toM, by metres past the start line)
+function kerbWidth(t, side, j, k) {
+    const kerbs = t.build?.kerbs;
+    if (!kerbs || !t.cum) return 0;
+    const n = t.path.length, total = t.cum[n], at = t.cum[j] + ((j + 1 < n ? t.cum[j + 1] : total) - t.cum[j]) * k;
+    const lap = ((((at - (t.startS || 0)) % total) + total) % total) / t.scale;
+    const q = kerbs.find((b) => b.side === side && (b.fromM <= b.toM ? lap >= b.fromM && lap < b.toM : lap >= b.fromM || lap < b.toM));
+    return q ? q.w * t.scale : 0;
 }
 
 export function terrainGround(t, reach) {

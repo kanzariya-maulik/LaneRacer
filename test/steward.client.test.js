@@ -17,3 +17,7 @@ test('stewardText: every verdict has a headline and a tip that says what to do',
     assert.deepStrictEqual(t({ kind: 'deleted' }), { head: 'Lap deleted · track limits', tip: 'Keep two wheels inside the white line', tone: 'warn' });
     assert.strictEqual(t({ kind: 'nope' }), null);
 });
+
+test('stewardText: formation lap overtake is a warning that says to give the place back', () => {
+    assert.deepStrictEqual(S.stewardText({ kind: 'formation_pass', with: 'MAX' }), { head: 'No overtaking on the formation lap', tip: 'Let MAX back past', tone: 'warn' });
+});

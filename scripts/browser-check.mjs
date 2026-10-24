@@ -1,6 +1,6 @@
 // Drives a local LanRace race in Chrome over the DevTools protocol: screenshots per view, fps, console errors.
 // Uses its own server on PORT 3299 (never the user's 3232) and kills only what it started.
-// node scripts/browser-check.mjs --track monza --level high --time day --views chase,tcam,cockpit --out <dir> [--headed] [--fps 10] [--lose] [--webgl] [--logdepth] [--at countdown] [--eval <js run before screenshots>] [--spots <json: [{ name, pos: [x, y, z], look: [x, y, z] }]>] [--bots <n>] [--cpuprofile <file>] [--vsync] [--team <name>] [--lobbyshots] [--after <js printed after the fps wait>] [--mbps <n>] [--lobby <s>] [--init <js run once the page loads, before joining>] [--cpu <n: CPU n times slower, a weaker laptop>] [--film <s: a screenshot every 0.5 s for s seconds from the start click>] [--quali full|short|oneshot (default off)] [--consoleprofile <file: what the page's console.profile() records>]
+// node scripts/browser-check.mjs --track monza --level high --time day --views chase,tcam,cockpit --out <dir> [--headed] [--fps 10] [--lose] [--webgl] [--logdepth] [--at countdown|formation] [--eval <js run before screenshots>] [--spots <json: [{ name, pos: [x, y, z], look: [x, y, z] }]>] [--bots <n>] [--cpuprofile <file>] [--vsync] [--team <name>] [--lobbyshots] [--after <js printed after the fps wait>] [--mbps <n>] [--lobby <s>] [--init <js run once the page loads, before joining>] [--cpu <n: CPU n times slower, a weaker laptop>] [--film <s: a screenshot every 0.5 s for s seconds from the start click>] [--quali full|short|oneshot (default off)] [--consoleprofile <file: what the page's console.profile() records>] [--chrome <browser binary>] [--formation on|off] [--next <tracks: after the race, a session on each in the same page>] [--lobbynext <s>]
 import { spawn, execSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -15,13 +15,13 @@ mkdirSync(out, { recursive: true });
 if (execSync(`lsof -iTCP:${PORT} -sTCP:LISTEN -t || true`).toString().trim()) { console.error(`port ${PORT} busy`); process.exit(2); }
 const server = spawn('node', ['server.js'], { env: { ...process.env, PORT: String(PORT) }, stdio: ['ignore', 'pipe', 'pipe'] });
 let serverLog = ''; server.stdout.on('data', (d) => (serverLog += d)); server.stderr.on('data', (d) => (serverLog += d));
-const chrome = spawn('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', [
+const chrome = spawn(arg('chrome', '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'), [ // --chrome <binary>: e.g. Chrome for Testing, whose shader cache can be cleared for a cold-cache run
     ...(headed ? [] : ['--headless=new']), `--remote-debugging-port=${DBG}`, '--mute-audio', '--enable-unsafe-webgpu',
     '--no-first-run', '--no-default-browser-check', `--user-data-dir=${out}/.chrome`, '--window-size=1600,900', ...(process.argv.includes('--vsync') ? [] : ['--disable-gpu-vsync', '--disable-frame-rate-limit']), ...extra, 'about:blank'], { stdio: 'ignore' });
 const stop = () => { try { chrome.kill(); } catch {} try { server.kill(); } catch {} };
 process.on('exit', stop);
-// A frozen page never answers DevTools calls: give up after 3 minutes, report what was seen, clean up
-setTimeout(() => { console.log(JSON.stringify({ track, time, level, error: 'timeout: page stopped answering', errors, warnings: warnings.slice(0, 5) })); process.exit(1); }, 180000).unref();
+// A frozen page never answers DevTools calls: give up after 3 minutes (5 more per --next session), report what was seen, clean up
+setTimeout(() => { console.log(JSON.stringify({ track, time, level, error: 'timeout: page stopped answering', errors, warnings: warnings.slice(0, 5) })); process.exit(1); }, 180000 + 300000 * String(arg('next', '')).split(',').filter(Boolean).length).unref();
 
 let ws, id = 0; const pending = new Map(), errors = [], warnings = [];
 const send = (method, params = {}) => new Promise((res) => { const i = ++id; pending.set(i, res); ws.send(JSON.stringify({ id: i, method, params })); });
@@ -75,12 +75,12 @@ try {
         await until(`document.querySelectorAll('.team-card').length > 0`);
         await evalJs(`[...document.querySelectorAll('.team-card')].find((c) => c.getAttribute('aria-label').toLowerCase().includes(${JSON.stringify(String(arg('team')).toLowerCase())}))?.click(); true`);
     }
-    if (arg('lobby')) await wait(Number(arg('lobby')) * 1000); // time in the lobby before joining (downloads run meanwhile)
     if (arg('init')) await evalJs(arg('init'));
+    if (arg('lobby')) await wait(Number(arg('lobby')) * 1000); // time in the lobby before joining (downloads and the lobby prebuild run meanwhile)
     await evalJs(`document.getElementById('username').value = 'Check'; document.getElementById('btn-join').click(); true`);
     await until(`!document.getElementById('host-settings').classList.contains('hidden')`);
     await evalJs(`(() => { const set = (id, v) => { const e = document.getElementById(id); e.value = v; e.dispatchEvent(new Event('change', { bubbles: true })); e.dispatchEvent(new Event('input', { bubbles: true })); };
-        set('setting-track', ${JSON.stringify(track)}); set('setting-time', ${JSON.stringify(time)}); set('setting-quali', ${JSON.stringify(arg('quali', 'off'))}); set('setting-laps', '1'); if (${JSON.stringify(arg('bots', null))}) { set('setting-ai', '1'); set('setting-ai-count', ${JSON.stringify(arg('bots', '0'))}); }
+        set('setting-track', ${JSON.stringify(track)}); set('setting-time', ${JSON.stringify(time)}); set('setting-quali', ${JSON.stringify(arg('quali', 'off'))}); set('setting-laps', '1'); if (${JSON.stringify(arg('formation', null))}) set('setting-formation', ${JSON.stringify(arg('formation', 'on'))}); if (${JSON.stringify(arg('bots', null))}) { set('setting-ai', '1'); set('setting-ai-count', ${JSON.stringify(arg('bots', '0'))}); }
         return true; })()`);
     await wait(500);
     await evalJs(`document.getElementById('btn-start').click(); true`);
@@ -88,7 +88,8 @@ try {
         const st = await evalJs(`typeof clientState !== 'undefined' ? clientState.status : ''`), shot = await send('Page.captureScreenshot', { format: 'jpeg', quality: 50 });
         writeFileSync(`${out}/film-${String(i).padStart(2, '0')}-${st}.jpg`, Buffer.from(shot.result.data, 'base64'));
     }
-    if (arg('at', 'race') === 'countdown') { await until(`typeof clientState !== 'undefined' && clientState.status === 'COUNTDOWN'`, 120000); await wait(1500); }
+    if (arg('at', 'race') === 'formation') { await until(`typeof clientState !== 'undefined' && clientState.status === 'FORMATION' && window.lanraceFps > 0`, 120000); await wait(3000); }
+    else if (arg('at', 'race') === 'countdown') { await until(`typeof clientState !== 'undefined' && clientState.status === 'COUNTDOWN'`, 120000); await wait(1500); }
     else { await until(`typeof clientState !== 'undefined' && ['RACE', 'QUALIFYING'].includes(clientState.status) && window.lanraceFps > 0`, 120000); await wait(3000); } // shaders warm, first frames settled
     // drive forward so the scene moves (motion blur, shadows following)
     await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'w', code: 'KeyW', windowsVirtualKeyCode: 87 });
@@ -122,6 +123,22 @@ try {
         await wait(700);
         const shot = await send('Page.captureScreenshot', { format: 'png' });
         writeFileSync(`${out}/${track}-${sp.name}.png`, Buffer.from(shot.result.data, 'base64'));
+    }
+    // --next spa,suzuka: race on, back to the lobby when it's over, then a session on each next track in the same page (no
+    // reload): the old world must go, the new one be the only one, and frames keep coming
+    for (const nt of String(arg('next', '')).split(',').filter(Boolean)) {
+        await until(`clientState.status === 'LOBBY' && !document.getElementById('host-settings').classList.contains('hidden')`, 600000);
+        await wait(Number(arg('lobbynext', 5)) * 1000); // the lobby prebuild of the new track starts once the setting holds still
+        await evalJs(`(() => { const e = document.getElementById('setting-track'); e.value = ${JSON.stringify(nt)}; e.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+        await wait(Number(arg('lobbynext', 5)) * 1000);
+        await evalJs(`window.__nextAt = performance.now(); document.getElementById('btn-start').click(); true`);
+        await until(`['RACE', 'FORMATION'].includes(clientState.status) && window.lanraceFps > 0`, 180000);
+        await wait(5000);
+        const shot = await send('Page.captureScreenshot', { format: 'png' });
+        writeFileSync(`${out}/next-${nt}.png`, Buffer.from(shot.result.data, 'base64'));
+        const seen = await evalJs(`JSON.stringify({ session: clientState.trackData?.id, worlds: window.lanraceDebug.scene.children.filter((o) => o.userData.trackId).map((o) => o.userData.trackId), fps: window.lanraceFps, status: clientState.status, readyMs: window.__drawnAt ? Math.round(window.__drawnAt - window.__nextAt) : null,
+            stallsAfterReady: (window.__e || []).filter((x) => x.at > (window.__drawnAt || 1e12) && (x.k === 'gap' || x.k === 'submit' || x.k === 'long')).map((x) => x.k + ':' + x.ms) })`);
+        console.log(JSON.stringify({ next: nt, seen: JSON.parse(seen), errors: errors.length }));
     }
     const stats = await evalJs(`document.getElementById('stats')?.textContent || ''`);
     console.log(JSON.stringify({ track, time, level: await evalJs('window.lanraceQuality?.level'), backend, fps, stats, evalOut, errors, warnings: warnings.slice(0, 5) }));

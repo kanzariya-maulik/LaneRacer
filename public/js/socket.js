@@ -176,7 +176,7 @@ setInterval(() => {
 // Ping on the HUD and in the lobby header, coloured for a LAN: green < 35 ms, amber < 80 ms, red beyond
 function showPing(rtt) {
     const level = rtt === null ? '' : rtt < 35 ? 'good' : rtt < 80 ? 'fair' : 'bad';
-    for (const id of ['hud-ping', 'lobby-ping']) {
+    for (const id of ['lobby-ping']) {
         const el = document.getElementById(id);
         if (!el) continue;
         el.textContent = rtt === null ? '—' : Math.round(rtt);
@@ -289,6 +289,7 @@ socket.on('game_init', (data) => {
     clientState.sessionBestIds = data.bestSectorIds ? [...data.bestSectorIds] : [null, null, null];
     clientState.fastestLap = data.fastestLap || null;
     clientState.raceResults = null;
+    clientState.formation = null;
     if (data.session) clientState.session = { phase: data.session.phase, endsAt: Date.now() + data.session.endsInMs };
     clientState.mySectors = [null, null, null];
     clientState.myBestSectors = [null, null, null];
@@ -331,6 +332,13 @@ socket.on('game_meta', (diff) => {
     for (const id in diff) if (clientState.gameState && clientState.gameState[id]) Object.assign(clientState.gameState[id], diff[id]);
     const mine = diff[clientState.me];
     if (mine && ('compound' in mine || 'wearPerM' in mine)) window.syncTyres?.();
+    if (mine && ('form' in mine || 'grid' in mine)) window.syncForm?.();
+});
+
+// Formation lap: start (banner), forming (the rest of the grid has endsInMs), done (the lights take over)
+socket.on('formation', (d) => {
+    clientState.formation = d.phase === 'done' ? null : { ...clientState.formation, phase: d.phase, endsAt: d.endsInMs ? Date.now() + d.endsInMs : clientState.formation?.endsAt ?? null };
+    window.onFormation?.(d);
 });
 
 socket.on('lights', ({ count }) => {
