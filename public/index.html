@@ -6,241 +6,269 @@
     <title>LAN Race</title>
     <link rel="stylesheet" href="css/style.css">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/lobby.css">
 </head>
 <body>
+<!-- DIRECTION (lobby). THESIS: the F1 / Forza game menu, played straight: the real 3D car is the screen, menus float over it;
+     refuses the web-form lobby of three equal dark cards. OWN-WORLD: near-black studio (#06080b), translucent dark
+     panels (no blur: weak laptops; only the settings drawer blurs), Saira (condensed to expanded), white text, team colour as the one accent (rim light, floor ring,
+     livery chips), F1 red only for the action. STORY: pick your team and name in the garage, join, see the grid fill,
+     ready up; the host starts. FIRST VIEWPORT: garage, team list left, car centre-right on a turntable, team name huge
+     bottom-left with name + JOIN under it. FORM: the category standard (user-picked: F1 / Forza menus), seed cba4ab99.
+     FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md -->
 
-    <!-- LOBBY SCREEN -->
-    <!-- LOBBY SCREEN -->
-    <div id="lobby-screen" class="screen">
-        <div class="lobby-container">
-            <header class="lobby-header">
-                <h1 class="glow-title">LAN RACE</h1>
-                <div id="session-summary" class="session-summary"></div>
-                <span class="lobby-ping">PING <span class="ping-val" id="lobby-ping">—</span> ms</span>
-            </header>
+    <!-- The 3D view: the race, or in the lobby the showroom car (game3d.js); both screens sit over it -->
+    <canvas id="game-canvas"></canvas>
 
-            <div class="lobby-panels">
-                <!-- Left: your car -->
-                <section class="panel profile-panel">
-                    <div id="hero" class="hero">
-                        <img id="hero-car" alt="" hidden>
-                        <div class="hero-info">
-                            <span id="hero-team" class="hero-team">Pick your team</span>
-                            <span id="hero-sub" class="hero-sub">11 teams · 2 seats each</span>
-                        </div>
-                        <div class="hero-join">
-                            <input type="text" id="username" placeholder="Driver name" maxlength="15" aria-label="Driver name">
-                            <button id="btn-join" class="btn primary">Join ▶</button>
-                            <button id="btn-credits" class="btn" type="button">Credits</button>
-                        </div>
-                    </div>
-                    <dialog id="credits">
-                        <h2>Credits</h2>
-                        <p>Cars, tyres and helmet from Sketchfab; textures from Poly Haven and ambientCG. Thank you to every author.</p>
-                        <ul id="credits-list"></ul>
-                        <form method="dialog"><button class="btn">Close</button></form>
-                    </dialog>
+    <!-- LOBBY: step 1 the garage (name + team), step 2 the race lobby (grid, session, chat); app.js sets data-step -->
+    <div id="lobby-screen" class="screen" data-step="garage">
+        <header class="lb-top">
+            <div class="lb-brand" aria-label="LAN Race"><svg class="lb-mark" viewBox="0 0 40 24" aria-hidden="true"><path d="M10 2h28l-8 20H2z"/><path class="lb-mark-cut" d="M17 8h14l-2.4 6H14.6z"/></svg><span>LAN<b>RACE</b></span></div>
+            <nav class="lb-steps" aria-label="Lobby">
+                <button type="button" class="lb-step" data-go="garage"><i>1</i>Garage</button>
+                <button type="button" class="lb-step" data-go="paddock" id="step-paddock" disabled><i>2</i>Race lobby</button>
+            </nav>
+            <div id="session-summary" class="session-summary"></div>
+            <span class="lobby-ping">PING <span class="ping-val" id="lobby-ping">—</span> ms</span>
+            <button type="button" id="btn-settings" class="lb-tool" aria-controls="my-settings" aria-expanded="false" title="My settings">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h3M11 12h9M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
+                <span>Settings</span>
+            </button>
+        </header>
 
-                    <h2>Teams</h2>
-                    <div id="team-grid"></div>
-
-                    <details class="my-settings">
-                        <summary>My settings</summary>
-                        <div class="settings-grid">
-                            <label class="graphics-picker">Graphics
-                                <select id="graphics-select">
-                                    <option value="auto" selected>Auto</option>
-                                    <option value="low">Low</option>
-                                    <option value="medium">Medium</option>
-                                    <option value="high">High</option>
-                                    <option value="ultra">Ultra</option>
-                                </select>
-                                <small id="graphics-note"></small>
-                            </label>
-                            <label class="graphics-picker">Racing line
-                                <select id="line-select">
-                                    <option value="off">Off</option>
-                                    <option value="corners" selected>Corners only</option>
-                                    <option value="full">Full</option>
-                                </select>
-                                <small>R / gamepad X during a race</small>
-                            </label>
-                            <div class="graphics-picker help-picker">
-                                <span class="assist-label">Braking help</span>
-                                <div class="seg" id="help-brake" role="group" aria-label="Braking help">
-                                    <button type="button" data-v="0">Off</button><button type="button" data-v="50">Low</button><button type="button" data-v="100">High</button>
-                                </div>
-                                <small id="help-brake-hint"></small>
-                                <span class="assist-label">Steering help</span>
-                                <div class="seg" id="help-steer" role="group" aria-label="Steering help">
-                                    <button type="button" data-v="0">Off</button><button type="button" data-v="100">On</button>
-                                </div>
-                                <span class="assist-label">Coach</span>
-                                <div class="seg" id="coach-seg" role="group" aria-label="Coach">
-                                    <button type="button" data-v="on">On</button><button type="button" data-v="off">Off</button>
-                                </div>
-                                <small id="help-note">Q cycles braking help during a race</small>
-                            </div>
-                            <label class="graphics-picker">Other cars
-                                <select id="others-select">
-                                    <option value="present" selected>Where they really are</option>
-                                    <option value="smooth">Smoothest (slightly behind)</option>
-                                </select>
-                                <small>"Where they really are" matches the hitbox</small>
-                            </label>
-                            <label class="graphics-picker">Sound volume
-                                <input type="range" id="volume-range" min="0" max="100" value="70">
-                            </label>
-                            <label class="graphics-picker">Start tyre
-                                <select id="compound-select"><option value="S">Soft</option><option value="M" selected>Medium</option><option value="H">Hard</option></select>
-                            </label>
-                            <label class="graphics-picker">Engine sound
-                                <select id="engine-select">
-                                    <option value="all" selected>All cars</option>
-                                    <option value="mine">Mine only</option>
-                                    <option value="off">Off</option>
-                                </select>
-                                <small>M mutes during a race</small>
-                            </label>
-                            <label class="graphics-picker">Engine sound style
-                                <select id="engine-type-select">
-                                    <option value="v8" selected>F1 2.4L V8 (Classic Scream)</option>
-                                    <option value="v6">F1 1.6L V6 Turbo (Modern Growl)</option>
-                                    <option value="muscle">7.0L V8 Muscle (Deep Bass Rumble)</option>
-                                    <option value="screamer">F1 Classic Screamer (High-RPM Howl)</option>
-                                    <option value="rotary">4-Rotor Wankel (787B Shriek)</option>
-                                    <option value="boxer">Flat-6 GT3 (Throaty Boxer Rasp)</option>
-                                </select>
-                            </label>
-                        </div>
-                    </details>
-                </section>
-
-                <!-- Middle: the grid -->
-                <section class="panel players-panel">
-                    <h2>Drivers <span id="driver-count" class="h2-meta"></span></h2>
-                    <ul id="players-list"></ul>
-                </section>
-
-                <!-- Right: the session -->
-                <section class="side">
-                    <div class="panel race-panel">
-                        <h2>Race settings</h2>
-                        <dl id="settings-view" class="settings-view"></dl>
-                        <div id="player-controls" class="hidden">
-                            <div id="host-settings" class="hidden">
-                                <div class="host-grid">
-                                    <label>Track
-                                        <select id="setting-track">
-                                            <option value="monza">Monza</option>
-                                            <option value="spa">Spa-Francorchamps</option>
-                                            <option value="silverstone">Silverstone</option>
-                                            <option value="suzuka">Suzuka</option>
-                                            <option value="sakhir">Bahrain (Sakhir)</option>
-                                            <option value="interlagos">Interlagos</option>
-                                            <option value="cota">Circuit of the Americas</option>
-                                            <option value="zandvoort">Zandvoort</option>
-                                            <option value="spielberg">Red Bull Ring</option>
-                                            <option value="montreal">Montreal</option>
-                                            <option value="hungaroring">Hungaroring</option>
-                                            <option value="monaco">Monaco</option>
-                                            <option value="imola">Imola</option>
-                                            <option value="buddh">Buddh International</option>
-                                        </select>
-                                    </label>
-                                    <label>Time
-                                        <select id="setting-time" title="Night: the circuit's own night sky, under race floodlights">
-                                            <option value="day" selected>Day</option>
-                                            <option value="night">Night</option>
-                                        </select>
-                                    </label>
-                                    <label>Laps
-                                        <input type="number" id="setting-laps" min="1" max="100" value="3">
-                                    </label>
-                                    <label>Qualifying
-                                        <select id="setting-quali">
-                                            <option value="full" selected>Full (Q1 · Q2 · Q3)</option>
-                                            <option value="short">Short</option>
-                                            <option value="oneshot">One-shot</option>
-                                            <option value="off">Off</option>
-                                        </select>
-                                    </label>
-                                    <label>Collisions
-                                        <select id="setting-collisions">
-                                            <option value="1" selected>On</option>
-                                            <option value="0">Off (ghost cars)</option>
-                                        </select>
-                                    </label>
-                                    <label>AI drivers
-                                        <select id="setting-ai" title="Add AI drivers to the grid">
-                                            <option value="0" selected>Off</option>
-                                            <option value="1">On</option>
-                                        </select>
-                                    </label>
-                                    <label>AI cars
-                                        <input type="number" id="setting-ai-count" min="1" max="21" step="1" value="21" title="How many AI drivers join (the grid holds 22 cars)">
-                                    </label>
-                                    <label>AI level
-                                        <select id="setting-ai-level">
-                                            <option value="easy">Easy</option>
-                                            <option value="medium" selected>Medium</option>
-                                            <option value="hard">Hard</option>
-                                            <option value="pro">Pro</option>
-                                        </select>
-                                    </label>
-                                    <label>Tyre wear
-                                        <select id="setting-tyres" title="Soft lasts ~40 % of the race, medium ~65 %, hard ~90 %; finishers must use two compounds">
-                                            <option value="1" selected>On</option>
-                                            <option value="0">Off</option>
-                                        </select>
-                                    </label>
-                                    <label>Driver help
-                                        <select id="setting-help" title="Same for all: every car drives with the help levels you pick">
-                                            <option value="choose" selected>Each driver chooses</option>
-                                            <option value="fixed">Same for all</option>
-                                        </select>
-                                    </label>
-                                    <label class="help-fixed-only hidden">Braking help
-                                        <select id="setting-help-brake"><option value="0">Off</option><option value="50">Low</option><option value="100" selected>High</option></select>
-                                    </label>
-                                    <label class="help-fixed-only hidden">Steering help
-                                        <select id="setting-help-steer"><option value="0">Off</option><option value="100" selected>On</option></select>
-                                    </label>
-                                    <label class="collisions-only">Start
-                                        <select id="setting-ghost" title="Cars pass through each other until the end of sector 1 on lap 1: no turn-1 pile-ups">
-                                            <option value="1" selected>Ghost first corners</option>
-                                            <option value="0">Contact from lights out</option>
-                                        </select>
-                                    </label>
-                                    <label class="collisions-only">Contact penalties
-                                        <select id="setting-penalties" title="+5 s for hitting another car, +10 s if it goes off or spins">
-                                            <option value="1" selected>On</option>
-                                            <option value="0">Off</option>
-                                        </select>
-                                    </label>
-                                </div>
-                                <button id="btn-start" class="btn success">Start Race</button>
-                            </div>
-                            <button id="btn-ready" class="btn primary">Ready Up</button>
-                        </div>
-                    </div>
-
-                    <div class="panel chat-panel">
-                        <h2>Chat</h2>
-                        <div id="chat-messages"></div>
-                        <form id="chat-form">
-                            <input type="text" id="chat-input" placeholder="Type a message..." autocomplete="off" aria-label="Chat message">
-                            <button type="submit" class="btn small">Send</button>
-                        </form>
-                    </div>
-                </section>
+        <!-- Step 1: the garage -->
+        <section class="garage" aria-label="Garage">
+            <div class="garage-teams">
+                <h2 class="lb-h">Choose your team</h2>
+                <div id="team-grid" role="group" aria-label="Teams"></div>
             </div>
-        </div>
+            <div class="garage-hero">
+                <div class="hero-plate">
+                    <span id="hero-team" class="hero-team">Pick your team</span>
+                    <span id="hero-sub" class="hero-sub">11 teams · 2 seats each</span>
+                </div>
+                <div class="hero-join">
+                    <label class="lb-field"><span>Driver name</span><input type="text" id="username" placeholder="Your name" maxlength="15" autocomplete="off"></label>
+                    <button id="btn-join" class="btn primary">Join</button>
+                    <button id="btn-to-paddock" type="button" class="btn ghost hidden">Race lobby
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg></button>
+                </div>
+            </div>
+            <div class="key-hints" aria-hidden="true"><span><kbd>↑</kbd><kbd>↓</kbd> Team</span><span><kbd>Enter</kbd> Join</span></div>
+        </section>
+
+        <!-- Step 2: the race lobby -->
+        <section class="paddock" aria-label="Race lobby">
+            <div class="lb-panel grid-panel">
+                <h2 class="lb-h">Starting grid <span id="driver-count" class="lb-h-meta"></span></h2>
+                <ol id="players-list"></ol>
+            </div>
+            <div class="paddock-center">
+                <div class="me-plate">
+                    <span id="me-name" class="me-name"></span>
+                    <span id="me-team" class="me-team"></span>
+                </div>
+                <div class="cta">
+                    <p id="ready-note" class="ready-note"></p>
+                    <button id="btn-start" class="btn primary cta-btn hidden">Start race</button>
+                    <button id="btn-ready" class="btn primary cta-btn hidden">Ready up</button>
+                </div>
+            </div>
+            <div class="paddock-side">
+                <div class="lb-panel race-panel">
+                    <h2 class="sr-only">Race settings</h2>
+                    <div id="track-plate" class="track-plate"></div>
+                    <dl id="settings-view" class="settings-view"></dl>
+                    <div id="player-controls" class="hidden">
+                        <div id="host-settings" class="hidden">
+                            <div class="host-grid">
+                                <label class="span-2">Track
+                                    <select id="setting-track">
+                                        <option value="monza">Monza</option>
+                                        <option value="spa">Spa-Francorchamps</option>
+                                        <option value="silverstone">Silverstone</option>
+                                        <option value="suzuka">Suzuka</option>
+                                        <option value="sakhir">Bahrain (Sakhir)</option>
+                                        <option value="interlagos">Interlagos</option>
+                                        <option value="cota">Circuit of the Americas</option>
+                                        <option value="zandvoort">Zandvoort</option>
+                                        <option value="spielberg">Red Bull Ring</option>
+                                        <option value="montreal">Montreal</option>
+                                        <option value="hungaroring">Hungaroring</option>
+                                        <option value="monaco">Monaco</option>
+                                        <option value="imola">Imola</option>
+                                        <option value="buddh">Buddh International</option>
+                                    </select>
+                                </label>
+                                <label>Time
+                                    <select id="setting-time" title="Night: the circuit's own night sky, under race floodlights">
+                                        <option value="day" selected>Day</option>
+                                        <option value="night">Night</option>
+                                    </select>
+                                </label>
+                                <label>Laps
+                                    <input type="number" id="setting-laps" min="1" max="100" value="3">
+                                </label>
+                                <label class="span-2">Qualifying
+                                    <select id="setting-quali">
+                                        <option value="full" selected>Full (Q1 · Q2 · Q3)</option>
+                                        <option value="short">Short</option>
+                                        <option value="oneshot">One-shot</option>
+                                        <option value="off">Off</option>
+                                    </select>
+                                </label>
+                                <label>AI drivers
+                                    <select id="setting-ai" title="Add AI drivers to the grid">
+                                        <option value="0" selected>Off</option>
+                                        <option value="1">On</option>
+                                    </select>
+                                </label>
+                                <label>AI cars
+                                    <input type="number" id="setting-ai-count" min="1" max="21" step="1" value="21" title="How many AI drivers join (the grid holds 22 cars)">
+                                </label>
+                                <label>AI level
+                                    <select id="setting-ai-level">
+                                        <option value="easy">Easy</option>
+                                        <option value="medium" selected>Medium</option>
+                                        <option value="hard">Hard</option>
+                                        <option value="pro">Pro</option>
+                                    </select>
+                                </label>
+                                <label>Tyre wear
+                                    <select id="setting-tyres" title="Soft lasts ~40 % of the race, medium ~65 %, hard ~90 %; finishers must use two compounds">
+                                        <option value="1" selected>On</option>
+                                        <option value="0">Off</option>
+                                    </select>
+                                </label>
+                                <label>Collisions
+                                    <select id="setting-collisions">
+                                        <option value="1" selected>On</option>
+                                        <option value="0">Off (ghost cars)</option>
+                                    </select>
+                                </label>
+                                <label class="collisions-only">Contact penalties
+                                    <select id="setting-penalties" title="+5 s for hitting another car, +10 s if it goes off or spins">
+                                        <option value="1" selected>On</option>
+                                        <option value="0">Off</option>
+                                    </select>
+                                </label>
+                                <label class="collisions-only">Start
+                                    <select id="setting-ghost" title="Cars pass through each other until the end of sector 1 on lap 1: no turn-1 pile-ups">
+                                        <option value="1" selected>Ghost first corners</option>
+                                        <option value="0">Contact from lights out</option>
+                                    </select>
+                                </label>
+                                <label>Driver help
+                                    <select id="setting-help" title="Same for all: every car drives with the help levels you pick">
+                                        <option value="choose" selected>Each driver chooses</option>
+                                        <option value="fixed">Same for all</option>
+                                    </select>
+                                </label>
+                                <label class="help-fixed-only hidden">Braking help
+                                    <select id="setting-help-brake"><option value="0">Off</option><option value="50">Low</option><option value="100" selected>High</option></select>
+                                </label>
+                                <label class="help-fixed-only hidden">Steering help
+                                    <select id="setting-help-steer"><option value="0">Off</option><option value="100" selected>On</option></select>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="lb-panel chat-panel">
+                    <h2 class="lb-h">Chat</h2>
+                    <div id="chat-messages" aria-live="polite"></div>
+                    <form id="chat-form">
+                        <input type="text" id="chat-input" placeholder="Message the grid" autocomplete="off" aria-label="Chat message">
+                        <button type="submit" class="btn small" aria-label="Send"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h14M12 6l6 6-6 6"/></svg></button>
+                    </form>
+                </div>
+            </div>
+        </section>
+
+        <!-- My settings: a drawer over either step -->
+        <aside id="my-settings" class="drawer" aria-label="My settings" inert>
+            <div class="drawer-head"><h2 class="lb-h">My settings</h2>
+                <button type="button" id="settings-close" class="lb-tool" title="Close (Esc)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+            <div class="drawer-body">
+                <fieldset><legend>Driving</legend>
+                    <div class="lb-row"><span class="assist-label">Braking help</span>
+                        <div class="seg" id="help-brake" role="group" aria-label="Braking help">
+                            <button type="button" data-v="0">Off</button><button type="button" data-v="50">Low</button><button type="button" data-v="100">High</button>
+                        </div>
+                        <small id="help-brake-hint"></small>
+                    </div>
+                    <div class="lb-row"><span class="assist-label">Steering help</span>
+                        <div class="seg" id="help-steer" role="group" aria-label="Steering help">
+                            <button type="button" data-v="0">Off</button><button type="button" data-v="100">On</button>
+                        </div>
+                    </div>
+                    <div class="lb-row"><span class="assist-label">Coach</span>
+                        <div class="seg" id="coach-seg" role="group" aria-label="Coach">
+                            <button type="button" data-v="on">On</button><button type="button" data-v="off">Off</button>
+                        </div>
+                        <small id="help-note">Q cycles braking help during a race</small>
+                    </div>
+                    <label class="lb-row">Racing line
+                        <select id="line-select">
+                            <option value="off">Off</option>
+                            <option value="corners" selected>Corners only</option>
+                            <option value="full">Full</option>
+                        </select>
+                        <small>R / gamepad X during a race</small>
+                    </label>
+                    <label class="lb-row">Start tyre
+                        <select id="compound-select"><option value="S">Soft</option><option value="M" selected>Medium</option><option value="H">Hard</option></select>
+                    </label>
+                </fieldset>
+                <fieldset><legend>Graphics</legend>
+                    <label class="lb-row">Quality
+                        <select id="graphics-select">
+                            <option value="auto" selected>Auto</option>
+                            <option value="low">Low</option>
+                            <option value="medium">Medium</option>
+                            <option value="high">High</option>
+                            <option value="ultra">Ultra</option>
+                        </select>
+                        <small id="graphics-note"></small>
+                    </label>
+                    <label class="lb-row">Other cars
+                        <select id="others-select">
+                            <option value="present" selected>Where they really are</option>
+                            <option value="smooth">Smoothest (slightly behind)</option>
+                        </select>
+                        <small>"Where they really are" matches the hitbox</small>
+                    </label>
+                </fieldset>
+                <fieldset><legend>Sound</legend>
+                    <label class="lb-row">Volume
+                        <input type="range" id="volume-range" min="0" max="100" value="70">
+                    </label>
+                    <label class="lb-row">Engine sound
+                        <select id="engine-select">
+                            <option value="all" selected>All cars</option>
+                            <option value="mine">Mine only</option>
+                            <option value="off">Off</option>
+                        </select>
+                        <small>M mutes during a race</small>
+                    </label>
+                    <label class="lb-row">Engine sound style
+                        <select id="engine-type-select">
+                            <option value="v8" selected>F1 2.4L V8 (Classic Scream)</option>
+                            <option value="v6">F1 1.6L V6 Turbo (Modern Growl)</option>
+                            <option value="muscle">7.0L V8 Muscle (Deep Bass Rumble)</option>
+                            <option value="screamer">F1 Classic Screamer (High-RPM Howl)</option>
+                            <option value="rotary">4-Rotor Wankel (787B Shriek)</option>
+                            <option value="boxer">Flat-6 GT3 (Throaty Boxer Rasp)</option>
+                        </select>
+                    </label>
+                </fieldset>
+            </div>
+        </aside>
     </div>
 
     <!-- GAME SCREEN -->
     <div id="game-screen" class="screen hidden">
-        <canvas id="game-canvas"></canvas>
         
         <!-- HUD -->
         <div id="hud">

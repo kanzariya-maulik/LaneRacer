@@ -1947,16 +1947,18 @@ let carParts = null; // real tyres per compound and the driver's helmet; until t
 // The files download at page load (bytes only), each parsed and put on the cars only while no one is driving (lobby,
 // results): parsing a car (geometry, texture decode) and rebuilding its team's cars froze a race for 80-200 ms each time,
 // which a friend's slow link spread through the first laps
-const quiet = () => !['QUALIFYING', 'COUNTDOWN', 'RACE'].includes(clientState.status);
+// The countdown counts as quiet: cars are frozen and the lights wait, so a model the lobby didn't get to (a slow laptop,
+// a quick start) still replaces the procedural car before lights out
+const quiet = () => !['QUALIFYING', 'RACE'].includes(clientState.status);
 let pendingModels = [];
 fetch('teams.json').then((r) => r.json()).then((list) => {
     for (const t of list) {
-        fetchModel(`models/cars/${t.id}.glb`).then((buf) => pendingModels.push(() => loadTeamCar(t.id, () => parseModel(buf)).then((a) => {
+        fetchModel(`models/cars/${t.id}.glb`).then((buf) => pendingModels.push(Object.assign(() => loadTeamCar(t.id, () => parseModel(buf)).then((a) => {
             if (!a) return;
             teamAssets[t.id] = a;
             lightCars();
             for (const id in cars) if (cars[id].teamId === t.id) dropCar(id);
-        }))).catch(() => {}); // no file: the procedural car
+        }), { team: t.id }))).catch(() => {}); // no file: the procedural car
     }
 });
 Promise.all(['models/tyre.glb', 'models/helmet.glb'].map((u) => fetchModel(u).then((b) => [u, b]))).then((files) => {
@@ -1971,8 +1973,10 @@ Promise.all(['models/tyre.glb', 'models/helmet.glb'].map((u) => fetchModel(u).th
 }).catch(() => {});
 function flushModels() { // every frame: cheap unless a model is waiting and no one is driving
     if (!quiet()) return;
-    for (const f of pendingModels.splice(0)) f();
-    uploadTextures();
+    // One parse a frame (each is ~0.25 s, ~1 s on a slow laptop: all at once froze the lobby), the showroom's team first
+    const i = Math.max(0, pendingModels.findIndex((f) => f.team === window.lobbyView?.team));
+    if (pendingModels.length) pendingModels.splice(i, 1)[0]();
+    else uploadTextures();
 }
 // Textures copied to the GPU while no one is driving: left to the first draw of a session, the copies (track photos and
 // liveries, 2048 px) held the screen black for ~0.8 s at every start
@@ -2071,6 +2075,98 @@ function updateTyreBatch() {
         }
     }
     for (const mesh of wheelBatch) mesh.instanceMatrix.needsUpdate = true;
+}
+
+// ---------- lobby showroom ----------
+// The lobby's backdrop, as the F1 games' menus: the selected team's real car (lobbyView.team, set by app.js) on a dark
+// studio floor, studio reflections on the paint, team-colour rim lights and a light ring under it, turning slowly. Car
+// metres, its own scene and camera; the race's renderer, models and materials. Low: a still frame, redrawn on changes
+const SHOW_BG = 0x06080b, SHOW_FRAME = { garage: { x: 0.15, y: 0.1, dist: 9.6, h: 1.45 }, paddock: { x: 0, y: 0.02, dist: 15.5, h: 2.6 } };
+const show = { scene: null, cam: null, car: null, teamId: undefined, parts: null, post: null, postKey: '', ring: null, rims: [], spin: 0.6, x: 0.15, y: 0.1, dist: 9.6, h: 1.45, w: 0, hgt: 0, dirty: true, flash: 0 };
+function buildShowroom() {
+    const sc = show.scene = new THREE.Scene();
+    sc.background = new THREE.Color(SHOW_BG);
+    sc.fog = new THREE.Fog(SHOW_BG, 12, 30);
+    const pmrem = new THREE.PMREMGenerator(renderer), room = new RoomEnvironment();
+    sc.environment = pmrem.fromScene(room, 0, 0.1, 100).texture;
+    sc.environmentIntensity = 0.5;
+    pmrem.dispose(); room.dispose();
+    // Matte: glossy, the floor mirrored the glowing turntable edge as a beam
+    const floor = new THREE.Mesh(new THREE.CircleGeometry(40, 96), new THREE.MeshStandardMaterial({ color: 0x0c0e12, roughness: 0.5, metalness: 0 }));
+    floor.rotation.x = -Math.PI / 2;
+    sc.add(floor);
+    // The turntable: a low dark disc, its edge a band of team-colour light; the car stands on it
+    const table = new THREE.Mesh(new THREE.CylinderGeometry(2.9, 2.95, 0.07, 96), new THREE.MeshStandardMaterial({ color: 0x15181d, roughness: 0.42, metalness: 0.35 }));
+    table.position.y = 0.035;
+    sc.add(table);
+    const shadow = blobShadow(0.95); // sized for the race: back to car metres, a bit wider for the studio's soft key
+    shadow.scale.setScalar(1.15 / (CAR_SCALE * scale)); shadow.position.set(0.15, 0.072, 0);
+    sc.add(shadow);
+    show.ring = new THREE.Mesh(new THREE.CylinderGeometry(2.952, 2.952, 0.025, 160, 1, true), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85, toneMapped: false, depthWrite: false }));
+    show.ring.position.y = 0.045;
+    sc.add(show.ring);
+    // Overhead light strips: the studio rig, seen at the top of the frame and caught in the paint
+    for (const z of [-2.2, 0, 2.2]) {
+        const strip = new THREE.Mesh(new THREE.PlaneGeometry(9, 0.32), new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffffff).multiplyScalar(2.4), toneMapped: false, side: THREE.DoubleSide }));
+        strip.rotation.x = Math.PI / 2; strip.position.set(0.4, 6.4, z);
+        sc.add(strip);
+    }
+    const key = new THREE.SpotLight(0xffffff, 300, 0, 0.55, 0.65, 2); // brighter clipped white liveries (the Suzuka car) to flat white
+    key.position.set(2, 9, 5); key.target.position.set(0, 0.4, 0);
+    sc.add(key, key.target, new THREE.HemisphereLight(0x9fb3c8, 0x0a0b0e, 0.35));
+    for (const z of [-1, 1]) { // team-colour rims from behind, either side
+        const rim = new THREE.SpotLight(0xffffff, 240, 0, 0.5, 0.8, 2);
+        rim.position.set(-4.5, 1.6, 4 * z); rim.target.position.set(0.8, 0.7, 0);
+        sc.add(rim, rim.target);
+        show.rims.push(rim);
+    }
+    show.cam = new THREE.PerspectiveCamera(26, 1, 0.1, 100);
+}
+function showroomCar(teamId) {
+    if (show.car) { show.scene.remove(show.car); show.car = null; }
+    const asset = teamAssets[teamId];
+    if (!asset) return; // not loaded yet: the empty studio until it is (flushModels loads this team first)
+    const wheels = [], car = realCar(asset, teamId, wheels);
+    if (carParts) for (const w of wheels) w.userData.tyre?.add(new THREE.Mesh(carParts.tyres.M.geometry, carParts.tyres.M.material), new THREE.Mesh(carParts.tyres.rim.geometry, carParts.tyres.rim.material));
+    car.traverse((o) => { if (o.isLOD) o.levels.forEach((l, i) => (l.object.visible = i === 0)); });
+    car.rotation.y = show.car?.rotation.y ?? -0.6;
+    car.position.y = 0.07; // on the turntable
+    show.car = car;
+    show.scene.add(car);
+}
+function renderShowroom(dt) {
+    if (!show.scene) buildShowroom();
+    const v = window.lobbyView || {}, team = v.team ?? null, still = level === 'low';
+    if (team !== show.teamId || (team && !show.car && teamAssets[team]) || (show.car && show.parts !== !!carParts)) {
+        show.teamId = team; show.parts = !!carParts;
+        showroomCar(team);
+        const c = new THREE.Color(teamInfo[team]?.chatColor || '#8892a0');
+        show.ring.material.color.copy(c);
+        for (const r of show.rims) r.color.copy(c);
+        show.flash = 1; show.dirty = true;
+    }
+    // Framing per step: the garage keeps the car right of the team list; the race lobby centres it, further back
+    const f = SHOW_FRAME[v.step] || SHOW_FRAME.garage, k = 1 - Math.exp(-dt * 3.2);
+    const moving = Math.abs(f.x - show.x) + Math.abs(f.y - show.y) + Math.abs(f.dist - show.dist) + Math.abs(f.h - show.h) > 0.002;
+    show.x += (f.x - show.x) * k; show.y += (f.y - show.y) * k; show.dist += (f.dist - show.dist) * k; show.h += (f.h - show.h) * k;
+    if (show.car && !still) show.car.rotation.y += dt * 0.16;
+    show.flash = Math.max(0, show.flash - dt * 1.6);
+    show.ring.material.opacity = 0.55 + 0.45 * show.flash;
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    if (w !== show.w || h !== show.hgt) { show.w = w; show.hgt = h; show.dirty = true; }
+    if (still && !show.dirty && !moving && show.flash === 0) return; // Low: nothing changed, the last frame stays up
+    show.dirty = false;
+    const cam = show.cam;
+    cam.aspect = w / Math.max(1, h);
+    cam.position.set(Math.cos(0.42) * show.dist, show.h, Math.sin(0.42) * show.dist);
+    cam.lookAt(0, 0.55, 0);
+    cam.setViewOffset(w, h, -show.x * w, show.y * h, w, h); // shifts the car across (and up) the screen without turning the camera
+    cam.updateProjectionMatrix();
+    renderer.toneMappingExposure = 0.9;
+    const fx = still ? [] : ['bloom', 'vignette', 'smaa'], key = fx.join();
+    if (key !== show.postKey) { show.post?.dispose(); show.post = fx.length ? buildPost(renderer, show.scene, cam, fx) : null; show.postKey = key; }
+    try { show.post ? show.post.render() : renderer.render(show.scene, cam); }
+    catch (e) { console.warn('showroom: post failed, plain render', e); show.post?.dispose(); show.post = null; show.postKey = 'none'; }
 }
 
 // ---------- camera ----------
@@ -2639,7 +2735,7 @@ function drawMinimap() {
 // ---------- loop ----------
 let last = performance.now();
 // F3 / ?stats=1: network and frame-time overlay, refreshed at 4 Hz
-const frameMs = [], lobbyMs = [], netstatsEl = document.getElementById('netstats');
+const frameMs = [], lobbyMs = [], netstatsEl = document.getElementById('netstats'), lobbyEl = document.getElementById('lobby-screen');
 let netstatsOn = new URLSearchParams(location.search).has('stats'), lastNetstats = 0;
 netstatsEl.classList.toggle('hidden', !netstatsOn);
 function drawNetstats() {
@@ -2715,10 +2811,11 @@ function frame(now) {
     flushModels();
     frameMs.push(dt * 1000);
     if (frameMs.length > 120) frameMs.shift();
-    if (clientState.status === 'LOBBY') { // engines and wind fade out in the lobby; nothing drawn: frames come at the display's rate
+    if (clientState.status === 'LOBBY' || !lobbyEl.classList.contains('hidden')) { // engines and wind fade out; the showroom car
         lobbyMs.push(dt * 1000);
         if (lobbyMs.length > 120) lobbyMs.shift();
         Sound.update(silentFrame);
+        renderShowroom(dt);
         return;
     }
     const paused = !!clientState.paused; // host pause: nothing is driven, cars hold where they are

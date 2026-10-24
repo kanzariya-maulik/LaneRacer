@@ -1,0 +1,117 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-24T00:00:00Z",
+  "title": "Design System: LAN Race",
+  "extensions": {
+    "colorMeta": {
+      "studio-black": { "role": "neutral", "displayName": "Studio Black", "canonical": "#06080b", "tonalRamp": ["#06080b", "#0c0e12", "#15181d", "#22262d", "#3a3f48", "#5c636e", "#a3acb7", "#f4f5f7"] },
+      "team": { "role": "primary", "displayName": "Team Colour (runtime --team; default slate)", "canonical": "#64748b", "tonalRamp": ["oklch(15% 0.03 257)", "oklch(25% 0.035 257)", "oklch(35% 0.04 257)", "oklch(45% 0.04 257)", "oklch(55% 0.04 257)", "oklch(68% 0.035 257)", "oklch(82% 0.025 257)", "oklch(95% 0.01 257)"] },
+      "f1-red": { "role": "secondary", "displayName": "F1 Red", "canonical": "#e10600", "tonalRamp": ["oklch(15% 0.06 29)", "oklch(25% 0.1 29)", "oklch(38% 0.16 29)", "oklch(50% 0.2 29)", "oklch(60% 0.24 29)", "oklch(70% 0.18 29)", "oklch(82% 0.1 29)", "oklch(95% 0.03 29)"] },
+      "f1-red-hover": { "role": "secondary", "displayName": "F1 Red, hover", "canonical": "#f5150e" },
+      "ready-green": { "role": "tertiary", "displayName": "Ready Green (semantic)", "canonical": "#19c37d", "tonalRamp": ["oklch(15% 0.04 158)", "oklch(25% 0.07 158)", "oklch(38% 0.1 158)", "oklch(50% 0.13 158)", "oklch(62% 0.16 158)", "oklch(73% 0.17 158)", "oklch(84% 0.1 158)", "oklch(95% 0.03 158)"] },
+      "host-amber": { "role": "tertiary", "displayName": "Host Amber (semantic)", "canonical": "#ffb21f", "tonalRamp": ["oklch(15% 0.03 75)", "oklch(25% 0.06 75)", "oklch(38% 0.09 75)", "oklch(50% 0.12 75)", "oklch(62% 0.15 75)", "oklch(72% 0.17 75)", "oklch(82% 0.16 75)", "oklch(95% 0.05 75)"] },
+      "text": { "role": "neutral", "displayName": "Studio White" },
+      "muted": { "role": "neutral", "displayName": "Label Grey" },
+      "dim": { "role": "neutral", "displayName": "Caption Grey" },
+      "ink-on-white": { "role": "neutral", "displayName": "Ink" },
+      "line": { "role": "neutral", "displayName": "Hairline" },
+      "line-strong": { "role": "neutral", "displayName": "Hairline Strong" },
+      "panel": { "role": "neutral", "displayName": "Plate" },
+      "field": { "role": "neutral", "displayName": "Field" }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Selected team name over the car in the garage." },
+      "headline": { "displayName": "Headline", "purpose": "The driver's own name in the race lobby." },
+      "title": { "displayName": "Title", "purpose": "Track name heading the race settings plate." },
+      "body": { "displayName": "Body", "purpose": "Team names, values, chat." },
+      "button": { "displayName": "Button", "purpose": "All buttons, uppercase, expanded." },
+      "label": { "displayName": "Label", "purpose": "Field captions, statuses, chips, key hints." },
+      "heading-label": { "displayName": "Heading label", "purpose": "Panel and section headings." }
+    },
+    "shadows": [
+      { "name": "plate-lift", "value": "0 18px 40px rgba(0, 0, 0, 0.35)", "purpose": "Every panel." },
+      { "name": "red-glow", "value": "0 10px 28px rgba(225, 6, 0, 0.35)", "purpose": "Primary buttons; hover 0 12px 34px rgba(225, 6, 0, 0.5)." },
+      { "name": "drawer-cast", "value": "-24px 0 60px rgba(0, 0, 0, 0.45)", "purpose": "Settings drawer." },
+      { "name": "caption-shadow", "value": "text-shadow: 0 6px 30px rgba(0, 0, 0, 0.5)", "purpose": "Display/headline names over the car." },
+      { "name": "drawer-blur", "value": "backdrop-filter: blur(24px) saturate(1.2)", "purpose": "The only blurred surface." }
+    ],
+    "motion": [
+      { "name": "ease", "value": "cubic-bezier(0.16, 1, 0.3, 1)", "purpose": "All lobby state changes." },
+      { "name": "control", "value": "0.2s-0.3s", "purpose": "Hover, selection, segment changes." },
+      { "name": "step", "value": "opacity 0.45s, transform 0.6s, 4% horizontal slide, 0.08s delay in", "purpose": "Garage <-> race lobby." },
+      { "name": "drawer", "value": "transform 0.5s", "purpose": "Settings drawer slide." },
+      { "name": "rise", "value": "0.5s, from translateY(10px) opacity 0", "purpose": "Team name change." },
+      { "name": "turntable", "value": "0.16 rad/s; still on Low graphics", "purpose": "Showroom car spin." }
+    ],
+    "breakpoints": [
+      { "name": "short", "value": "max-height: 820px" },
+      { "name": "compact", "value": "max-width: 1280px" },
+      { "name": "narrow", "value": "max-width: 1060px" }
+    ]
+  },
+  "components": [
+    { "name": "Primary Button", "kind": "button", "refersTo": "button-primary", "description": "The one action on screen: Join, Ready up, Start race.",
+      "html": "<button class=\"ds-btn ds-btn-primary\">Join</button>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; justify-content: center; gap: 10px; padding: 12px 26px; border: 0; border-radius: 6px; font-family: 'Saira', 'Outfit', system-ui, sans-serif; font-size: 1rem; font-weight: 700; font-stretch: 110%; letter-spacing: 0.12em; text-transform: uppercase; cursor: pointer; transition: background 0.2s cubic-bezier(0.16,1,0.3,1), transform 0.15s cubic-bezier(0.16,1,0.3,1), box-shadow 0.3s cubic-bezier(0.16,1,0.3,1); } .ds-btn:active { transform: translateY(1px) scale(0.99); } .ds-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; } .ds-btn-primary { background: #e10600; color: #fff; box-shadow: 0 10px 28px rgba(225,6,0,0.35); } .ds-btn-primary:hover { background: #f5150e; box-shadow: 0 12px 34px rgba(225,6,0,0.5); }" },
+    { "name": "Race CTA", "kind": "button", "refersTo": "button-cta", "description": "Parallelogram Start race / Ready up in the race lobby.",
+      "html": "<button class=\"ds-cta\">Start race</button>",
+      "css": ".ds-cta { min-width: 340px; height: 64px; border: 0; border-radius: 0; clip-path: polygon(14px 0, 100% 0, calc(100% - 14px) 100%, 0 100%); background: #e10600; color: #fff; font-family: 'Saira', 'Outfit', system-ui, sans-serif; font-size: 1.25rem; font-weight: 700; font-stretch: 110%; letter-spacing: 0.16em; text-transform: uppercase; cursor: pointer; transition: background 0.2s; } .ds-cta:hover { background: #f5150e; } .ds-cta:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }" },
+    { "name": "Ghost Button", "kind": "button", "refersTo": "button-ghost", "description": "Secondary navigation, e.g. back to the race lobby.",
+      "html": "<button class=\"ds-btn-ghost\">Race lobby</button>",
+      "css": ".ds-btn-ghost { padding: 12px 26px; border: 0; border-radius: 6px; background: transparent; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.18); color: #f4f5f7; font-family: 'Saira', 'Outfit', system-ui, sans-serif; font-size: 1rem; font-weight: 700; font-stretch: 110%; letter-spacing: 0.12em; text-transform: uppercase; cursor: pointer; transition: background 0.2s; } .ds-btn-ghost:hover { background: rgba(255,255,255,0.08); } .ds-btn-ghost:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }" },
+    { "name": "Text Field", "kind": "input", "refersTo": "input", "description": "Field with an uppercase caption; focus border takes the team colour.",
+      "html": "<label class=\"ds-field\" style=\"--team:#e10600\"><span>Driver name</span><input placeholder=\"Your name\"></label>",
+      "css": ".ds-field { display: flex; flex-direction: column; gap: 6px; width: 340px; font-family: 'Saira', 'Outfit', system-ui, sans-serif; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; color: #a3acb7; } .ds-field input { padding: 10px 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.09); background: rgba(255,255,255,0.06); color: #f4f5f7; font: 500 0.95rem 'Saira', sans-serif; letter-spacing: 0; text-transform: none; outline: none; transition: border-color 0.2s, background 0.2s; } .ds-field input::placeholder { color: #7d8691; } .ds-field input:hover { border-color: rgba(255,255,255,0.18); } .ds-field input:focus { border-color: color-mix(in srgb, var(--team) 70%, white); background: rgba(255,255,255,0.1); }" },
+    { "name": "Step Switcher", "kind": "nav", "refersTo": "step-pill-active", "description": "Numbered pill tabs; active inverts to white.",
+      "html": "<nav class=\"ds-steps\"><button class=\"ds-step on\"><i>1</i>Garage</button><button class=\"ds-step\"><i>2</i>Race lobby</button></nav>",
+      "css": ".ds-steps { display: inline-flex; gap: 4px; padding: 4px; border-radius: 999px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.09); } .ds-step { display: flex; align-items: center; gap: 8px; padding: 7px 16px 7px 8px; border: 0; border-radius: 999px; background: transparent; color: #a3acb7; font: 600 0.82rem 'Saira', sans-serif; letter-spacing: 0.12em; text-transform: uppercase; cursor: pointer; transition: background 0.3s, color 0.3s; } .ds-step:hover { color: #f4f5f7; } .ds-step i { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.18); font-style: normal; font-size: 0.72rem; letter-spacing: 0; } .ds-step.on { background: #f4f5f7; color: #0a0c10; } .ds-step.on i { border-color: transparent; background: #0a0c10; color: #f4f5f7; } .ds-step:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }" },
+    { "name": "Session Chip", "kind": "chip", "refersTo": "session-chip", "description": "Top-bar summary of the host's race settings.",
+      "html": "<div class=\"ds-chips\"><span class=\"lead\">Monza</span><span>Day</span><span>3 laps</span></div>",
+      "css": ".ds-chips { display: flex; gap: 6px; } .ds-chips span { padding: 5px 12px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.09); background: rgba(255,255,255,0.04); color: #a3acb7; font: 600 0.74rem 'Saira', sans-serif; letter-spacing: 0.14em; text-transform: uppercase; } .ds-chips span.lead { color: #f4f5f7; border-color: rgba(255,255,255,0.18); background: rgba(255,255,255,0.1); }" },
+    { "name": "Panel", "kind": "card", "refersTo": "panel", "description": "Translucent unblurred plate with a tracked heading.",
+      "html": "<section class=\"ds-panel\"><h2>Starting grid <span>1 / 22</span></h2><p>Content</p></section>",
+      "css": ".ds-panel { padding: 18px 18px 16px; background: rgba(9,11,15,0.74); border: 1px solid rgba(255,255,255,0.09); border-radius: 10px; box-shadow: 0 18px 40px rgba(0,0,0,0.35); color: #f4f5f7; font-family: 'Saira', 'Outfit', system-ui, sans-serif; } .ds-panel h2 { display: flex; margin: 0 0 14px; font-size: 0.8rem; font-weight: 700; letter-spacing: 0.22em; text-transform: uppercase; color: #a3acb7; } .ds-panel h2 span { margin-left: auto; color: #f4f5f7; letter-spacing: 0.08em; font-variant-numeric: tabular-nums; }" },
+    { "name": "Team Row", "kind": "custom", "refersTo": "panel", "description": "Selectable team with skewed livery chip and seat dots; selected state washes in team colour.",
+      "html": "<button class=\"ds-team sel\" style=\"--team:#3671c6\"><i class=\"chip\"></i><span><b>Red Bull Racing</b><small>RB19</small></span><span class=\"seats\"><i></i><i></i></span></button>",
+      "css": ".ds-team { display: grid; grid-template-columns: 14px 1fr auto; align-items: center; gap: 14px; width: 340px; min-height: 46px; padding: 6px 14px 6px 12px; border-radius: 6px; border: 1px solid transparent; background: rgba(9,11,15,0.62); color: #f4f5f7; text-align: left; font-family: 'Saira', sans-serif; cursor: pointer; transition: background 0.25s, border-color 0.25s, transform 0.25s; } .ds-team:hover { background: rgba(255,255,255,0.08); transform: translateX(3px); } .ds-team .chip { width: 8px; height: 26px; justify-self: center; background: var(--team); transform: skewX(-16deg); border-radius: 1px; } .ds-team b { display: block; font-size: 0.95rem; font-weight: 600; } .ds-team small { font-size: 0.72rem; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase; color: #7d8691; } .ds-team .seats { display: flex; gap: 4px; } .ds-team .seats i { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid #7d8691; } .ds-team.sel { background: linear-gradient(90deg, color-mix(in srgb, var(--team) 42%, transparent), rgba(9,11,15,0.55) 85%); border-color: color-mix(in srgb, var(--team) 55%, transparent); } .ds-team.sel .chip { transform: skewX(-16deg) scale(1.5, 1.23); } .ds-team:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }" },
+    { "name": "Segmented Control", "kind": "custom", "refersTo": "segmented-on", "description": "Drawer option picker; selected segment inverts to white.",
+      "html": "<div class=\"ds-seg\"><button>Off</button><button>Low</button><button class=\"on\">High</button></div>",
+      "css": ".ds-seg { display: flex; width: 320px; padding: 3px; border-radius: 6px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.09); } .ds-seg button { flex: 1; padding: 7px 0; border: 0; border-radius: 4px; background: transparent; color: #a3acb7; font: 600 0.82rem 'Saira', sans-serif; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; transition: background 0.2s, color 0.2s; } .ds-seg button:hover { color: #f4f5f7; } .ds-seg button.on { background: #f4f5f7; color: #0a0c10; } .ds-seg button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }" }
+  ],
+  "narrative": {
+    "northStar": "The Team Garage at Night",
+    "overview": "The lobby plays the F1 / Forza game menu straight. The selected team's real car stands on a slowly turning studio turntable in a near-black room. Menus float over it as translucent dark plates, and the type is a wide, heavy Saira, set uppercase in the voice of a broadcast graphic. The screen has two steps on one surface. The garage is for picking a team and a name, and the race lobby is for the grid, the session and chat. Moving between the steps is one authored move: the plates cross-fade with a 4% horizontal slide while the 3D camera reframes the car.\n\nColour is disciplined. The room and the type are achromatic. The selected team's colour is the only decorative accent, and it appears everywhere the team appears: the turntable edge band, the rim lights, the livery slashes, the selected team row, and the focus border. F1 red marks the one thing to press. Green, amber and the ping levels mean something, so they are never used for decoration.\n\nThe world must hold up on the weakest laptop in the room. On Low graphics the showroom drops to a still frame with no bloom and no post-processing, and the only backdrop blur in the lobby is the settings drawer.",
+    "keyCharacteristics": [
+      "A live 3D car is the hero; the UI frames it and never covers its centre.",
+      "Panels are translucent near-black plates with hairline white borders, not frosted glass.",
+      "Saira variable, used across its width axis: expanded (110–120%) for display and buttons, regular for body text, condensed (85%) for grid numerals.",
+      "Labels are uppercase with wide tracking (0.12–0.22em) in muted grey; values are white.",
+      "Slanted geometry borrowed from F1 graphics: skewed livery slashes, a parallelogram CTA, and a slanted brand mark."
+    ],
+    "rules": [
+      { "name": "The One Accent Rule", "body": "Team colour is the only decorative hue. Any new element that needs colour for identity gets `--team`, never a new hue.", "section": "colors" },
+      { "name": "The Red Means Go Rule", "body": "F1 red is the fill of the single primary action on screen, plus the brand mark. If two red buttons are visible at the same time, one of them is wrong. The garage's Join and the race lobby's Start race / Ready up are never on screen together.", "section": "colors" },
+      { "name": "The Signal Rule", "body": "Green, amber and the ping colours are status, not decoration. Never use them for an accent, a border or a background wash.", "section": "colors" },
+      { "name": "The Caps Are Captions Rule", "body": "Uppercase with wide tracking is for short labels and broadcast captions. Free text (chat, input values, select options in the host grid) stays in sentence case with no tracking.", "section": "typography" },
+      { "name": "The Width Axis Rule", "body": "Emphasis comes from Saira's width and weight, not from a second family. Use wdth 110–120% for display and actions, and 85% for compact numerals.", "section": "typography" },
+      { "name": "The No-Blur Plates Rule", "body": "Panels get their legibility from opacity (0.62–0.86) and the vignette, not from `backdrop-filter`. Blur is allowed only on a transient overlay.", "section": "elevation" },
+      { "name": "The Still Frame Rule", "body": "Every live 3D effect needs a Low path. On Low graphics the showroom renders one still frame with no post-processing and redraws only when the team, step or size changes.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do route every identity colour through `--team`; it already updates the 3D rim lights and turntable band along with the CSS.",
+      "Do keep F1 red (#e10600) for the one primary action on screen.",
+      "Do set labels in uppercase Saira at 0.12–0.22em in muted or dim grey, with values in white beneath or beside them.",
+      "Do use tabular numerals for anything that counts or updates.",
+      "Do keep plates translucent near-black (0.62–0.86) with hairline borders, and leave the car's centre clear.",
+      "Do give every 3D or motion effect a Low or reduced-motion path; transitions collapse under `prefers-reduced-motion`.",
+      "Do use the shared ease `cubic-bezier(0.16, 1, 0.3, 1)` for state changes (0.2–0.3s for controls, 0.45–0.6s for step and drawer moves)."
+    ],
+    "donts": [
+      "Don't add `backdrop-filter` to panels; the drawer is the only blurred surface.",
+      "Don't introduce a second accent hue, or use green, amber or ping colours as decoration.",
+      "Don't fall back to the web-form lobby of three equal dark cards; the car is the screen.",
+      "Don't bring HUD values (Outfit, the HUD's glass treatment, `style.css` colours) into lobby surfaces.",
+      "Don't put red on borders, headings or panel chrome."
+    ]
+  }
+}

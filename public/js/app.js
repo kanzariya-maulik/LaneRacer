@@ -172,7 +172,7 @@ function syncProfile() {
 function renderNameField() {
     const me = isJoined && clientState.players[clientState.me];
     inputUser.disabled = !canEditProfile();
-    btnJoin.textContent = isJoined ? 'Save' : 'Join ▶';
+    btnJoin.textContent = isJoined ? 'Save' : 'Join';
     btnJoin.classList.toggle('hidden', isJoined && (!me || !canEditProfile() || inputUser.value.trim() === me.username || !inputUser.value.trim()));
 }
 inputUser.addEventListener('input', renderNameField);
@@ -182,64 +182,101 @@ function renderTeamGrid() {
     syncProfile();
     renderNameField();
     const counts = teamCounts();
-    // Start on the first team with a free seat so the hero shows a car; any card click changes it before joining
+    // Start on the first team with a free seat so the showroom shows a car; any row click changes it before joining
     if (!isJoined && !teams.some((t) => t.id === selectedTeam && (counts[t.id] || 0) < t.maxPlayers)) {
         selectedTeam = teams.find((t) => (counts[t.id] || 0) < t.maxPlayers)?.id ?? null;
     }
-    teamGrid.innerHTML = '';
-    for (const t of teams) {
-        const n = counts[t.id] || 0;
-        const full = n >= t.maxPlayers;
+    teamGrid.replaceChildren(...teams.map((t) => {
+        const n = counts[t.id] || 0, full = n >= t.maxPlayers;
         const card = document.createElement('button');
         card.type = 'button';
         card.className = 'team-card' + (t.id === selectedTeam ? ' selected' : '') + (full ? ' full' : '');
         card.disabled = !canEditProfile() || (full && t.id !== selectedTeam);
         card.setAttribute('aria-pressed', t.id === selectedTeam);
-        card.title = t.name;
+        card.setAttribute('aria-label', `${t.name}, ${n} of ${t.maxPlayers} seats taken`);
+        card.dataset.team = t.id;
         card.style.setProperty('--team', t.chatColor);
-
-        const swatch = document.createElement('span');
-        swatch.className = 'team-swatch';
-        const name = document.createElement('span');
-        name.className = 'team-name';
-        name.textContent = t.name;
-        const count = document.createElement('span');
-        count.className = 'team-count';
-        count.textContent = `${n}/${t.maxPlayers}`;
-        count.setAttribute('aria-label', `${n} of ${t.maxPlayers} seats taken`);
-
-        card.append(swatch, name, count);
-        card.addEventListener('click', () => {
-            if (t.id === selectedTeam) return;
-            if (isJoined) return socket.emit('update_profile', { teamId: t.id }); // switches once the server says the seat is free
-            selectedTeam = t.id;
-            renderTeamGrid();
-        });
-        teamGrid.appendChild(card);
-    }
+        const text = Object.assign(document.createElement('span'), { className: 'team-text' });
+        text.append(Object.assign(document.createElement('span'), { className: 'team-name', textContent: t.name }),
+            Object.assign(document.createElement('span'), { className: 'team-car', textContent: t.car }));
+        const seats = Object.assign(document.createElement('span'), { className: 'team-seats' });
+        for (let k = 0; k < t.maxPlayers; k++) seats.append(Object.assign(document.createElement('i'), { className: k < n ? 'taken' : '' }));
+        card.append(Object.assign(document.createElement('span'), { className: 'team-chip' }), text, seats);
+        card.addEventListener('click', () => pickTeam(t.id));
+        return card;
+    }));
     renderHero();
 }
 
-// Big car + team colours for the selected team
-const heroCar = document.getElementById('hero-car');
+function pickTeam(id) {
+    if (id === selectedTeam || !canEditProfile()) return;
+    if (isJoined) return socket.emit('update_profile', { teamId: id }); // switches once the server says the seat is free
+    selectedTeam = id;
+    renderTeamGrid();
+}
+
+// Garage keys: up / down move through the teams with a free seat (also while typing the name)
+document.addEventListener('keydown', (e) => {
+    if (screenLobby.dataset.step !== 'garage' || screenLobby.classList.contains('hidden') || !['ArrowUp', 'ArrowDown'].includes(e.key)) return;
+    if (document.activeElement?.tagName === 'SELECT' || document.activeElement === chatInput) return;
+    const counts = teamCounts(), open = teams.filter((t) => t.id === selectedTeam || (counts[t.id] || 0) < t.maxPlayers);
+    const i = open.findIndex((t) => t.id === selectedTeam), next = open[(i + (e.key === 'ArrowDown' ? 1 : -1) + open.length) % open.length];
+    if (!next) return;
+    e.preventDefault();
+    pickTeam(next.id);
+});
+
+// Team colours, title and the showroom car (game3d.js reads window.lobbyView) for the selected team
+const heroTeam = document.getElementById('hero-team');
 function renderHero() {
     const t = teams.find((x) => x.id === selectedTeam);
-    heroCar.hidden = !t;
-    if (t && heroCar.getAttribute('src') !== `liveries/${t.id}-thumb.png`) heroCar.src = `liveries/${t.id}-thumb.png`;
+    window.lobbyView = { ...window.lobbyView, team: t?.id ?? null };
     screenLobby.style.setProperty('--team', t ? t.chatColor : '#64748b');
-    document.getElementById('hero-team').textContent = t ? t.name : 'Pick your team';
-    document.getElementById('hero-sub').textContent = t ? `${t.car} · ${teamCounts()[t.id] || 0}/${t.maxPlayers} seats taken` : `${teams.length || 11} teams · 2 seats each`;
+    if (heroTeam.textContent !== (t ? t.name : 'Pick your team')) {
+        heroTeam.textContent = t ? t.name : 'Pick your team';
+        heroTeam.style.animation = 'none'; void heroTeam.offsetWidth; heroTeam.style.animation = ''; // the title rises in again
+    }
+    const n = t ? teamCounts()[t.id] || 0 : 0;
+    document.getElementById('hero-sub').textContent = t ? `${t.car} · ${n} / ${t.maxPlayers} seats taken` : `${teams.length || 11} teams · 2 seats each`;
+    const me = isJoined && clientState.players[clientState.me];
+    document.getElementById('me-team').textContent = t ? `${t.name} · ${t.car}` : '';
+    heroTeam.classList.toggle('long', !!t && t.name.length > 16); // one line, even for the Suzuka special
+    document.getElementById('me-name').textContent = me ? me.username : inputUser.value.trim();
 }
+
+// Step 1 garage, step 2 race lobby; the paddock opens once you're on the grid
+const stepPaddock = document.getElementById('step-paddock'), btnToPaddock = document.getElementById('btn-to-paddock');
+function setStep(step) {
+    if (step === 'paddock' && !isJoined) step = 'garage';
+    screenLobby.dataset.step = step;
+    window.lobbyView = { ...window.lobbyView, step };
+    if (step === 'garage' && !inputUser.disabled) inputUser.focus();
+}
+document.querySelectorAll('.lb-step').forEach((b) => b.addEventListener('click', () => setStep(b.dataset.go)));
+btnToPaddock.addEventListener('click', () => setStep('paddock'));
+
+// My settings: a drawer over either step
+const drawer = document.getElementById('my-settings'), btnSettings = document.getElementById('btn-settings');
+function setDrawer(open) {
+    drawer.classList.toggle('open', open);
+    drawer.inert = !open;
+    btnSettings.setAttribute('aria-expanded', open);
+    if (open) drawer.querySelector('select, button')?.focus(); else btnSettings.focus();
+}
+btnSettings.addEventListener('click', () => setDrawer(!drawer.classList.contains('open')));
+document.getElementById('settings-close').addEventListener('click', () => setDrawer(false));
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && drawer.classList.contains('open')) setDrawer(false); });
 
 function setJoinedUI(joined) {
     isJoined = joined;
     controlsPanel.classList.toggle('hidden', !joined);
+    stepPaddock.disabled = !joined;
+    btnToPaddock.classList.toggle('hidden', !joined);
     renderTeamGrid();
+    setStep(joined ? 'paddock' : 'garage');
 }
 
-inputUser.focus();
-// Wide, tall screens have room for My settings next to the teams: start it open there
-if (matchMedia('(min-width: 1281px) and (min-height: 900px)').matches) document.querySelector('.my-settings').open = true;
+setStep('garage');
 
 const compoundSelect = document.getElementById('compound-select');
 try { compoundSelect.value = localStorage.getItem('lanrace.compound') || 'M'; } catch (e) { /* storage blocked */ }
@@ -274,7 +311,6 @@ socket.on('kicked', () => {
 socket.on('connect', () => {
     if (!lastJoin || !isJoined) return;
     amReady = false;
-    btnReady.innerText = 'Ready Up';
     socket.emit('join_lobby', lastJoin);
 });
 
@@ -285,12 +321,16 @@ window.handleJoinError = (reason) => {
     window.appendChat('SYSTEM', '#f43f5e', reason);
 };
 
+function renderReady() {
+    btnReady.textContent = amReady ? 'Ready' : 'Ready up';
+    btnReady.title = amReady ? 'Click to stand down' : '';
+    btnReady.classList.toggle('primary', !amReady);
+    btnReady.classList.toggle('success', amReady);
+}
 btnReady.addEventListener('click', () => {
     amReady = !amReady;
     socket.emit('toggle_ready', amReady);
-    btnReady.innerText = amReady ? 'Unready' : 'Ready Up';
-    btnReady.classList.toggle('primary', !amReady);
-    btnReady.classList.toggle('success', amReady);
+    renderReady();
 });
 
 btnStart.addEventListener('click', () => {
@@ -354,7 +394,8 @@ window.updateLobbyUI = () => {
 
         const nameNode = document.createElement('span');
         nameNode.className = 'player-name';
-        nameNode.textContent = player.username + (id === myId ? ' (You)' : '');
+        nameNode.textContent = player.username;
+        li.title = `${player.username} · ${teams.find((t) => t.id === player.teamId)?.name || ''}`;
         const teamNode = document.createElement('span');
         teamNode.className = 'player-team';
         teamNode.textContent = teams.find((t) => t.id === player.teamId)?.name || '';
@@ -384,25 +425,27 @@ window.updateLobbyUI = () => {
         }
         playersList.appendChild(li);
     });
-    // A few open grid slots so a quiet lobby still reads as a grid waiting to fill
-    for (let i = entries.length; i < Math.min(MAX_RACERS, Math.max(12, entries.length + 1)); i++) {
+    // Every box on the grid, the empty ones waiting to fill
+    for (let i = entries.length; i < MAX_RACERS; i++) {
         const li = document.createElement('li');
         li.className = 'player-item open';
         const num = Object.assign(document.createElement('span'), { className: 'player-num', textContent: String(i + 1).padStart(2, '0') });
         li.append(num, Object.assign(document.createElement('span'), { className: 'player-color' }),
-            Object.assign(document.createElement('span'), { className: 'player-name', textContent: 'Open slot' }));
+            Object.assign(document.createElement('span'), { className: 'player-name', textContent: 'Open' }));
         playersList.appendChild(li);
     }
     document.getElementById('driver-count').textContent = `${entries.length} / ${MAX_RACERS}`;
 
-    if (amHost) {
-        hostSettings.classList.remove('hidden');
-        btnReady.classList.add('hidden');
-    } else {
-        hostSettings.classList.add('hidden');
-        if (isJoined) btnReady.classList.remove('hidden');
-    }
+    hostSettings.classList.toggle('hidden', !amHost);
+    btnStart.classList.toggle('hidden', !amHost || !isJoined);
+    btnReady.classList.toggle('hidden', amHost || !isJoined);
+    // Who the start waits for: everyone racing but the host must be ready
+    const racers = entries.filter(([id, p]) => id !== clientState.hostId && !p.isSpectating), ready = racers.filter(([, p]) => p.isReady).length;
+    document.getElementById('ready-note').innerHTML = !isJoined ? '' : amHost
+        ? (racers.length ? `<b>${ready} / ${racers.length}</b> drivers ready` : 'Just you on the grid: start when you like')
+        : (clientState.players[myId]?.isReady ? 'Waiting for the host to start' : 'Ready up when you are set');
     settingsView.classList.toggle('hidden', amHost); // the host edits; everyone else reads
+    document.getElementById('track-plate').classList.toggle('hidden', amHost);
 
     const me = clientState.players[myId];
     const spOverlay = document.getElementById('spectator-overlay');
@@ -412,9 +455,7 @@ window.updateLobbyUI = () => {
         screenGame.classList.add('hidden');
         // Server state wins: syncs arrive whenever anyone joins, so don't reset a ready player
         amReady = !!me?.isReady;
-        btnReady.innerText = amReady ? 'Unready' : 'Ready Up';
-        btnReady.classList.toggle('primary', !amReady);
-        btnReady.classList.toggle('success', amReady);
+        renderReady();
     } else {
         screenLobby.classList.add('hidden');
         screenGame.classList.remove('hidden');
@@ -452,8 +493,12 @@ window.updateSettingsUI = () => {
     const time = s.timeOfDay === 'night' ? 'Night' : 'Day';
     const rows = [['Track', track], ['Time', time], ['Laps', s.maxLaps], ['Qualifying', quali], ['Collisions', s.collisions === false ? 'Off' : (s.contactPenalties === false ? 'On, no penalties' : 'On, penalties') + (s.ghostStart !== false ? ', ghost start' : '')], ['Tyre wear', s.tyreWear === false ? 'Off' : 'On'],
         ['Driver help', help.mode === 'fixed' ? `Same for all: braking ${{ 0: 'Off', 50: 'Low', 100: 'High' }[help.brake]}, steering ${help.steer ? 'On' : 'Off'}` : 'Each driver chooses']];
-    settingsView.replaceChildren(...rows.map(([k, v]) => {
+    const plate = document.getElementById('track-plate');
+    plate.replaceChildren(Object.assign(document.createElement('b'), { textContent: track }),
+        Object.assign(document.createElement('span'), { textContent: `${time} · ${s.maxLaps} ${s.maxLaps === 1 ? 'lap' : 'laps'}` }));
+    settingsView.replaceChildren(...rows.filter(([k]) => !['Track', 'Time', 'Laps'].includes(k)).map(([k, v]) => {
         const d = document.createElement('div');
+        if (String(v).length > 18) d.className = 'wide';
         d.append(Object.assign(document.createElement('dt'), { textContent: k }), Object.assign(document.createElement('dd'), { textContent: v }));
         return d;
     }));
@@ -510,23 +555,3 @@ window.handleStatusChange = (status) => {
         document.getElementById('countdown-text').innerText = 'FINISH!';
     }
 };
-
-// Credits: every model's author and licence (public/models/credits.json, written by the car build) and the textures'
-// sources (public/textures/manifest.json)
-const TEXTURE_SITES = { polyhaven: 'Poly Haven', ambientcg: 'ambientCG' };
-document.getElementById('btn-credits').addEventListener('click', async () => {
-    const dlg = document.getElementById('credits'), list = document.getElementById('credits-list');
-    if (!list.childElementCount) {
-        const get = (url) => fetch(url).then((r) => r.json()).catch(() => null);
-        const [models, textures] = await Promise.all([get('models/credits.json'), get('textures/manifest.json')]);
-        const rows = [...(models || []).map((m) => [m.name, `${m.author} (${m.licence})`, m.url]),
-            ...[...new Map(Object.values(textures || {}).map((t) => [t.url, t])).values()].map((t) => { const [site, name] = t.src.split(':'); return [name, `${TEXTURE_SITES[site] || site} (${t.licence})`, t.url]; })];
-        for (const [name, who, url] of rows) {
-            const li = document.createElement('li'), a = document.createElement('a');
-            a.href = url; a.target = '_blank'; a.rel = 'noopener'; a.textContent = name;
-            li.append(a, ` — ${who}`);
-            list.appendChild(li);
-        }
-    }
-    dlg.showModal();
-});
