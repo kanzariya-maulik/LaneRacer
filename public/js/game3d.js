@@ -1707,13 +1707,18 @@ function roomEnvTexture() {
     pmrem.dispose(); room.dispose();
     return roomEnv;
 }
+// The paint as modelled, per material, kept outside it: in userData the textures went into every material.clone() (the
+// ghost copies), which serialises userData as JSON and so re-encoded each 2048 px texture as a PNG data URL, ~0.1-0.5 s each,
+// 44 of them: the freezes at every session start and through the first corners (ghosts), seconds on a slow laptop
+const paintOf = new WeakMap();
 function lightCars() {
     for (const a of Object.values(teamAssets)) for (const o of [a.near, a.far]) o.traverse((x) => {
         const s = x.material;
-        if (!x.isMesh || (s.envMap === carEnv && s.userData.day === carDay)) return;
-        const modelled = (s.userData.paint ||= { roughnessMap: s.roughnessMap, metalnessMap: s.metalnessMap, roughness: s.roughness, metalness: s.metalness });
-        for (const m of [s, ghostOf(s)]) Object.assign(m, carDay ? DAY_PAINT : modelled, { envMap: carEnv, envMapIntensity: 0.6, needsUpdate: true });
-        s.userData.day = carDay;
+        if (!x.isMesh || (s.envMap === carEnv && paintOf.get(s)?.day === carDay)) return;
+        if (!paintOf.has(s)) paintOf.set(s, { modelled: { roughnessMap: s.roughnessMap, metalnessMap: s.metalnessMap, roughness: s.roughness, metalness: s.metalness } });
+        const paint = paintOf.get(s);
+        for (const m of [s, ghostOf(s)]) Object.assign(m, carDay ? DAY_PAINT : paint.modelled, { envMap: carEnv, envMapIntensity: 0.6, needsUpdate: true });
+        paint.day = carDay;
     });
 }
 

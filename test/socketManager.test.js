@@ -67,7 +67,7 @@ test('everyone leaving during countdown cancels it, so a new host gets exactly o
     b.fire('disconnect');
 });
 
-test('lights wait for a slow browser to draw the grid, at most 15 s', (t) => {
+test('lights wait for a slow browser to draw the grid, at most 30 s', (t) => {
     t.mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
     const io = fakeIo();
     setupSocketManager(io, noNet);
@@ -82,7 +82,7 @@ test('lights wait for a slow browser to draw the grid, at most 15 s', (t) => {
 
     a.fire('restart_session'); // b never draws: the start goes ahead without it
     const lit = io.events('lights').length;
-    advance(t, 14000);
+    advance(t, 29000);
     assert.strictEqual(io.events('lights').length, lit, 'lights before the wait ran out');
     advance(t, 2000);
     assert.ok(io.events('lights').length > lit, 'a stuck browser held the start forever');

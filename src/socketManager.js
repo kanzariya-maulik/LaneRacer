@@ -8,7 +8,9 @@ const { fillGrid } = require('./game/bots/roster');
 const TRACKS = Track.loadAll(); // throws at startup if track data is missing
 const RESULTS_MS = 8000;
 const FINISH_MS = 15000; // results screen time before everyone returns to the lobby
-const DRAWN_WAIT_MS = 15000; // the lights wait at most this long for a slow (or stuck) browser to draw the grid
+// The lights wait at most this long for a slow (or stuck) browser to draw the grid: a laptop 4x slower than an M1 Pro takes
+// ~7 s (track build 2.2 s, first-frame shaders 4.3 s); twice that again still fits
+const DRAWN_WAIT_MS = 30000;
 
 const state = {
     status: 'LOBBY', // LOBBY, QUALIFYING, QUALI_RESULTS, COUNTDOWN, RACE, FINISHED
