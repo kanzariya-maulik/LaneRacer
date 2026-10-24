@@ -17,9 +17,10 @@ function start(t, players, settings = RACE) {
     return g;
 }
 
-// From just inside the pit mouth at racing speed, no driver input: the game does the rest
+// From just inside the pit mouth at racing speed, no driver input, "box" called: the game does the rest
 function enterPit(t, g, p, speedMs = 60, atM = 5) {
     const q = pitPoint(t, atM * t.scale), v = speedMs * t.scale;
+    if (g.mode === 'race') p.boxCall = 'this';
     Object.assign(p, { x: q.x, y: q.y, angle: q.angle, vx: Math.cos(q.angle) * v, vy: Math.sin(q.angle) * v, speed: v });
     p.input = { throttle: 0, brake: 0, steer: 0, drs: false };
 }
@@ -305,7 +306,7 @@ test('quali: a fresh set every pit visit; race: one service per lap', () => {
         const t = Track.load('monza'), g = new Game(io, [lp('a')], t, mode === 'quali' ? { qualiLaps: 2 } : RACE, () => {}, mode), p = g.players.a, sc = t.scale;
         // In the lane: a due car is taken to its box ('lane'), otherwise driven through ('out') or left alone (same visit)
         const visit = () => {
-            Object.assign(p, { inPit: true, pitS: 5 * sc, vx: 0, vy: 0, input: { throttle: 0, brake: 0, steer: 0 } });
+            Object.assign(p, { inPit: true, pitS: 40 * sc, vx: 0, vy: 0, input: { throttle: 0, brake: 0, steer: 0 } }); // in the open lane
             g.updateStop(p);
             if (p.stop?.phase !== 'lane') { p.stop = null; return false; }
             p.stop = { phase: 'service', t: 1e-6, age: 0, parkedAt: g.clock }; g.updateStop(p);
@@ -405,14 +406,14 @@ for (const id of Track.TRACK_IDS) {
             p.stop = null; g.frozen = false;
             const visits = p.pitVisits;
             for (const atM of [(pit.limEnd + pit.len) / 2 / sc, (p.box.s + pit.limEnd) / 2 / sc]) {
-                Object.assign(p, { inPit: false, wasInPit: false });
+                Object.assign(p, { inPit: false, wasInLane: false });
                 assert.deepStrictEqual(driveAlong(t, g, p, atM, 60 * 3), [], `${g.mode}: entered at ${atM.toFixed(0)} m`);
             }
             assert.strictEqual(p.pitVisits, visits, `${g.mode}: a stray entry counted as a pit visit`);
         }
         // Handed back at the limiter end (inPit may flicker at the exit tip), then flat out along the lane line
         const g = start(t, [lp('a', 'ferrari')]), p = g.players.a;
-        Object.assign(p, { x: p.box.x, y: p.box.y, angle: p.box.angle, vx: 0, vy: 0, speed: 0, stop: { phase: 'out', t: 0, age: 0 }, inPit: true, wasInPit: true });
+        Object.assign(p, { x: p.box.x, y: p.box.y, angle: p.box.angle, vx: 0, vy: 0, speed: 0, stop: { phase: 'out', t: 0, age: 0 }, inPit: true, wasInLane: true });
         p.input = { throttle: 0, brake: 0, steer: 0, drs: false };
         for (let k = 0; k < 60 * 60 && p.stop; k++) g.update();
         assert.strictEqual(p.stop, null);
@@ -427,7 +428,7 @@ test('one stop per lap: boxes before and past the start line both get a service 
         p.lap = 1;
         for (let n = 1; n <= 2; n++) {
             const lap = p.lap;
-            Object.assign(p, { checkpoint: t.checkpoints.length - 1, inPit: false, wasInPit: false, stop: null });
+            Object.assign(p, { checkpoint: t.checkpoints.length - 1, inPit: false, wasInLane: false, stop: null });
             enterPit(t, g, p, 30);
             runStop(t, g, p);
             assert.strictEqual(p.stops, n, `${team}: stop ${n} (entered on lap ${lap}, now lap ${p.lap})`);

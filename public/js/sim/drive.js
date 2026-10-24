@@ -60,11 +60,14 @@ export const pitHalf = (pit, n) => (pit.widthAt[n.i] + (pit.widthAt[Math.min(n.i
 // Barrier response (physics.js): n points from the barrier back toward the car
 export const bounce = (p, nx, ny) => Physics.bounce(p, nx, ny);
 
-// In the pit lane = on pit asphalt and off the track's (where they overlap, it's track); limiter caps speed
+// In the pit lane = on pit asphalt and off the track's (where they overlap, it's track), and on the lane's side of the pit
+// wall: the wall stands at the lane's edge, and a car rubbing it from the track had its centre inside the lane's width (the
+// assist then pinned it to the wall, steering for the lane centre); limiter caps speed
 export function updatePitState(p, t, near, nearPit) {
     const pit = t.pit;
     p.pitS = pitAlong(pit, nearPit);
-    p.inPit = nearPit.dist <= pitHalf(pit, nearPit) && surfaceUnder(t, near, p.x, p.y) !== 'road';
+    p.inPit = nearPit.dist <= pitHalf(pit, nearPit) && surfaceUnder(t, near, p.x, p.y) !== 'road'
+        && !Physics.crossWall(p.x, p.y, nearPit.px, nearPit.py, pit.wall);
     p.limiter = p.inPit && p.pitS >= pit.limStart && p.pitS <= pit.limEnd;
     if (p.limiter) {
         const max = ((pit.limitKmh || PIT_LIMIT_KMH) / 3.6) * t.scale, v = Math.hypot(p.vx, p.vy);

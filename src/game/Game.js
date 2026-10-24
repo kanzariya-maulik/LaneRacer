@@ -105,7 +105,7 @@ class Game {
                 vx: 0, vy: 0, speed: 0, steer: 0,
                 inPit: false, limiter: false, pitS: 0,
                 box: boxes ? boxes[index] : null, stop: mode === 'quali' && boxes ? { phase: 'wait', t: 0, age: 0 } : null, lastStop: null,
-                servicedLap: -1, pitVisits: 0, servicedVisit: -1, wasInPit: false,
+                servicedLap: -1, pitVisits: 0, servicedVisit: -1, wasInLane: false,
                 limits: 0, penalty: 0, offLimits: false, finishTime: null,
                 lastSafeX: slot.x, lastSafeY: slot.y, gridX: slot.x, gridY: slot.y, jumpStart: false, reacted: false,
                 drs: false, drsAvailable: false, drsEligible: [], tow: 0, lapS: null,
@@ -196,10 +196,16 @@ class Game {
     updateStop(p) {
         const t = this.track, sc = t.scale;
         if (!t.pit || !p.box || p.finished) return;
-        // Only from the entry end: not onto the exit lane, nor an inPit flicker at the exit tip after the hand-back
-        const entered = p.inPit && !p.wasInPit && p.pitS < t.pit.limStart;
+        // Taken over at the mouth only when the driver called "box": the lane tapers to nothing at the white line there, and a
+        // car just running wide over the line (still racing) was steered into the start of the pit wall. Uncalled, a car is
+        // taken once it's in the open lane. Only from the entry end (the limiter line, or 30 m into the open lane where that
+        // comes first): not onto the exit lane, nor an inPit flicker at the exit tip after the hand-back
+        const pit = t.pit;
+        pit.openS ??= pit.cum[pit.widthAt.findIndex((w) => w >= 0.9 * Math.max(...pit.widthAt))];
+        const inLane = p.inPit && (p.boxCall === 'this' || p.pitS >= pit.openS) && p.pitS < Math.max(pit.limStart, pit.openS + 30 * sc);
+        const entered = inLane && !p.wasInLane && !p.stop; // a car the game is driving (out of its garage, say) isn't arriving
         if (entered) { p.pitVisits++; p.entryLap = p.lap; } // quali: a fresh set every visit. Race: the lap may tick in the lane
-        p.wasInPit = p.inPit;
+        p.wasInLane = inLane;
         const thr = (p.input.throttle || 0) >= RELEASE_THROTTLE;
         // Release presses are edge-triggered: throttle held while the game drives is neither perfect nor a jump
         const press = thr && !p.thrWas;

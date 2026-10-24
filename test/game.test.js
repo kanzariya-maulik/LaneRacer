@@ -3,6 +3,7 @@ const assert = require('node:assert');
 const Game = require('../src/game/Game');
 const Track = require('../src/game/Track');
 const Physics = require('../src/game/Physics');
+const Drive = require('../public/js/sim/drive.js');
 const CarPhysics = require('../src/game/CarPhysics');
 
 const io = { emit() {}, volatile: { emit() {} } };
@@ -364,6 +365,40 @@ const pitS = (p) => {
     return monza.pit.cum[n.i] + n.t * (monza.pit.cum[n.i + 1] - monza.pit.cum[n.i]);
 };
 const pitPoint = (s) => Track.pointAt(monza.pit.path, monza.pit.cum, s, false);
+
+for (const id of Track.TRACK_IDS) {
+    // The lane tapers to nothing at the white line: a car running wide over the line at the mouth isn't in the pit lane,
+    // so the pit assist mustn't take it (it steered it into the start of the pit wall and held it there)
+    test(`${id}: running wide over the line at the pit entry mouth doesn't start a pit stop; the open lane does`, () => {
+        const tr = Track.load(id), pit = tr.pit, g = new Game(io, [lp('a')], tr, RACE, () => {});
+        g.release();
+        const p = g.players.a, at = (m) => { p.stop = null; Object.assign(p, { inPit: true, wasInLane: false, pitS: m * tr.scale }); g.updateStop(p); return p.stop; };
+        assert.strictEqual(at(9), null, '9 m into the taper');
+        p.boxCall = 'this';
+        assert.ok(at(9), 'called in: taken from the mouth');
+        p.boxCall = null;
+        const open = pit.cum[pit.widthAt.findIndex((w) => w >= 0.9 * Math.max(...pit.widthAt))] / tr.scale;
+        assert.ok(at(open + 2), `the open lane (${open.toFixed(0)} m) starts the stop`);
+    });
+}
+
+for (const id of Track.TRACK_IDS) {
+    // The pit wall stands at the lane's edge: a car rubbing it from the track side had its centre inside the lane's width,
+    // counted as in the pit, and the assist pinned it against the wall steering for the lane centre
+    test(`${id}: nothing on the track side of the pit wall counts as in the pit lane`, () => {
+        const tr = Track.load(id), pit = tr.pit, sc = tr.scale, wrong = [];
+        for (let i = 0; i < pit.path.length - 1; i++) {
+            const a = pit.path[i], b = pit.path[i + 1], L = Math.hypot(b.x - a.x, b.y - a.y) || 1, nx = -(b.y - a.y) / L, ny = (b.x - a.x) / L;
+            for (let k = -28; k <= 28; k++) { // every 25 cm across, 7 m either side of the centre line
+                const x = a.x + nx * k * 0.25 * sc, y = a.y + ny * k * 0.25 * sc, np = Physics.nearestOnPath(x, y, pit.path, false);
+                const p = { x, y, vx: 0, vy: 0 };
+                Drive.updatePitState(p, tr, Physics.nearestOnTrack(x, y, tr), np);
+                if (p.inPit && Physics.crossWall(x, y, np.px, np.py, pit.wall)) wrong.push(`${(p.pitS / sc).toFixed(0)} m`);
+            }
+        }
+        assert.deepStrictEqual(wrong, [], 'in the pit lane behind the pit wall');
+    });
+}
 
 test('pit entry is open: a car drives down the lane past the garages under the limiter', () => {
     const g = new Game(io, [lp('a')], monza, RACE, () => {});
