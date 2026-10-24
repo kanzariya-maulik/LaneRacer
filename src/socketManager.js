@@ -8,6 +8,7 @@ const { fillGrid } = require('./game/bots/roster');
 const TRACKS = Track.loadAll(); // throws at startup if track data is missing
 const RESULTS_MS = 8000;
 const FINISH_MS = 15000; // results screen time before everyone returns to the lobby
+const DRAWN_WAIT_MS = 15000; // the lights wait at most this long for a slow (or stuck) browser to draw the grid
 
 const state = {
     status: 'LOBBY', // LOBBY, QUALIFYING, QUALI_RESULTS, COUNTDOWN, RACE, FINISHED
@@ -44,6 +45,14 @@ function clearTimers() {
 
 // Live sockets by id, so the host can tell a kicked player
 const sockets = {};
+// Drivers whose browser hasn't drawn the new session's world yet; the lights start when it empties
+let notDrawn = new Set(), onAllDrawn = null;
+function drawn(id) {
+    if (!notDrawn.delete(id) || notDrawn.size) return;
+    const go = onAllDrawn;
+    onAllDrawn = null;
+    go?.();
+}
 
 // A player leaves the session (disconnect or kick): their car goes, and the host role passes on
 function removePlayer(io, id) {
@@ -271,7 +280,10 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
                 (car ? ` | late inputs ${car.starveLast ?? 0}/s re-syncs ${car.realigns || 0}` : ''));
         });
 
+        socket.on('world_drawn', () => drawn(socket.id));
+
         socket.on('disconnect', () => {
+            drawn(socket.id); // no one waits for a browser that left
             console.log(`Player disconnected: ${socket.id}`);
             netlog.log(`[DISCONNECT] ${state.players[socket.id]?.username ?? 'visitor'} (${socket.id})`);
             net.cleanup(socket.id);
@@ -300,16 +312,26 @@ function startRace(io, grid) {
     setStatus(io, 'COUNTDOWN');
     const race = new Game(io, grid, TRACKS[state.settings.trackId], state.settings, () => finishRace(io), 'race', net);
     gameInstance = race;
-    race.start(); // cars are drawn on the grid, frozen until lights out
 
-    for (let n = 1; n <= 5; n++) later(() => { if (gameInstance === race) io.emit('lights', { count: n }); }, n * 1000);
-    later(() => {
-        if (gameInstance !== race) return; // race already ended (e.g. its grid emptied)
-        io.emit('lights', { count: 0 });
-        race.release();
-        setStatus(io, 'RACE');
-        io.emit('session', { phase: 'RACE', endsInMs: null });
-    }, 5000 + 500 + Math.random() * 2000);
+    // The lights wait for every driver's browser to draw the grid: a slow laptop building the track missed the start
+    const lights = () => {
+        onAllDrawn = null;
+        if (gameInstance !== race) return;
+        for (let n = 1; n <= 5; n++) later(() => { if (gameInstance === race) io.emit('lights', { count: n }); }, n * 1000);
+        later(() => {
+            if (gameInstance !== race) return; // race already ended (e.g. its grid emptied)
+            io.emit('lights', { count: 0 });
+            race.release();
+            setStatus(io, 'RACE');
+            io.emit('session', { phase: 'RACE', endsInMs: null });
+        }, 5000 + 500 + Math.random() * 2000);
+    };
+    notDrawn = new Set(grid.map((p) => p.id).filter((id) => sockets[id]));
+    onAllDrawn = lights;
+    race.start(); // cars are drawn on the grid, frozen until lights out; game_init asks each browser to draw them
+    if (onAllDrawn !== lights) return; // every browser has drawn already
+    if (!notDrawn.size) lights(); // bots only
+    else later(() => onAllDrawn === lights && lights(), DRAWN_WAIT_MS);
 }
 
 function finishRace(io) {

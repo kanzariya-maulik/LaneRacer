@@ -1965,20 +1965,24 @@ function teamMaterial(key, m, paint) {
     if (!t) { t = m.clone(); paint(t); byMat.set(m, t); }
     return t;
 }
-// Every team's car shaders, solid and ghost, near and far, built in the background at session start: none mid-race
-function warmCars() {
-    const group = new THREE.Group();
+// The grid's car shaders, solid and ghost, near and far, built at session start: none mid-race. One car a frame: all
+// teams in one go held the page ~1.3 s here and ~5 s on a 4x slower laptop (Chrome's "Page Unresponsive")
+let warmRun = 0, worldUndrawn = false;
+async function warmCars() {
+    const run = ++warmRun, onGrid = new Set(Object.values(clientState.gameState || {}).map((p) => p.teamId));
     for (const [teamId, asset] of Object.entries(teamAssets)) {
+        if (onGrid.size && !onGrid.has(teamId)) continue;
         for (const ghost of [false, true]) {
+            await new Promise(requestAnimationFrame);
+            if (run !== warmRun) return; // a newer session started
             const m = realCar(asset, teamId, []);
             m.traverse((o) => { if (o.isLOD) for (const l of o.levels) l.object.visible = true; });
             if (ghost) setGhost(m, true);
-            group.add(m);
+            m.scale.setScalar(scale * CAR_SCALE);
+            m.updateMatrixWorld(true);
+            await renderer.compileAsync(m, camera, scene).catch((e) => console.warn('car warm-up', e));
         }
     }
-    group.scale.setScalar(scale * CAR_SCALE);
-    group.updateMatrixWorld(true);
-    renderer.compileAsync(group, camera, scene).catch((e) => console.warn('car warm-up', e));
 }
 const TYRE_BATCHES = ['S', 'M', 'H', 'rim'];
 function updateWheelBatch() {
@@ -2712,6 +2716,7 @@ function frame(now) {
             if (post) post.key = 'fallback';
             postFellBack = true;
         }
+        if (worldUndrawn) { worldUndrawn = false; socket.emit('world_drawn'); } // the server holds the start lights for this
     }
 
     if (now - lastHud > 66) { // HUD and minimap at 15 Hz, timing tower at 4 Hz
@@ -2817,6 +2822,7 @@ window.initGameVisuals = () => {
     singlePass(scene);
     freeze(world);
     warmCars();
+    worldUndrawn = true;
     // No shader warm-up: renderer.compileAsync took ~22 s on Monza (the 1.5 s wait for it only left the screen blank, then
     // the first draw compiled everything anyway, ~1 s); the world is drawn at once, under the start lights
     simStep(false); // resend what's held when a new session starts

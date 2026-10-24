@@ -2,12 +2,14 @@
 // parts (tyres per compound, helmet). Loaded once per page; a team whose GLB is missing or broken keeps the procedural car.
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 
 let loader = null;
-const gltfLoad = (url) => (loader ||= new GLTFLoader()).loadAsync(url);
+const gltfLoader = () => (loader ||= new GLTFLoader().setMeshoptDecoder(MeshoptDecoder)); // the cars are meshopt-compressed
+const gltfLoad = (url) => gltfLoader().loadAsync(url);
 // The file's bytes alone (no main-thread cost while it downloads) and, separately, its parse (geometry, texture decode)
 export const fetchModel = (url) => fetch(url).then((r) => { if (!r.ok) throw new Error(`${url}: ${r.status}`); return r.arrayBuffer(); });
-export const parseModel = (buf) => (loader ||= new GLTFLoader()).parseAsync(buf, '');
+export const parseModel = (buf) => gltfLoader().parseAsync(buf, '');
 const carFrame = (o) => [o.position.x, -o.position.z, o.position.y]; // glTF y up → car frame (x forward, y left, z up)
 const WHEEL_NAMES = ['wheel_FL', 'wheel_FR', 'wheel_RL', 'wheel_RR'];
 
@@ -28,7 +30,6 @@ function toAsset({ scene }) {
         wheels[name] = { pos: carFrame(w), radius: w.userData.radius, width: w.userData.width };
     }
     const at = (name) => (get(name) ? carFrame(get(name)) : null);
-    for (const m of [near, far]) m.position.set(0, 0, 0); // the LOD places them
     return { near, far, wheels, eye: at('eye'), wheelPos: at('wheel_pos'), head: at('head') };
 }
 
@@ -37,7 +38,9 @@ function toAsset({ scene }) {
 export function cloneForCar(asset, lodM) {
     const lod = new THREE.LOD();
     for (const [m, d] of [[asset.near, 0], [asset.far, lodM]]) {
-        const c = m.clone();
+        // In a plain group: the mesh carries meshopt's dequantizing scale/offset, what's added to the level (the driver)
+        // stays in car metres
+        const c = new THREE.Group().add(m.clone());
         c.traverse((o) => {
             if (!o.isMesh) return;
             o.castShadow = o.receiveShadow = true;

@@ -4,7 +4,7 @@
 # radius and width), head / eye / wheel_pos markers at the cockpit, and two detail levels (lod_near, lod_far) each with
 # one material 'livery' whose colour, normal and roughness are baked from the full model.
 #   blender -b --python scripts/cars/build.py -- <teamId> [--preview]
-import bpy, bmesh, json, os, sys, glob, math
+import bpy, bmesh, json, os, sys, glob, math, subprocess
 from mathutils import Vector, Matrix
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -512,6 +512,8 @@ def build(team):
     out = os.path.join(OUT, f'{team}.glb')
     bpy.ops.export_scene.gltf(filepath=out, export_format='GLB', export_extras=True, export_image_format='WEBP',
                               export_yup=True, export_apply=True, export_materials='EXPORT')
+    # meshopt: geometry ~4x smaller (every player downloads every car); carModels.js decodes it
+    subprocess.run(['npx', '-y', '@gltf-transform/cli@4', 'meshopt', out, out], check=True)
     log(f'wrote {out} ({os.path.getsize(out) / 1e6:.1f} MB)')
     return out
 

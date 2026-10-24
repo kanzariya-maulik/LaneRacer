@@ -84,20 +84,10 @@ test('crossWall: crossing reports the normal back toward the side the car came f
 
 // ---- car hitbox matches the cars drawn (public/models/cars GLBs, near LOD: x forward, z sideways), median of the grid ----
 async function carExtents() {
-    const fs = require('fs'), dir = 'public/models/cars', fronts = [], rears = [], sides = [];
+    const fs = require('fs'), { readGlb } = require('../scripts/cars/glb.cjs'), dir = 'public/models/cars', fronts = [], rears = [], sides = [];
     for (const f of fs.readdirSync(dir).filter((n) => n.endsWith('.glb'))) {
-        const b = fs.readFileSync(`${dir}/${f}`), j = JSON.parse(b.subarray(20, 20 + b.readUInt32LE(12)));
-        let front = -Infinity, rear = Infinity, side = 0;
-        const walk = (i, T) => { // the build script bakes transforms into the meshes: only translations remain
-            const nd = j.nodes[i], t = nd.translation || [0, 0, 0], P = [T[0] + t[0], T[1] + t[1], T[2] + t[2]];
-            if (nd.mesh !== undefined) for (const p of j.meshes[nd.mesh].primitives) {
-                const a = j.accessors[p.attributes.POSITION];
-                front = Math.max(front, a.max[0] + P[0]); rear = Math.min(rear, a.min[0] + P[0]); side = Math.max(side, -(a.min[2] + P[2]), a.max[2] + P[2]);
-            }
-            (nd.children || []).forEach((c) => walk(c, P));
-        };
-        walk(j.nodes.findIndex((n) => n.name === 'lod_near'), [0, 0, 0]);
-        fronts.push(front); rears.push(rear); sides.push(side);
+        const { min, max } = readGlb(`${dir}/${f}`).bounds('lod_near');
+        fronts.push(max[0]); rears.push(min[0]); sides.push(Math.max(-min[2], max[2]));
     }
     const med = (v) => v.sort((a, b) => a - b)[v.length >> 1], K = Physics.CAR_SCALE; // drawn (and collided) at this share
     return { front: med(fronts) * K, rear: med(rears) * K, side: med(sides) * K };

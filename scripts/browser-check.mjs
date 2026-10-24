@@ -1,6 +1,6 @@
 // Drives a local LanRace race in Chrome over the DevTools protocol: screenshots per view, fps, console errors.
 // Uses its own server on PORT 3299 (never the user's 3232) and kills only what it started.
-// node scripts/browser-check.mjs --track monza --level high --time day --views chase,tcam,cockpit --out <dir> [--headed] [--fps 10] [--lose] [--webgl] [--logdepth] [--at countdown] [--eval <js run before screenshots>] [--spots <json: [{ name, pos: [x, y, z], look: [x, y, z] }]>] [--bots <n>] [--cpuprofile <file>] [--vsync] [--team <name>] [--credits] [--after <js printed after the fps wait>] [--mbps <n>] [--lobby <s>] [--init <js run once the page loads, before joining>] [--quali full|short|oneshot (default off)] [--consoleprofile <file: what the page's console.profile() records>]
+// node scripts/browser-check.mjs --track monza --level high --time day --views chase,tcam,cockpit --out <dir> [--headed] [--fps 10] [--lose] [--webgl] [--logdepth] [--at countdown] [--eval <js run before screenshots>] [--spots <json: [{ name, pos: [x, y, z], look: [x, y, z] }]>] [--bots <n>] [--cpuprofile <file>] [--vsync] [--team <name>] [--credits] [--after <js printed after the fps wait>] [--mbps <n>] [--lobby <s>] [--init <js run once the page loads, before joining>] [--cpu <n: CPU n times slower, a weaker laptop>] [--film <s: a screenshot every 0.5 s for s seconds from the start click>] [--quali full|short|oneshot (default off)] [--consoleprofile <file: what the page's console.profile() records>]
 import { spawn, execSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -46,6 +46,7 @@ try {
         if (d.method === 'Runtime.exceptionThrown') errors.push((d.params.exceptionDetails.exception?.description || d.params.exceptionDetails.text).slice(0, 300));
     };
     await send('Runtime.enable'); await send('Page.enable');
+    if (arg('cpu')) await send('Emulation.setCPUThrottlingRate', { rate: Number(arg('cpu')) });
     if (arg('consoleprofile')) { await send('Profiler.enable'); await send('Profiler.setSamplingInterval', { interval: 200 }); }
     if (arg('mbps')) { // a slower link, as friends on WiFi: --mbps 20 (download), 5 ms latency
         await send('Network.enable'); await send('Network.setCacheDisabled', { cacheDisabled: true }); // a friend's first load
@@ -77,6 +78,10 @@ try {
         return true; })()`);
     await wait(500);
     await evalJs(`document.getElementById('btn-start').click(); true`);
+    for (let i = 0; i < Number(arg('film', 0)) * 2; i++, await wait(500)) { // what a player sees while the session loads
+        const st = await evalJs(`typeof clientState !== 'undefined' ? clientState.status : ''`), shot = await send('Page.captureScreenshot', { format: 'jpeg', quality: 50 });
+        writeFileSync(`${out}/film-${String(i).padStart(2, '0')}-${st}.jpg`, Buffer.from(shot.result.data, 'base64'));
+    }
     if (arg('at', 'race') === 'countdown') { await until(`typeof clientState !== 'undefined' && clientState.status === 'COUNTDOWN'`, 120000); await wait(1500); }
     else { await until(`typeof clientState !== 'undefined' && ['RACE', 'QUALIFYING'].includes(clientState.status) && window.lanraceFps > 0`, 120000); await wait(3000); } // shaders warm, first frames settled
     // drive forward so the scene moves (motion blur, shadows following)

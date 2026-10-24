@@ -23,9 +23,15 @@ function readGlb(file) {
         return under(n.index).flatMap((i) => (json.nodes[i].mesh === undefined ? [] : json.meshes[json.nodes[i].mesh].primitives));
     };
     const triangles = (name) => prims(name).reduce((s, p) => s + (p.indices !== undefined ? json.accessors[p.indices].count : json.accessors[p.attributes.POSITION].count) / 3, 0);
-    // bounds from the POSITION accessors' min/max (node-local; the pipeline applies transforms before export)
+    // bounds from the POSITION accessors' min/max, through the mesh node's own translation and scale (meshopt's
+    // quantization stores positions as integers and puts the dequantizing transform on the node)
     const bounds = (name) => {
-        const ps = prims(name).map((p) => json.accessors[p.attributes.POSITION]);
+        const n = nodes.get(name);
+        const ps = n ? under(n.index).filter((i) => json.nodes[i].mesh !== undefined).flatMap((i) => json.meshes[json.nodes[i].mesh].primitives.map((p) => {
+            const a = json.accessors[p.attributes.POSITION], s = scl(json.nodes[i]), t = local(json.nodes[i]);
+            const q = a.normalized ? { 5120: 127, 5121: 255, 5122: 32767, 5123: 65535 }[a.componentType] : 1; // integers stand for -1..1 (or 0..1)
+            return { min: a.min.map((v, k) => (v / q) * s[k] + t[k]), max: a.max.map((v, k) => (v / q) * s[k] + t[k]) };
+        })) : [];
         if (!ps.length) return null;
         return { min: [0, 1, 2].map((k) => Math.min(...ps.map((a) => a.min[k]))), max: [0, 1, 2].map((k) => Math.max(...ps.map((a) => a.max[k]))) };
     };

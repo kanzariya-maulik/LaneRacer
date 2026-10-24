@@ -12,7 +12,11 @@ function fakeIo() {
         handlers: {},
         sent: [],
         on(ev, fn) { this.handlers[ev] = fn; },
-        emit(ev, data) { this.sent.push([ev, data]); },
+        clients: [],
+        emit(ev, data) {
+            this.sent.push([ev, data]);
+            if (ev === 'game_init') for (const s of this.clients) if (!s.slow) s.fire('world_drawn'); // browsers that draw at once
+        },
         volatile: { emit() {} },
     };
     io.connect = (id) => {
@@ -26,6 +30,7 @@ function fakeIo() {
             fire(ev, data) { this.handlers[ev]?.(data); },
         };
         io.handlers.connection(s);
+        io.clients.push(s);
         return s;
     };
     io.events = (name) => io.sent.filter(([ev]) => ev === name).map(([, d]) => d);
@@ -60,6 +65,28 @@ test('everyone leaving during countdown cancels it, so a new host gets exactly o
     advance(t, 10000);
     assert.strictEqual(io.events('status_change').filter(s => s === 'RACE').length, 1, 'stale lights started a second race');
     b.fire('disconnect');
+});
+
+test('lights wait for a slow browser to draw the grid, at most 15 s', (t) => {
+    t.mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
+    const io = fakeIo();
+    setupSocketManager(io, noNet);
+    const a = join(io, 'a', 'ferrari', 0), b = join(io, 'b', 'haas');
+    b.slow = true; // still building the track
+    a.fire('start_game');
+    advance(t, 8000);
+    assert.deepStrictEqual(io.events('lights'), [], 'lights before b drew the grid');
+    b.fire('world_drawn');
+    advance(t, 1000);
+    assert.deepStrictEqual(io.events('lights').map(l => l.count), [1]);
+
+    a.fire('restart_session'); // b never draws: the start goes ahead without it
+    const lit = io.events('lights').length;
+    advance(t, 14000);
+    assert.strictEqual(io.events('lights').length, lit, 'lights before the wait ran out');
+    advance(t, 2000);
+    assert.ok(io.events('lights').length > lit, 'a stuck browser held the start forever');
+    a.fire('disconnect'); b.fire('disconnect');
 });
 
 test('lights: 1..5 one per second, out 0.5–2.5 s later; throttle before lights out is a jump start', (t) => {
