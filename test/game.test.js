@@ -1368,3 +1368,27 @@ test('cars in the pit lane never make contact (the game drives them: no penalty 
     try { g.update(); } finally { Drive.updatePitState = prev; }
     assert.strictEqual(g.contacts.size, 0);
 });
+
+test('attack (late braking help): a driver beside a car just ahead is attacking; right behind it, far back or ahead is not', () => {
+    const g = new Game(io, [lp('a'), lp('b')], monza, { ...RACE, ghostStart: false }, () => {});
+    g.update(); g.release();
+    const a = g.players.a, b = g.players.b, sc = monza.scale;
+    // m metres past the start line, side metres to the driver's left
+    const put = (p, m, side) => {
+        const q = Track.pointAt(monza.path, monza.cum, monza.startS + m * sc);
+        Object.assign(p, { x: q.x - Math.sin(q.angle) * side * sc, y: q.y + Math.cos(q.angle) * side * sc, angle: q.angle, vx: 0, vy: 0, speed: 0 });
+    };
+    const attacking = (gap, side) => { put(a, 400, side); put(b, 400 + gap, 0); g.update(); return a.attack; };
+    assert.strictEqual(attacking(15, 2.5), true);
+    assert.strictEqual(attacking(15, 1.7), true, 'still pulled out (it holds down to 1.5 m: no flicker in the braking zone)');
+    assert.strictEqual(attacking(15, 1.2), false, 'back in behind it');
+    assert.strictEqual(attacking(15, 1.7), false, 'not yet pulled out (a car is 1.6 m wide: from 2 m)');
+    assert.strictEqual(attacking(2, 2.5), true, 'alongside');
+    assert.strictEqual(attacking(15, 0), false, 'right behind it: braking later would hit it');
+    assert.strictEqual(attacking(80, 2.5), false, 'too far back');
+    assert.strictEqual(attacking(-15, 2.5), false, 'ahead of it');
+    // Sent every tick with the car (the predicted car brakes the same on the same tick, not 10 Hz late)
+    attacking(15, 2.5);
+    const entry = g.fastPacket().c.find((e) => e[0] === g.index.a);
+    assert.ok(entry[6] & Game.FLAGS.attack, 'attack flag in the fast packet');
+});

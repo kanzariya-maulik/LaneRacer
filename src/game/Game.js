@@ -47,9 +47,12 @@ const FORMATION_WAIT_S = 30, FORMATION_MAX_S = 180, FORMATION_HALF = [0.35, 0.65
 const FORMATION_BOT_PARK_M = 250, FORMATION_BOT_DEC = 5; // bots: from this far behind their slot, steer onto its line and brake to stop on it
 const STOP_CODE = { guide: 1, service: 2, hold: 3, lane: 4, out: 5, wait: 6 };
 
-const FLAGS = { inPit: 1, limiter: 2, drs: 4, drsAvailable: 8, finished: 16, lapValid: 32, ghost: 64 };
+const FLAGS = { inPit: 1, limiter: 2, drs: 4, drsAvailable: 8, finished: 16, lapValid: 32, ghost: 64, attack: 128 };
 const META_FIELDS = ['lap', 'checkpoint', 'rank', 'gap', 'lapsDown', 'lastLap', 'bestLap', 'lapStart', 'bestLapSectors', 'lastValid', 'penalty', 'compound', 'nextCompound', 'stops', 'compoundsUsed', 'wearPerM', 'lastStop', 'segBest', 'qualiOut', 'boxCall', 'isBot', 'form', 'grid'];
 const META_EVERY = 6; // ticks: info updates at 10 Hz
+// Attacking: a car up to ATTACK_M ahead (or alongside), the driver pulled out from behind it: from ATTACK_SIDE_M to its side
+// (a car is 1.6 m wide), held down to ATTACK_HOLD_M so it doesn't flicker on and off in the braking zone
+const ATTACK_M = 30, ATTACK_BACK_M = 3, ATTACK_SIDE_M = 2, ATTACK_HOLD_M = 1.5;
 const r1 = (v) => Math.round(v * 10) / 10;
 
 // Signed heading change per metre of the path over ±BEND_SPAN_M around index i: > 0 turns clockwise on screen (y down),
@@ -117,7 +120,7 @@ class Game {
                 limits: 0, penalty: 0, offLimits: false, finishTime: null,
                 lastSafeX: slot.x, lastSafeY: slot.y, gridX: slot.x, gridY: slot.y, jumpStart: false, reacted: false,
                 grid: mode === 'race' ? { x: slot.x, y: slot.y, angle: slot.angle } : null, form: null, // formation lap: own slot, phase
-                drs: false, drsAvailable: false, drsEligible: [], tow: 0, lapS: null,
+                drs: false, drsAvailable: false, attack: false, drsEligible: [], tow: 0, lapS: null,
                 ...(() => {
                     const compound = Tyres.isCompound(p.compound) ? p.compound : 'M';
                     return { compound, nextCompound: null, wear: 0, wearPerM: Game.tyreWearPerM(settings, track, compound),
@@ -313,7 +316,8 @@ class Game {
             const p = this.players[id];
             const flags = (p.inPit && FLAGS.inPit) | (p.limiter && FLAGS.limiter) | (p.drs && FLAGS.drs)
                 | (p.drsAvailable && FLAGS.drsAvailable) | (p.finished && FLAGS.finished)
-                | (p.lapValid && FLAGS.lapValid) | ((this.mode === 'quali' || this.settings.collisions === false || p.ghost) && FLAGS.ghost);
+                | (p.lapValid && FLAGS.lapValid) | ((this.mode === 'quali' || this.settings.collisions === false || p.ghost) && FLAGS.ghost)
+                | (p.attack && FLAGS.attack);
             c.push([this.index[id], r1(p.x), r1(p.y), +p.angle.toFixed(4), r1(p.speed), +p.steer.toFixed(3), flags,
                     r1(p.vx), r1(p.vy), +(p.tow || 0).toFixed(2), p.lastSeq, +(p.wear || 0).toFixed(4),
                     p.stop ? STOP_CODE[p.stop.phase] : 0, p.stop ? +p.stop.t.toFixed(1) : 0, p.slack ?? 1]);
@@ -580,6 +584,7 @@ class Game {
                 }
             }
             if (this.mode === 'race') this.updateGhosts(ids);
+            if (this.mode === 'race') this.updateAttack(ids);
             if (this.mode === 'race' && this.settings.collisions !== false) { // host can turn contact off
                 for (let i = 0; i < ids.length; i++) {
                     for (let j = i + 1; j < ids.length; j++) {
@@ -627,6 +632,23 @@ class Game {
     }
 
     // ---------- "box, box" (race) ----------
+    // Late braking help (assist.js ATTACK): a driver with a car just ahead or alongside, pulled out beside it (right behind
+    // it, braking later would hit it). Races only, not on the formation lap; bots race with their own driver
+    updateAttack(ids) {
+        const sc = this.track.scale, total = this.track.cum[this.track.path.length];
+        for (const id of ids) {
+            const p = this.players[id];
+            if (p.isBot) continue;
+            p.attack = !this.formation && !p.inPit && !p.finished && ids.some((o) => {
+                const q = this.players[o];
+                if (q === p || q.finished || q.inPit || q.ghost) return false;
+                const gap = ((((q.lapS ?? 0) - (p.lapS ?? 0)) % total + total * 1.5) % total - total / 2) / sc; // metres, + = ahead
+                const side = Math.sqrt(Math.max(0, Math.hypot(q.x - p.x, q.y - p.y) ** 2 / (sc * sc) - gap * gap));
+                return gap > -ATTACK_BACK_M && gap < ATTACK_M && side > (p.attack ? ATTACK_HOLD_M : ATTACK_SIDE_M);
+            });
+        }
+    }
+
     // Metres along the track to the pit entry (lapS is from the start line, pit.entryS from path index 0)
     toEntryM(p) {
         const t = this.track, total = t.cum[t.path.length];
@@ -847,7 +869,7 @@ class Game {
                 lap: 0, checkpoint: 0, progress: 0, passTimes: { 0: 0 }, lapStart: 0, sectorStart: 0, lastLap: null, sectors: [null, null, null],
                 lapValid: true, lastValid: null, offLimits: false, fromPit: false, limits: 0, wear: 0, wearPerM: p.formWearPerM ?? p.wearPerM,
                 tyreGrip: Tyres.gripOf(p.compound, 0), penalty: 0, jumpStart: false, throttledEarly: false, reacted: false,
-                drs: false, drsAvailable: false, drsEligible: [], tow: 0, stop: null, boxCall: null, inPit: false, limiter: false,
+                drs: false, drsAvailable: false, attack: false, drsEligible: [], tow: 0, stop: null, boxCall: null, inPit: false, limiter: false,
                 ghost: this.settings.ghostStart !== false, form: null, lapS: null, throttleArmed: false });
             delete p.formWearPerM; delete p.formS; delete p.formPrevS; delete p.formPassed;
             delete p.bot; // bot driver state from the formation lap (its start hold, its mistakes) starts afresh

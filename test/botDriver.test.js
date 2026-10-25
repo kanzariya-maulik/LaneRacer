@@ -269,3 +269,114 @@ test('a bot held up by a slower car stays in line while both passing lanes are t
     for (let k = 0; k < 10; k++) D.drive(me, ctx);
     assert.notStrictEqual(me.bot.passSide, 0);
 });
+
+// A lone pro bot (pace 1) on lap 2: seconds spent per path point, and how many "wide" moments
+function loneLap(t, tyreGrip = null) {
+    let wide = 0;
+    const g = new Game({ emit: (e, d) => { if (e === 'track_limits' && d.kind === 'wide') wide++; }, volatile: { emit() {} } }, fillGrid([], 'pro', 3, 1), t, { ...RACE, maxLaps: 4 }, () => {});
+    const p = Object.values(g.players)[0];
+    p.ai.pace = 1;
+    g.update(); g.release();
+    const spent = new Array(t.path.length).fill(0), speed = new Array(t.path.length).fill(0);
+    for (let k = 0; k < 60 * 400 && p.lap < 3; k++) {
+        if (tyreGrip !== null) p.tyreGrip = tyreGrip;
+        g.update();
+        if (p.lap === 2) { spent[p.bot.idx] += 1 / 60; speed[p.bot.idx] = p.speed / t.scale; }
+    }
+    return { spent, speed, wide, lap: spent.reduce((a, b) => a + b, 0) };
+}
+
+test('worn hard tyres: slower through corners than new mediums, and still clean', () => {
+    const fresh = loneLap(tracks.monza, 1), worn = loneLap(tracks.monza, 0.85);
+    assert.ok(worn.lap > fresh.lap + 0.5, `worn ${worn.lap.toFixed(2)} vs fresh ${fresh.lap.toFixed(2)}`);
+    assert.strictEqual(worn.wide, 0, 'ran wide on worn tyres');
+    assert.strictEqual(fresh.wide, 0, 'ran wide on fresh tyres');
+});
+
+
+// Racecraft at the limit (docs/superpowers/specs/2026-10-24-race-at-the-limit-design.md)
+const braking = (t) => { const ph = t.racingLine.phase; for (let k = 1; k < ph.length; k++) if (ph[k] === 2 && ph[k - 1] === 0) return k; return 0; };
+
+test('pro dive: a committed move on the inside is kept into the braking zone, not given up for not being alongside yet', () => {
+    const { drive, state, ahead } = require('../src/game/bots/driver');
+    const t = tracks.monza, i = braking(t) + 1, j = ahead(t, i, 4); // into the braking zone, their gearbox 4 m ahead
+    const me = mk(t, i, t.racingLine.offset[i] / t.scale - 2, 75, { ai: { pace: 1, aggression: 0.95, mistake: 0, reaction: 0 } });
+    const them = mk(t, j, t.racingLine.offset[j] / t.scale, 72, { rank: 1 });
+    me.rank = 2;
+    const b = state(me);
+    b.passSide = -1; b.passCar = them; b.prevPhase = 2;
+    drive(me, ctxOf(t, [me, them], 100));
+    assert.strictEqual(b.passSide, -1, 'gave up the dive');
+});
+
+test('switchback: just passed, the bot goes straight back at the car that passed it', () => {
+    const { drive, state, ahead } = require('../src/game/bots/driver');
+    const t = tracks.monza, i = 200, sc = t.scale;
+    const me = mk(t, i, t.racingLine.offset[i] / sc, 70, { ai: { pace: 1, aggression: 0.95, mistake: 0, reaction: 0 }, rank: 1 });
+    const at = (k) => mk(t, k, t.racingLine.offset[k] / sc + 3, 72, { rank: 2, id: 'x' }); // 3 m to my side
+    const other = at(i - 1); // a point (~10 m) behind me
+    drive(me, ctxOf(t, [me, other], 100));
+    Object.assign(other, at(ahead(t, i, 9)), { rank: 1 }); me.rank = 2; // a moment later it's ahead
+    drive(me, ctxOf(t, [me, other], 101));
+    assert.strictEqual(state(me).passCar, other, 'not attacking the car that just passed');
+    assert.ok(state(me).passSide !== 0);
+});
+
+test('no dive into a car already turned in: past the turn-in with them ahead, the move is called off', () => {
+    const { drive, state, ahead } = require('../src/game/bots/driver');
+    const t = tracks.monza, ph = t.racingLine.phase;
+    let i = 0; for (let k = 1; k < ph.length; k++) if (ph[k] === 1 && ph[k - 1] === 2) { i = k; break; }
+    const j = ahead(t, i, 7);
+    const me = mk(t, i, t.racingLine.offset[i] / t.scale - 2.5, 30, { ai: { pace: 1, aggression: 0.95, mistake: 0, reaction: 0 }, rank: 2 });
+    const them = mk(t, j, t.racingLine.offset[j] / t.scale, 28, { rank: 1 });
+    const b = state(me);
+    b.passSide = -1; b.passCar = them; b.prevPhase = 1;
+    drive(me, ctxOf(t, [me, them], 100));
+    assert.strictEqual(b.passSide, 0, 'kept diving at a car already in the corner');
+});
+
+test('a bot far over its corner speed brakes even with the wheel at full lock (Monaco, run wide off a passing move)', () => {
+    const { drive } = require('../src/game/bots/driver');
+    const t = tracks.monaco, total = t.cum[t.path.length];
+    const i = t.cum.findIndex((c) => c >= (t.startS + 2875 * t.scale) % total); // 20 m before the corner after the pool
+    const me = mk(t, i, t.racingLine.offset[i] / t.scale + 3.4, 28.5, { ai: { pace: 1, aggression: 0.5, mistake: 0, reaction: 0 } });
+    const out = drive(me, ctxOf(t, [me], 150));
+    assert.ok(out.brake >= 0.5, `brake ${out.brake.toFixed(2)}, steer ${out.steer.toFixed(2)}, at 28.5 m/s for a ${t.lineLimit[i]} m/s corner`);
+});
+
+test('opening lap (after turn 1): a pro bot races calmer, no move from as far back as later in the race', () => {
+    const { drive, state, ahead } = require('../src/game/bots/driver');
+    const t = tracks.monza, i = 100, j = ahead(t, i, 30); // ~36 m behind a car 8 m/s slower (in reach at 33 m/s only later in the race)
+    const moves = (lap) => {
+        const me = mk(t, i, t.racingLine.offset[i] / t.scale, 33, { id: 'me', lap, rank: 2, ai: { level: 'pro', pace: 1, aggression: 0.95, mistake: 0, reaction: 0 } });
+        const slow = mk(t, j, t.racingLine.offset[j] / t.scale, 25, { id: 'slow', lap, rank: 1 });
+        drive(me, ctxOf(t, [me, slow], 50));
+        return state(me).passSide !== 0;
+    };
+    assert.strictEqual(t.racingLine.phase[i], 0, 'test point on a straight');
+    assert.strictEqual(moves(2), true, 'lap 2: goes for it');
+    assert.strictEqual(moves(0), false, 'opening lap: waits until closer');
+    // In the opening lap's nose-to-tail train every car has a tow: that alone is no reason to pull out
+    const towed = (lap) => {
+        const k = ahead(t, i, 15), me = mk(t, i, t.racingLine.offset[i] / t.scale, 33, { id: 'me', lap, rank: 2, tow: 0.1, ai: { level: 'pro', pace: 1, aggression: 0.95, mistake: 0, reaction: 0 } });
+        const front = mk(t, k, t.racingLine.offset[k] / t.scale, 34.5, { id: 'front', lap, rank: 1 });
+        drive(me, ctxOf(t, [me, front], 50));
+        return state(me).passSide !== 0;
+    };
+    assert.strictEqual(towed(2), true, 'lap 2: the tow is the move');
+    assert.strictEqual(towed(0), false, 'opening lap: a tow in the train is not');
+});
+
+test('a bot queued at the pit entry behind a stopped car holds still, never reverses into the queue (Spa Bus Stop)', () => {
+    const { drive } = require('../src/game/bots/driver');
+    const t = Track.load('spa'), sc = t.scale;
+    const g = new Game(io, fillGrid([], 'pro', 3, 2), t, { ...RACE, formationLap: false }, () => {});
+    g.update(); g.release();
+    const [me, front] = Object.values(g.players);
+    const put = (p, m) => { const q = Track.pointAt(t.path, t.cum, t.pit.entryS - m * sc); Object.assign(p, { x: q.x, y: q.y, angle: q.angle, vx: 0, vy: 0, speed: 0, lapS: t.pit.entryS - t.startS - m * sc }); };
+    put(me, 20); put(front, 12);
+    me.boxCall = 'this';
+    const ctx = { track: t, cars: [me, front], mode: 'race', time: 300, dt: 1 / 60, rng: () => 0.5, frozen: false, toEntryM: (p) => g.toEntryM(p) };
+    assert.ok(g.toEntryM(me) < 30, `${g.toEntryM(me)} m to the entry`);
+    assert.strictEqual(drive(me, ctx).brake, 0, 'brake at a standstill reverses');
+});

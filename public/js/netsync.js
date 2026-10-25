@@ -12,7 +12,7 @@ const WHEELBASE_M = 3.6;          // CarPhysics.C.WHEELBASE
 const OFFSET_DRIFT = 0.05;        // how fast the clock estimate follows packets that arrive later than the best seen
 const NEW_SESSION_GAP = 600;      // seq this far below the newest (10 s of ticks) = the server started a new session
 const JITTER_WINDOW_S = 2;
-export const FLAGS = { inPit: 1, limiter: 2, drs: 4, drsAvailable: 8, finished: 16, lapValid: 32, ghost: 64 }; // matches Game.FLAGS
+export const FLAGS = { inPit: 1, limiter: 2, drs: 4, drsAvailable: 8, finished: 16, lapValid: 32, ghost: 64, attack: 128 }; // matches Game.FLAGS
 
 export function decodeFlags(f, out = {}) {
     for (const k in FLAGS) out[k] = (f & FLAGS[k]) !== 0;

@@ -349,7 +349,7 @@ function buildMedians(t) {
     return medians;
 }
 
-function build(raw, circuit = {}) {
+function build(raw, circuit = {}, limits = readLimits(raw.id)) { // limits: null for the grip model alone
     const { width, scale } = raw, pts = fair(raw.path, scale);
     const cum = cumulative(pts);
     const total = cum[pts.length];
@@ -453,17 +453,29 @@ function build(raw, circuit = {}) {
         const i = Physics.nearestOnTrack(cp.x, cp.y, track).i;
         cp.radius = Math.min(CP_RADIUS_MAX_M * scale, Math.max(track.barrierR[i], track.barrierL[i]) + 10 * scale);
     }
-    const { limit: lineLimit, ...line } = RacingLine.compute(track);
+    // Corner limits as the car really holds them (data/tracks/<id>.limits.json, scripts/calibrate-lines.mjs): the racing line
+    // (bots, the drawn line) drives them. Stale (track reshaped): unused
+    const fit = limits && limits.points === track.path.length ? limits : null;
+    const { limit: lineLimit, modelLimit, ...line } = RacingLine.compute(track, fit?.help);
     track.racingLine = line;  // visual guide, sent to clients in game_init
-    track.lineLimit = lineLimit;  // braking help's corner speeds (shared sim, sent with the track)
+    track.lineLimit = lineLimit;  // the line's corner speeds
+    // The braking help's: the grip model's. The true limits hold only for a car right on the line; with the help a driver
+    // a metre off it left the road. Shared sim, sent with the track
+    track.helpLimit = modelLimit;
+    track.lineScale = fit?.help || null; // per point: how far each corner's limit is above the grip model
     return track;
 }
 
-function load(id) {
+function readLimits(id) {
+    const file = path.join(DATA_DIR, `${id}.limits.json`);
+    return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : null;
+}
+
+function load(id, limits) { // limits: null for the grip model alone (calibration); left out, the stored ones
     const file = path.join(DATA_DIR, `${id}.json`);
     if (!fs.existsSync(file)) throw new Error(`Missing track data ${file}. Run: npm run tracks`);
     const circuits = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'circuits.json'), 'utf8'));
-    return build(JSON.parse(fs.readFileSync(file, 'utf8')), circuits[id]);
+    return build(JSON.parse(fs.readFileSync(file, 'utf8')), circuits[id], limits);
 }
 
 function loadAll() {

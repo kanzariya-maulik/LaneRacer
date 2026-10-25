@@ -112,18 +112,28 @@ test('a bot behind cars that never move (stalled, AFK, still loading) goes aroun
 
 // Every circuit: a bot called in makes its stop. Spa's lane leaves right after the final chicane (the track turns 84° in the
 // last 40 m): the assist steered for the mouth at the lane's own speed, ran wide at 23 m/s into the wall and sat there
+const Physics = require('../src/game/Physics');
+const { surfaceUnder } = require('../public/js/sim/drive.js');
+const ASPHALT = ['road', 'kerb', 'asphalt', 'paint'];
+// ponytail: known, also at 75b67fd: the pit side is held through the last corner at the racing line's speed, too fast for that
+// tighter path, and the car runs onto the grass. Fix = speeds for the path driven (a pit-side speed profile), then drop this list
+const OFF_ON_WAY_IN = ['silverstone', 'cota', 'hungaroring', 'imola'];
 for (const id of Track.TRACK_IDS) {
-    test(`${id}: a bot called into the pits reaches its box`, () => {
+    test(`${id}: a bot called into the pits reaches its box, on the asphalt`, () => {
         const g = new Game({ emit() {}, volatile: { emit() {} } }, fillGrid([], 'pro', 3, 1), Track.load(id), { maxLaps: 3, qualifying: false, tyreWear: true, collisions: true, formationLap: false }, () => {});
         const p = Object.values(g.players)[0];
         g.update(); g.release();
-        let called = false, k = 0;
+        let called = false, k = 0, off = 0;
         for (; k < 60 * 240 && p.stop?.phase !== 'service'; k++) {
             g.update();
             const d = g.toEntryM(p);
             if (!called && g.time > 20 && d < 1200 && d > 600) { g.setBoxCall(p.id, true); called = true; }
+            const apron = Physics.nearestOnPath(p.x, p.y, g.track.pit.path, false).dist <= g.track.pit.width / 2; // the lane's corridor is asphalt (drive.js)
+            if (called && !p.inPit && !apron && !ASPHALT.includes(surfaceUnder(g.track, Physics.nearestOnTrack(p.x, p.y, g.track), p.x, p.y))) off++;
         }
         assert.ok(called, 'never called in');
+        // Suzuka's chicane before the lane: the aim jumped across it
+        if (!OFF_ON_WAY_IN.includes(id)) assert.strictEqual(off, 0, `left the asphalt on the way in (${off} ticks)`);
         assert.strictEqual(p.stop?.phase, 'service', `no stop: lap ${p.lap}, ${g.toEntryM(p).toFixed(0)} m to the entry, ${(p.speed / g.track.scale).toFixed(1)} m/s`);
     });
 }

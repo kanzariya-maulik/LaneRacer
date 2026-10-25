@@ -41,7 +41,7 @@ export class Predictor {
     load(e) {
         const c = this.car;
         c.x = e[1]; c.y = e[2]; c.angle = e[3]; c.speed = e[4]; c.steer = e[5];
-        c.inPit = !!(e[6] & 1); c.limiter = !!(e[6] & 2); c.drs = !!(e[6] & 4);
+        c.inPit = !!(e[6] & 1); c.limiter = !!(e[6] & 2); c.drs = !!(e[6] & 4); c.attack = !!(e[6] & 128); // attack: the braking help's
         c.vx = e[7] ?? Math.cos(e[3]) * e[4]; c.vy = e[8] ?? Math.sin(e[3]) * e[4]; c.tow = e[9] || 0;
         c.wear = e[11] ?? c.wear ?? 0;
         c.gripEvo = this.gripEvo; // qualifying track evolution (quali_clock), undefined in races

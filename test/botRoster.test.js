@@ -46,3 +46,13 @@ test('settings: aiCount a whole number of bots, 1..21', () => {
     assert.strictEqual(lobby.sanitizeSettings(cur, { aiCount: 4.6 }, []).aiCount, 5);
     assert.strictEqual(lobby.sanitizeSettings(cur, { aiCount: '7' }, []).aiCount, 21);
 });
+
+test('pace: pro 1.0 spread only slower (≤ +1 %), hard 1.005, medium 1.035, easy 1.085 (±1.5 %)', () => {
+    const range = (level) => { const p = []; for (let s = 1; s <= 20; s++) for (const b of fillGrid([], level, s)) p.push(b.ai.pace); return [Math.min(...p), Math.max(...p)]; };
+    const [pLo, pHi] = range('pro');
+    assert.ok(pLo >= 1 && pHi <= 1.01, `pro ${pLo.toFixed(4)}-${pHi.toFixed(4)}`);
+    for (const [level, mid] of [['hard', 1.005], ['medium', 1.035], ['easy', 1.085]]) {
+        const [lo, hi] = range(level);
+        assert.ok(lo >= mid * 0.985 - 1e-9 && hi <= mid * 1.015 + 1e-9 && lo < mid && hi > mid, `${level} ${lo.toFixed(4)}-${hi.toFixed(4)}`);
+    }
+});

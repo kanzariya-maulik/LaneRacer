@@ -46,12 +46,13 @@ function cornerSpeed(k) {
 }
 
 // Speed along a line: corner limits, then forward (drive) and backward (brake) passes, twice round so the lap wraps
-function profile(L, scale, cap) {
+function profile(L, scale, cap, scaleBy = null) {
     const n = L.length, k = curvatures(L, scale);
-    const vmax = k.map((x, i) => Math.min(cornerSpeed(x), cap ? cap[i] : Infinity));
+    const vmax = k.map((x, i) => Math.min(cornerSpeed(x) * (scaleBy ? scaleBy[i] : 1), cap ? cap[i] : Infinity, MAX_SAFE));
     const v = vmax.slice();
     const ds = L.map((p, i) => Math.hypot(L[(i + 1) % n].x - p.x, L[(i + 1) % n].y - p.y) / scale);
-    const rem = (i, vi) => Math.sqrt(Math.max(0, 1 - ((vi * vi * k[i]) / latMax(vi)) ** 2)); // friction circle
+    const grip = (i, vi) => latMax(vi) * (scaleBy ? scaleBy[i] ** 2 : 1); // a corner calibrated s× faster holds s²× the model's grip
+    const rem = (i, vi) => Math.sqrt(Math.max(0, 1 - ((vi * vi * k[i]) / grip(i, vi)) ** 2)); // friction circle
     for (let pass = 0; pass < 2; pass++) for (let i = 0; i < n; i++) {
         const j = (i + 1) % n, vi = v[i];
         const a = Math.min(C.POWER / (C.MASS * Math.max(vi, 1)), C.TRACTION * C.MU * (C.G + DOWN * vi * vi)) * rem(i, vi) - drag(vi);
@@ -71,7 +72,9 @@ function profile(L, scale, cap) {
     return { speed: v, phase, vmax, lap };
 }
 
-function compute(t) {
+// scale: per path point, how far each corner's limit is above the grip model (lineCalibration.js; default 1). The model
+// is conservative: the car itself holds 8-16 % more speed in most corners, found by driving them
+function compute(t, scale = null) {
     const P = t.path, n = P.length, N = normals(P), m = MARGIN_M * t.scale; // inside the real white lines (+ = driver's right)
     const lo = t.edgeL.map((e) => -(e - m)), hi = t.edgeR.map((e) => e - m);
     // Minimum curvature: minimise Σ w_j·|L_{j−1} − 2L_j + L_{j+1}|², each point moving along its normal.
@@ -99,9 +102,10 @@ function compute(t) {
     const offset = o.map((x) => Math.round(x * 10) / 10);
     const L = linePoints(P, offset);
     // Corner limit along the line at real grip (crests included): the braking help's targets, shared with the client
-    const limit = safeSpeeds(L, t.scale, t.vcurv).map((v) => Math.floor(v * 10) / 10);
-    const prof = profile(L, t.scale, limit);
-    return { offset, speed: prof.speed.map((v) => Math.floor(v * 10) / 10), phase: prof.phase, limit, lapS: Math.round(prof.lap * 10) / 10 };
+    const base = safeSpeeds(L, t.scale, t.vcurv);
+    const limit = base.map((v, i) => Math.floor(Math.min(MAX_SAFE, v * (scale ? scale[i] : 1)) * 10) / 10);
+    const prof = profile(L, t.scale, limit, scale);
+    return { offset, speed: prof.speed.map((v) => Math.floor(v * 10) / 10), phase: prof.phase, limit, modelLimit: base.map((v) => Math.floor(v * 10) / 10), lapS: Math.round(prof.lap * 10) / 10 };
 }
 
 module.exports = { compute, profile, linePoints, curvatures, latMax, MARGIN_M };

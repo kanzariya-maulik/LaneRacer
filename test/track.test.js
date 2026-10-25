@@ -297,3 +297,15 @@ test('narrow surveys widened to an F1 width (11.5 m median), never within 1.5 m 
         }
     }
 });
+
+test('limits file: used when its point count matches the track, ignored (scale 1) when missing or stale', () => {
+    const raw = JSON.parse(fs.readFileSync(path.join(DATA, 'monza.json'), 'utf8'));
+    const none = Track.build(raw, circuits.monza, null);
+    const stale = Track.build(raw, circuits.monza, { points: 3, help: [1.2, 1.2, 1.2] });
+    assert.deepStrictEqual(stale.lineLimit, none.lineLimit, 'a stale file changed the limits');
+    const n = none.path.length;
+    const up = Track.build(raw, circuits.monza, { points: n, help: new Array(n).fill(1.1) });
+    const i = none.lineLimit.findIndex((v) => v < 40);
+    assert.ok(up.lineLimit[i] >= none.lineLimit[i] * 1.09, 'the line drives the calibrated limits');
+    assert.deepStrictEqual(up.helpLimit, none.lineLimit, 'the braking help keeps the grip model\'s');
+});

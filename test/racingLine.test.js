@@ -15,7 +15,8 @@ for (const id of Track.TRACK_IDS) {
         rl.offset.forEach((o, i) => assert.ok(o <= t.edgeR[i] - m && o >= -(t.edgeL[i] - m), `point ${i} offset ${o} past the white line`));
         const k = RL.curvatures(RL.linePoints(t.path, rl.offset), t.scale);
         rl.speed.forEach((v, i) => {
-            assert.ok(v * v * k[i] <= RL.latMax(v) * 1.01 + 0.5, `point ${i}: ${v} m/s needs more grip than the car has`);
+            const s = t.lineScale ? t.lineScale[i] : 1; // calibrated corners hold s² the grip model (lineCalibration.js)
+            assert.ok(v * v * k[i] <= RL.latMax(v) * s * s * 1.01 + 0.5, `point ${i}: ${v} m/s needs more grip than the car has`);
             assert.ok(v <= t.lineLimit[i] + 0.06, `point ${i}: ${v} m/s faster than the line's corner limit`);
         });
         const centre = RL.profile(t.path, t.scale, t.safeSpeed);
@@ -73,3 +74,22 @@ for (const id of Track.TRACK_IDS) {
         assert.deepStrictEqual(wrong, [], `${wrong.length} straight points marked lift/brake`);
     });
 }
+
+test('a corner scale raises that corner\'s limit and speed, and only there', () => {
+    const t = tracks.monza, n = t.path.length;
+    const base = RL.compute(t);
+    // the first corner: every point from the first slow one on while the grip model limits it
+    let i0 = base.limit.findIndex((v) => v < 40), a = i0, b = i0;
+    while (base.limit[(a - 1 + n) % n] < MAX_SAFE) a = (a - 1 + n) % n;
+    while (base.limit[(b + 1) % n] < MAX_SAFE) b = (b + 1) % n;
+    const corner = []; for (let i = a; i !== (b + 1) % n; i = (i + 1) % n) corner.push(i);
+    const scale = new Array(n).fill(1);
+    for (const i of corner) scale[i] = 1.05;
+    const up = RL.compute(t, scale);
+    for (const i of corner) assert.ok(up.limit[i] >= Math.min(MAX_SAFE, base.limit[i] * 1.05) - 0.11, `point ${i}: limit ${up.limit[i]} vs ${base.limit[i]}`);
+    const apex = corner.reduce((m, i) => (base.speed[i] < base.speed[m] ? i : m), corner[0]);
+    assert.ok(up.speed[apex] >= base.speed[apex] * 1.04, `apex ${apex}: ${up.speed[apex]} vs ${base.speed[apex]}`);
+    const far = (apex + Math.floor(n / 2)) % n; // half a lap away
+    assert.ok(Math.abs(up.speed[far] - base.speed[far]) <= 0.1, 'speeds elsewhere unchanged');
+    assert.ok(up.lapS < base.lapS, 'a faster corner is a faster lap');
+});

@@ -26,7 +26,9 @@ function safeSpeeds(path, scale, vcurv) {
     });
 }
 
-// Braking help, judged against the racing line's corner speeds at real grip (track.lineLimit).
+// Braking help. On the racing line it brakes for the line's true limits (track.lineLimit, calibrated), off it for the
+// grip model's (track.helpLimit): with the true limits a driver a metre off the line left the road. Between ON_LINE_M
+// and OFF_LINE_M off it, a blend.
 // aim: share of the corner speed to arrive at; margin: share of the braking grip (at the corner speed) the help plans
 // to use. The help cuts the throttle (so drive doesn't take the cornering grip on the friction circle, and a driver who
 // holds the throttle still turns in) when the car is over the target for a corner point within liftM, or when the
@@ -37,14 +39,34 @@ function safeSpeeds(path, scale, vcurv) {
 const HIGH = { aim: 0.90, margin: 0.7, liftM: 30, liftK: 1 };
 const LOW = { aim: 0.85, margin: 1.0, liftM: 30, liftK: 0.8 };
 const LOOK_EXTRA_M = 30;
+// Attacking (car.attack: a car just ahead, the driver beside it, set by the server): later braking, on more of the braking
+// grip (High's 0.7 up to ATTACK_MARGIN; Low already brakes on all of it), against the grip model's corner speeds, the
+// inside line's. Full grip or a faster apex ran a flat-out driver off on most tracks
+const ATTACK_MARGIN = 0.85;
+const ON_LINE_M = 0.5, OFF_LINE_M = 1.5;
+const UPLIFT = 0.25; // share of the line's true gain over the grip model the help brakes for: it brakes on/off, not trailing
+// off like a driver at the limit. A flat-out driver ran off Montreal above 0.3 (Monza's Ascari above 0.8)
+
+// 0 on the racing line .. 1 OFF_LINE_M or more off it (no line: 1)
+function offLine(car, { path, scale, racingLine }, near) {
+    if (!racingLine?.offset || near.px === undefined) return 1;
+    const n = path.length, a = path[near.i], b = path[(near.i + 1) % n], l = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+    const o = ((car.x - near.px) * -(b.y - a.y) + (car.y - near.py) * (b.x - a.x)) / l, lo = racingLine.offset;
+    const m = Math.abs(o - (lo[near.i] + (lo[(near.i + 1) % n] - lo[near.i]) * near.t)) / scale;
+    return Math.min(1, Math.max(0, (m - ON_LINE_M) / (OFF_LINE_M - ON_LINE_M)));
+}
 
 // level: 0 off, 0.5 Low, 1 High. Stateless (client prediction runs it too). Worn tyres: lower targets, less braking
 function brakeAssist(car, input, track, near, level) {
-    const { path, cum, lineLimit, scale } = track;
+    const { path, cum, scale } = track, model = track.helpLimit || track.lineLimit, line = track.lineLimit || model;
     const v = car.speed / scale;
     if (!(level > 0) || v < 5 || input.brake >= 1) return input;
-    const { aim, margin, liftM, liftK } = level >= 1 ? HIGH : LOW;
+    const { aim, liftM, liftK, ...base } = level >= 1 ? HIGH : LOW, margin = car.attack ? Math.max(base.margin, ATTACK_MARGIN) : base.margin;
     const tyre = car.tyreGrip ?? 1, mu = C.MU * tyre, corner = aim * Math.sqrt(tyre);
+    // The line's true limits only on the line, on fresh tyres (worn, they scale by grip, not √grip: the uplift on √grip ran
+    // off on most tracks), and never attacking
+    const up = car.attack ? 0 : UPLIFT * (1 - offLine(car, track, near)) * Math.min(1, Math.max(0, (tyre - 0.9) / 0.1));
+    const limitAt = (j) => model[j] + (line[j] - model[j]) * up;
     const reach = (v * v) / (2 * margin * mu * C.G) + LOOK_EXTRA_M;
     const n = path.length, total = cum[n];
     const here = cum[near.i] + near.t * (cum[near.i + 1] - cum[near.i]);
@@ -53,8 +75,8 @@ function brakeAssist(car, input, track, near, level) {
         const j = (near.i + k) % n;
         const d = k === 0 ? 0 : ((((cum[j] - here) % total) + total) % total) / scale;
         if (d > reach) break;
-        if (lineLimit[j] >= MAX_SAFE) continue; // a straight: never braked for (DRS and tow can beat the cap)
-        const s = lineLimit[j] * corner;
+        if (model[j] >= MAX_SAFE) continue; // a straight: never braked for (DRS and tow can beat the cap)
+        const s = limitAt(j) * corner;
         if (!(v > s)) continue;
         if (d <= liftM) lift = true;
         if (k === 0) continue;
@@ -67,4 +89,4 @@ function brakeAssist(car, input, track, near, level) {
     return lift && input.throttle > 0 ? { throttle: 0, brake: input.brake, steer: input.steer } : input;
 }
 
-export { DOWN, MAX_SAFE, HIGH, LOW, safeSpeeds, brakeAssist };
+export { DOWN, MAX_SAFE, HIGH, LOW, ATTACK_MARGIN, safeSpeeds, brakeAssist };

@@ -4,12 +4,13 @@ const TEAMS = require('../../../public/teams.json');
 
 // pace: lap ÷ racingLine.lapS. mistake: chance per corner. reaction / release: seconds [min, max]. bog: chance of a slow getaway
 const LEVELS = {
-    easy:   { pace: 1.08,  aggression: 0.3,  mistake: 0.03,  reaction: [0.32, 0.42], release: [0.25, 0.6], bog: 0.1 },
-    medium: { pace: 1.03,  aggression: 0.55, mistake: 0.012, reaction: [0.25, 0.34], release: [0.1, 0.4],  bog: 0.03 },
-    hard:   { pace: 1.0,   aggression: 0.8,  mistake: 0.005, reaction: [0.2, 0.27],  release: [0.03, 0.2], bog: 0 },
-    pro:    { pace: 0.995, aggression: 0.95, mistake: 0.001, reaction: [0.16, 0.22], release: [0, 0.1],    bog: 0 },
+    easy:   { pace: 1.085,  aggression: 0.3,  mistake: 0.03,  reaction: [0.32, 0.42], release: [0.25, 0.6], bog: 0.1 },
+    medium: { pace: 1.035,  aggression: 0.55, mistake: 0.012, reaction: [0.25, 0.34], release: [0.1, 0.4],  bog: 0.03 },
+    hard:   { pace: 1.005,  aggression: 0.8,  mistake: 0.005, reaction: [0.2, 0.27],  release: [0.03, 0.2], bog: 0 },
+    pro:    { pace: 1.0,   aggression: 0.95, mistake: 0.001, reaction: [0.16, 0.22], release: [0, 0.1],    bog: 0 },
 };
 const SPREAD = 0.015; // ±1.5 % pace around the level
+const PRO_SPREAD = 0.01; // pro: 0 to +1 % slower only — the fastest is on the calibrated limit (pace 1 = the line's speeds); nobody faster
 
 // F1 legends (the host asked for them): world champions and greats across the eras, 24 so a full grid never repeats one
 const NAMES = ['Ayrton Senna', 'Alain Prost', 'Michael Schumacher', 'Niki Lauda', 'Juan Manuel Fangio', 'Jim Clark', 'Jackie Stewart',
@@ -43,7 +44,7 @@ function fillGrid(humans, level, seed, max = 22) {
             bots.push({
                 id: `ai-${bots.length + 1}`, username: pool[bots.length], teamId: t.id, color: t.chatColor,
                 assist: { steer: 1, brake: 0 }, compound: 'M', isBot: true,
-                ai: { level: name, pace: L.pace * (1 + (rng() * 2 - 1) * SPREAD), aggression: Math.min(1, Math.max(0, L.aggression + (rng() - 0.5) * 0.1)),
+                ai: { level: name, pace: L.pace * (1 + (name === 'pro' ? rng() * PRO_SPREAD : (rng() * 2 - 1) * SPREAD)), aggression: Math.min(1, Math.max(0, L.aggression + (rng() - 0.5) * 0.1)),
                     mistake: L.mistake * (0.75 + rng() * 0.5), reaction: between(L.reaction), release: between(L.release), bog: L.bog },
             });
         }

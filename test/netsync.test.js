@@ -55,7 +55,7 @@ test('project pushes the own car forward along its heading, capped at 250 ms', (
 });
 
 test('decodeFlags', () => {
-    assert.deepStrictEqual(N.decodeFlags(1 | 4 | 64), { inPit: true, limiter: false, drs: true, drsAvailable: false, finished: false, lapValid: false, ghost: true });
+    assert.deepStrictEqual(N.decodeFlags(1 | 4 | 64), { inPit: true, limiter: false, drs: true, drsAvailable: false, finished: false, lapValid: false, ghost: true, attack: false });
 });
 
 test('late in-order arrivals never move a car backwards', () => {

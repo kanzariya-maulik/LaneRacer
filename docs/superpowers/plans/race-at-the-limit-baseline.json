@@ -1,0 +1,176 @@
+{
+ "monza": {
+  "1": {
+   "bestRatio": 1.0168,
+   "medianRatio": 1.0337,
+   "overtakes": 785,
+   "collisions": 14,
+   "dnfs": 0,
+   "stopped": 22,
+   "raceS": 503
+  },
+  "2": {
+   "bestRatio": 1.0131,
+   "medianRatio": 1.0553,
+   "overtakes": 708,
+   "collisions": 13,
+   "dnfs": 0,
+   "stopped": 22,
+   "raceS": 495
+  },
+  "3": {
+   "bestRatio": 1.0258,
+   "medianRatio": 1.0623,
+   "overtakes": 735,
+   "collisions": 14,
+   "dnfs": 0,
+   "stopped": 22,
+   "raceS": 497
+  }
+ },
+ "spa": {
+  "1": {
+   "bestRatio": 1.0213,
+   "medianRatio": 1.0487,
+   "overtakes": 663,
+   "collisions": 8,
+   "dnfs": 0,
+   "stopped": 22,
+   "raceS": 610
+  },
+  "2": {
+   "bestRatio": 1.0175,
+   "medianRatio": 1.0522,
+   "overtakes": 724,
+   "collisions": 6,
+   "dnfs": 0,
+   "stopped": 22,
+   "raceS": 607
+  },
+  "3": {
+   "bestRatio": 1.0184,
+   "medianRatio": 1.0548,
+   "overtakes": 483,
+   "collisions": 4,
+   "dnfs": 0,
+   "stopped": 22,
+   "raceS": 605
+  }
+ },
+ "silverstone": {
+  "1": {
+   "bestRatio": 1.0122,
+   "medianRatio": 1.0382,
+   "overtakes": 956,
+   "collisions": 9,
+   "dnfs": 0,
+   "stopped": 22,
+   "raceS": 536
+  },
+  "2": {
+   "bestRatio": 1.0119,
+   "medianRatio": 1.044,
+   "overtakes": 853,
+   "collisions": 2,
+   "dnfs": 0,
+   "stopped": 22,
+   "raceS": 535
+  },
+  "3": {
+   "bestRatio": 1.0156,
+   "medianRatio": 1.036,
+   "overtakes": 694,
+   "collisions": 2,
+   "dnfs": 0,
+   "stopped": 22,
+   "raceS": 532
+  }
+ },
+ "suzuka": {
+  "1": {
+   "bestRatio": 0.9993,
+   "medianRatio": 3.2663,
+   "overtakes": 1126,
+   "collisions": 63,
+   "dnfs": 0,
+   "stopped": 15,
+   "raceS": 720
+  },
+  "2": {
+   "bestRatio": 1.0542,
+   "medianRatio": 1.0973,
+   "overtakes": 608,
+   "collisions": 39,
+   "dnfs": 0,
+   "stopped": 4,
+   "raceS": 720
+  },
+  "3": {
+   "bestRatio": 1.0169,
+   "medianRatio": 1.0494,
+   "overtakes": 911,
+   "collisions": 14,
+   "dnfs": 1,
+   "stopped": 22,
+   "raceS": 561
+  }
+ },
+ "monaco": {
+  "1": {
+   "bestRatio": 1.0116,
+   "medianRatio": 1.0331,
+   "overtakes": 1327,
+   "collisions": 15,
+   "dnfs": 0,
+   "stopped": 22,
+   "raceS": 451
+  },
+  "2": {
+   "bestRatio": 1.0103,
+   "medianRatio": 1.0369,
+   "overtakes": 1200,
+   "collisions": 12,
+   "dnfs": 0,
+   "stopped": 22,
+   "raceS": 451
+  },
+  "3": {
+   "bestRatio": 1.0094,
+   "medianRatio": 1.0286,
+   "overtakes": 1232,
+   "collisions": 21,
+   "dnfs": 0,
+   "stopped": 22,
+   "raceS": 456
+  }
+ },
+ "interlagos": {
+  "1": {
+   "bestRatio": 1.0186,
+   "medianRatio": 1.034,
+   "overtakes": 595,
+   "collisions": 7,
+   "dnfs": 0,
+   "stopped": 22,
+   "raceS": 467
+  },
+  "2": {
+   "bestRatio": 1.0163,
+   "medianRatio": 1.0291,
+   "overtakes": 533,
+   "collisions": 8,
+   "dnfs": 0,
+   "stopped": 22,
+   "raceS": 470
+  },
+  "3": {
+   "bestRatio": 1.0158,
+   "medianRatio": 1.0289,
+   "overtakes": 466,
+   "collisions": 8,
+   "dnfs": 0,
+   "stopped": 22,
+   "raceS": 464
+  }
+ }
+}
