@@ -102,3 +102,54 @@ for (const id of Track.TRACK_IDS) {
         assert.ok(Math.abs(vol / (len * 0.6) - 1) < 0.1, `volume ${vol.toFixed(1)} m³ for ${len.toFixed(0)} m of wall`);
     });
 }
+
+// Monza's pit mouths (Track.js pit.blend): the track's white line beside the lane is dashed where crossing it is legal
+// (into the entry road before its gore, out of the exit road past its solid line), solid elsewhere
+test('monza: the line beside each pit mouth is dashed where the lane blends in, solid elsewhere', () => {
+    const t = tracks.monza, G = build('monza'), blend = t.pit.blend;
+    assert.strictEqual(blend.length, 2);
+    for (const q of blend) {
+        const g = G.lines[q.side], n = G.lap.length, I = g.index, quads = new Set();
+        for (let k = 0; k < I.length; k += 3) for (const [u, v] of [[I[k], I[k + 1]], [I[k + 1], I[k + 2]], [I[k + 2], I[k]]]) quads.add(`${Math.min(u, v)},${Math.max(u, v)}`);
+        const drawn = { has: (k) => quads.has(`${Math.min(g.outer[k], g.outer[(k + 1) % n])},${Math.max(g.outer[k], g.outer[(k + 1) % n])}`) }; // the quad from k to k+1
+        const inside = (m) => (q.fromM <= q.toM ? m >= q.fromM && m < q.toM : m >= q.fromM || m < q.toM);
+        const ks = G.lap.map((m, k) => k).filter((k) => inside(G.lap[k]));
+        assert.ok(ks.length > 5, `${q.fromM}..${q.toM}: a stretch`);
+        const gaps = ks.filter((k) => !drawn.has(k)).length;
+        assert.ok(gaps > ks.length / 4 && gaps < (3 * ks.length) / 4, `dashed: ${gaps} gaps of ${ks.length}`);
+        for (const k of [(ks[0] - 8 + n) % n, (ks.at(-1) + 8) % n]) assert.ok(drawn.has(k), `solid around it at ${G.lap[k].toFixed(0)} m`);
+    }
+});
+
+// A kerb is its full width from its first row to its last: untangle took the zero-width quad just outside a kerb for a
+// fold and shrank the first and last rows to nothing (every kerb ~6 m short at each end, physics counting it there)
+for (const id of Track.TRACK_IDS) test(`${id}: every kerb full width end to end`, () => {
+    const G = build(id), sc = tracks[id].scale, bad = [];
+    G.kerbs.forEach((kb, n) => {
+        const P = kb.position, w = [];
+        for (let i = 0; i + 5 < P.length; i += 6) w.push(Math.hypot(P[i + 3] - P[i], P[i + 5] - P[i + 2]) / sc); // a row: inner, outer
+        const max = Math.max(...w), ok = (x) => x >= max / 2, lead = w.findIndex(ok), trail = [...w].reverse().findIndex(ok);
+        if (lead + trail > 2) bad.push(`kerb ${n}: ${lead} + ${trail} end rows under half width`); // (a fold mid-bend may narrow it)
+    });
+    assert.deepStrictEqual(bad, []);
+});
+
+// The white line is drawn where the track limits are judged: the road is drawn on a smooth curve through the centreline
+// points, the limits on the straight segments between them, and the two parted (COTA: 1.26 m, others 0.25-0.75 m)
+for (const id of Track.TRACK_IDS) test(`${id}: the drawn edge lies on the judged edge`, () => {
+    const t = tracks[id], G = build(id), sc = t.scale, Physics = require('../src/game/Physics'), C = G.road.centre, K = C.length / t.path.length, m = t.path.length;
+    let worst = 0, at = null;
+    for (const row of G.road.edgeRows) for (const [idx, E, side] of [[row.left, G.road.eL, t.edgeL], [row.right, G.road.eR, t.edgeR]]) {
+        const v = vert(G.road, idx), c = C[row.k], e = E[row.k], d = Math.hypot(v[0] - c.x, v[2] - c.y);
+        if (d < e - 0.05 * sc) continue; // inside a bend tighter than the offset: the inside clamp (the road can't reach it unfolded)
+        // on the judged edge: inside it 0.15 m in, outside it 0.15 m out (where it jumps between two segments' widths, that's
+        // the switch), judged on its own road (Suzuka's bridge)
+        const cl = (o) => {
+            const f = (d + o) / d, x = c.x + (v[0] - c.x) * f, y = c.y + (v[2] - c.y) * f, n = Physics.nearestOnTrack(x, y, t, Math.floor(row.k / K));
+            return n.dist - (side[n.i] + (side[(n.i + 1) % m] - side[n.i]) * n.t);
+        };
+        const bad = Math.max(cl(-0.15 * sc), -cl(0.15 * sc));
+        if (bad > 0 && bad / sc > worst) { worst = bad / sc; at = row.k; }
+    }
+    assert.ok(worst === 0, `${worst.toFixed(2)} m off the judged edge at curve point ${at}`);
+});

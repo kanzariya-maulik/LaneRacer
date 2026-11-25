@@ -5,6 +5,7 @@
 const WALL_OFFSET_M = 80 / 6;  // today's barrier: this far past the track edge
 const KERB_TURN = 0.05;        // rad per path segment: tighter corners get kerbs (game3d.js today)
 const PIT_RUNOFF_M = 2;        // drive.js: the pit lane's barrier this far outside its edge
+const GARAGE_DEEP_M = 6;       // past the run-off on the garage side: the garages (pitLayout.js: 5 m deep) and a little behind
 
 const heading = (P, i) => { const n = P.length, a = P[(i - 1 + n) % n], b = P[(i + 1) % n]; return Math.atan2(b.y - a.y, b.x - a.x); };
 
@@ -48,7 +49,22 @@ function reachField(t, limR, limL, polys = []) {
         }
     };
     for (let i = 0; i < n; i++) { const k = (i + 1) % n; capsule(P[i], P[k], [limL[i], limL[k]], [limR[i], limR[k]]); }
-    if (t.pit) { const Q = t.pit.path, r = t.pit.width / 2 + PIT_RUNOFF_M * sc; for (let i = 0; i + 1 < Q.length; i++) capsule(Q[i], Q[i + 1], [r, r], [r, r]); }
+    if (t.pit) {
+        // The garage side, along the garages: clear to behind them (pitLayout.js stands their fronts on the run-off line, and
+        // the barrier ran through the open bays), unless the track itself runs close behind (where the garages are skipped)
+        const pit = t.pit, Q = pit.path, r = pit.width / 2 + PIT_RUNOFF_M * sc, rg = r + GARAGE_DEEP_M * sc, s = pit.trackSide;
+        const [lo, hi] = pit.garageSpan || [Infinity, -Infinity], pad = 9 * sc, P = t.path;
+        const behind = (i) => { // the garage side's limit at lane point i
+            if (pit.cum[i] < lo - pad || pit.cum[i] > hi + pad) return r;
+            const a = Q[i], b = Q[Math.min(i + 1, Q.length - 1)], h = Math.atan2(b.y - a.y, b.x - a.x) || 0;
+            const q = { x: a.x + Math.sin(h) * s * rg, y: a.y - Math.cos(h) * s * rg }; // -trackSide along (-sin, cos)
+            const near = P.some((c) => Math.hypot(c.x - q.x, c.y - q.y) < t.width / 2 + WALL_OFFSET_M * sc);
+            return near ? r : rg;
+        };
+        const G = Q.map((_, i) => behind(i));
+        // capsule takes [left, right] (+lateral = driver's right): the track is on trackSide, the garages on the other side
+        for (let i = 0; i + 1 < Q.length; i++) { const g2 = [G[i], G[i + 1]], r2 = [r, r]; capsule(Q[i], Q[i + 1], s > 0 ? g2 : r2, s > 0 ? r2 : g2); }
+    }
     // polygons: minus the distance to their edge inside, plus outside (only near them: the rest is far outside anyway)
     for (const poly of polys) {
         const px = poly.map((p) => p.x), py = poly.map((p) => p.y), m = poly.length;

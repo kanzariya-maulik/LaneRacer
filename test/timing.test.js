@@ -117,3 +117,16 @@ test('watchTarget: after finishing, watch the best-placed car still running; kee
     assert.strictEqual(T.watchTarget(['a', 'b'], 'a', fin('a', 'b'), null), null, 'everyone done: back to your own car');
     assert.strictEqual(T.watchTarget(['a', 'b'], 'a', fin('a'), 'gone'), 'b', 'a car that left: pick again');
 });
+
+test('LAP box: the lap being driven, capped at the race distance; qualifying counts on (no distance to cap at)', () => {
+    assert.deepStrictEqual([0, 1, 2, 3, 5].map((l) => T.lapLabel(l, 3, false)), [1, 2, 3, 3, 3]);
+    assert.deepStrictEqual([0, 1, 2, 3, 5].map((l) => T.lapLabel(l, 3, true)), [1, 2, 3, 4, 6]);
+    assert.strictEqual(T.lapLabel(4, 1, true), 5, '1-lap race setting: quali still counts');
+});
+
+test('results: a lapped finisher shows the laps it is down, not a time gap', () => {
+    const f = (s) => `${s}`;
+    assert.strictEqual(T.resultCells({ position: 2, total: 310, gap: 10, lapsDown: 1, penalty: 0, change: 0 }, f).time, '+1 LAP');
+    assert.strictEqual(T.resultCells({ position: 3, total: 320, gap: 20, lapsDown: 2, penalty: 0, change: 0 }, f).time, '+2 LAPS');
+    assert.strictEqual(T.resultCells({ position: 2, total: 301, gap: 1, lapsDown: 0, penalty: 0, change: 0 }, f).time, '+1.000');
+});

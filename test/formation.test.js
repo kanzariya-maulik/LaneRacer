@@ -197,6 +197,17 @@ test('throttle held while parked is not a jump start when the formation ends; pr
     assert.ok(a.jumpStart && a.penalty > 0);
 });
 
+// ...but it doesn't drive the car either: held through the whole light sequence it rolled 144 m off the slot, unpenalised
+test('a throttle held from the formation lap through the lights keeps the car on its slot', () => {
+    const g = race(), a = g.players.a;
+    g.startFormation();
+    g.endFormation();
+    const x0 = a.x, y0 = a.y;
+    for (let i = 0; i < 60 * 5; i++) { a.input = { throttle: 1, brake: 0, steer: 0 }; g.update(); }
+    assert.ok(Math.hypot(a.x - x0, a.y - y0) / monza.scale < 0.5, `rolled ${(Math.hypot(a.x - x0, a.y - y0) / monza.scale).toFixed(1)} m`);
+    assert.strictEqual(a.penalty, 0);
+});
+
 test('throttle while the grid is still loading, before a formation lap, is not a jump start', () => {
     const g = race(), a = g.players.a;
     assert.strictEqual(g.wantsFormation, true);

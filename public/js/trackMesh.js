@@ -6,6 +6,7 @@
 // Positions are three.js (x, height, z = the game's y); world units (track.scale per metre).
 import { smoothPath, vergeReach } from './scenery.js';
 import { pathHeights } from './sim/elevation.js';
+import Physics from './sim/physics.js';
 
 const LINE_M = 0.15;       // white edge line width (FIA minimum 0.10 m; unconfirmed per circuit)
 const INSIDE_MAX = 0.95;   // offsets on the inside of a corner stay within this share of its radius
@@ -14,7 +15,7 @@ const APRON_MAX_M = 6;     // the pit apron fills gaps up to this wide between t
 const UNDER_LANE_M = 0.05; // ...and reaches this far under the lane's edge
 const PIT_WALL_M = { thick: 0.6, tall: 1 };
 // heights above the road surface (world units) each layer is drawn at, as game3d.js always did
-export const LAYER_Y = { verge: 0.3, apron: 0.5, lane: 0.55, road: 0.6, kerb: 0.7, line: 0.9 };
+export const LAYER_Y = { verge: 0.3, apron: 0.5, lane: 0.55, road: 0.6, kerb: 0.7, mark: 0.8, line: 0.9 }; // mark: markings.js paint, on any of them
 
 // Arrays → a mesh description; tri(a, b, c) adds a triangle when it isn't a sliver
 function mesher(sc) {
@@ -48,6 +49,24 @@ export function buildTrackGeometry(t) {
     // tangent, normal (+ = the driver's right, offsetPoints' convention) and the inside of the bend with its radius
     const T = rp.map((_, k) => { const a = rp[(k - 1 + n) % n], b = rp[(k + 1) % n], l = Math.hypot(b.x - a.x, b.y - a.y) || 1; return { x: (b.x - a.x) / l, y: (b.y - a.y) / l }; });
     const N = T.map((d) => ({ x: -d.y, y: d.x }));
+    // The white lines where the limits are judged (Track.edgeAt, on the centreline's straight segments), not just the edge
+    // widths carried onto the smooth curve: the two parted by up to 1.26 m (COTA), a car judged off on a drawn line
+    const m = t.path.length, K = n / m;
+    const judged = (k, o, sd) => { // clearance from the judged edge of the point o out from the curve on side sd (+ = right)
+        const x = rp[k].x + N[k].x * o * sd, y = rp[k].y + N[k].y * o * sd, q = Physics.nearestOnTrack(x, y, t, Math.floor(k / K));
+        const e = sd > 0 ? t.edgeR : t.edgeL; // its own side's (a side test flips near a joint of the centreline's segments)
+        return q.dist - (e[q.i] + (e[(q.i + 1) % m] - e[q.i]) * q.t);
+    };
+    // where the clearance changes sign: bisection, as the judged edge jumps where the nearest centreline segment changes and
+    // the edge widths either side differ (COTA's narrowing: no point at 0 there, the edge is the switch)
+    for (const [E, sd] of [[eR, 1], [eL, -1]]) for (let k = 0; k < n; k++) {
+        let lo = 0.5 * E[k], hi = 1.5 * E[k];
+        if (judged(k, lo, sd) > 0) lo = 0;
+        if (judged(k, hi, sd) < 0) hi = 3 * E[k];
+        if (judged(k, lo, sd) > 0 || judged(k, hi, sd) < 0) continue; // no edge to find on this line (leave the carried width)
+        for (let it = 0; it < 20 && hi - lo > 0.01 * sc; it++) { const mid = (lo + hi) / 2; if (judged(k, mid, sd) < 0) lo = mid; else hi = mid; }
+        E[k] = (lo + hi) / 2;
+    }
     const bend = rp.map((p, k) => {
         const a = rp[(k - 1 + n) % n], c = rp[(k + 1) % n], ab = Math.hypot(p.x - a.x, p.y - a.y), bc = Math.hypot(c.x - p.x, c.y - p.y), ca = Math.hypot(a.x - c.x, a.y - c.y);
         const cr = (p.x - a.x) * (c.y - a.y) - (p.y - a.y) * (c.x - a.x);
@@ -65,7 +84,7 @@ export function buildTrackGeometry(t) {
                 // both triangles of the quad between the columns face up (y of the cross product, as mesher draws them)
                 const up = (p, q, r) => (q[2] - p[2]) * (r[0] - p[0]) - (q[0] - p[0]) * (r[2] - p[2]);
                 const s = Math.sign(off[k] - floor[k]) || 1, [l0, r0, l1, r1] = s > 0 ? [A, B, E, C] : [B, A, C, E];
-                if (up(l0, r0, r1) > 0 && up(l0, r1, l1) > 0) continue;
+                if (up(l0, r0, r1) >= 0 && up(l0, r1, l1) >= 0) continue; // zero area (a kerb's zero-width neighbour) isn't a fold
                 for (const q of [(k - 1 + n) % n, k, j, (j + 1) % n]) off[q] = floor[q] + (off[q] - floor[q]) * 0.7;
                 bad = true;
             }
@@ -86,10 +105,12 @@ export function buildTrackGeometry(t) {
 
     // Road: white line to white line
     const road = ribbon(LAYER_Y.road, (k) => -eL[k], (k) => eR[k]);
-    const roadMesh = road.done({ edgeRows: road.A.map((l, k) => ({ k, left: l, right: road.B[k] })), centre: rp });
+    const roadMesh = road.done({ edgeRows: road.A.map((l, k) => ({ k, left: l, right: road.B[k] })), centre: rp, eR, eL });
     // White lines: the road's own edge vertices outward... inward (they lie on the road)
-    const lineR = ribbon(LAYER_Y.road, (k) => eR[k] - LINE_M * sc, (k) => eR[k]);
-    const lineL = ribbon(LAYER_Y.road, (k) => -eL[k], (k) => -eL[k] + LINE_M * sc);
+    // dashed (every other quad, ~2.5 m) where a pit lane blends in (Track.js pit.blend)
+    const dash = (side) => (k) => k % 2 === 0 || !(t.pit?.blend || []).some((q) => covers(q, side, lap[k]));
+    const lineR = ribbon(LAYER_Y.road, (k) => eR[k] - LINE_M * sc, (k) => eR[k], dash('R'));
+    const lineL = ribbon(LAYER_Y.road, (k) => -eL[k], (k) => -eL[k] + LINE_M * sc, dash('L'));
     const lines = { R: lineR.done({ outer: lineR.B }), L: lineL.done({ outer: lineL.A }) };
 
     // Kerbs: one mesh per run of the same kerb (style, colours), from the road edge out by its width; v = metres along
@@ -158,7 +179,7 @@ function buildPitGeometry(t, rp, N, eR, eL, H, clamp) {
     const apron = mesher(sc), trackSide = [], laneSide = [], rows = [];
     for (let i = 0; i < m; i++) {
         const o = s * Math.max(0, half[i] - UNDER_LANE_M * sc), p = { x: Q[i].x + QN[i].x * o, y: Q[i].y + QN[i].y * o }, e = nearestEdge(p);
-        if (e.d > APRON_MAX_M * sc) { rows.push(null); continue; }
+        if (e.d > APRON_MAX_M * sc || e.d < 0.05 * sc) { rows.push(null); continue; } // (no gap: the lane meets the road there)
         const a = apron.vertex(p.x, Z[i] + LAYER_Y.apron, p.y, p.x / sc, p.y / sc), b = apron.vertex(e.x, e.h + LAYER_Y.apron, e.y, e.x / sc, e.y / sc);
         laneSide.push(a); trackSide.push(b);
         const right = (e.x - p.x) * QN[i].x + (e.y - p.y) * QN[i].y > 0;

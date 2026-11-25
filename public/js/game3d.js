@@ -16,12 +16,12 @@ import { parseAssist } from './sim/carphysics.js';
 import { LEVELS, capLevel, scaleRange, pixelRatio, resolveLevel, autoPick, shouldMeasure, stepDown, depthBias, adaptStep, frameCapped, refreshHz } from './quality.js';
 import { placeScenery, seedOf, vergeReach, terrainHeights, terrainGround, skirtDepth, gridSampler, carveReach, onVerge, onPit, untangle, smoothPath, RENDER_STEP_M, SKIRT_M } from './scenery.js';
 import { heightAt, pathHeights } from './sim/elevation.js';
-import { buildTrackGeometry } from './trackMesh.js';
+import { buildTrackGeometry, LAYER_Y } from './trackMesh.js';
 import { loadTrackTextures, asphaltMaterial, groundMaterial, kerbMaterial, paintMaterial } from './trackMaterials.js';
 import { buildBarriers, instancedMesh } from './barriers.js';
 import { rubberProfile, rubberLevel, SkidLayer } from './rubber.js';
 import { uniform } from 'three/tsl';
-import { prepareTrack, slotFrame, FORM_SETTLE_M, FORM_SNAP_M } from './sim/drive.js';
+import { prepareTrack, slotFrame, FORM_SETTLE_M, FORM_SNAP_M, PIT_WORK_LANE_M } from './sim/drive.js';
 import { themeOf, LANDS, SKIES, nightOf } from './themes.js';
 import { SnapshotBuffer, RenderClock, sample, samplePresent, decodeFlags } from './netsync.js';
 import { decodeFast } from './netcodec.js';
@@ -33,10 +33,11 @@ import { nextHarder } from './sim/tyres.js';
 import { Gearbox, shiftLights } from './audio/gearbox.js';
 import { estimateLoad } from './audio/mix.js';
 import * as Sound from './audio/audio.js';
-import { gapText, lapDelta, stepFollow, watchTarget, inDrsZone, drsHint, liveSectors, resultCells, sectorClass, lastLapClass } from './timing.js';
+import { gapText, lapDelta, stepFollow, watchTarget, inDrsZone, drsHint, liveSectors, resultCells, sectorClass, lastLapClass, lapLabel as lapLabelOf } from './timing.js';
 import { cornersOf, createCoach, pastLine, SHOW_S } from './coach.js';
 import { MODES, segmentColor, cornerMask, aheadM, trackIndex, nextMode } from './racingline.js';
-import { distToPath, pitLayout, tMarks, wallStands, pickerOpen, cardText, crew17, BOX_M, COMPOUND_COLORS } from './pitLayout.js';
+import { markings } from './markings.js';
+import { distToPath, pitLayout, tMarks, wallStands, pickerOpen, cardText, crew17, stopWarning, BOX_M, COMPOUND_COLORS } from './pitLayout.js';
 
 // World units per metre come from the track JSON (track.scale = 6).
 const WHEEL_RADIUS_M = WHEEL_RADIUS; // carShape.js
@@ -349,6 +350,9 @@ let boxConfirmAt = 0, boxPick = null; // boxPick: the set chosen for the called 
 function callBox() {
     const me = clientState.gameState?.[clientState.me];
     if (clientState.status !== 'RACE' || !me || me.finished || isSpectator()) return;
+    // The server refuses these: say why instead of nothing happening
+    if (me.form) return void window.showBanner?.('NO STOPS ON THE FORMATION LAP', true);
+    if (me.inPit) return void window.showBanner?.('ALREADY IN THE PIT LANE', true);
     socket.emit('box_call', { on: !me.boxCall });
 }
 let lastPick = null; // fitted at once on the grid / quali box, so the server clears nextCompound: remember the pick to confirm it
@@ -1019,19 +1023,22 @@ function buildPit(pit, t, G, mats) {
     world.add(ribbonMesh(G.apron, { material: mats.apron })); // the lane to the road edge: the track's own asphalt
     // White edges: the outer one all along; the track-side one is the blend line in the mouths and the pit-wall line beside it
     const inL = half.map((h) => h - line), inR = half.map((h) => -h + line);
-    world.add(strip(pit.path, inL, half, 0.85, (i) => inner(i) && W[i] > line, solid('#f2f2f2')));
-    world.add(strip(pit.path, neg(half), inR, 0.85, (i) => inner(i) && W[i] > line, solid('#f2f2f2')));
+    // (where the lane runs on the track's edge, Track.js pit.onEdge, the track's own line is the one line between them)
+    const edgeLine = (sd) => (i) => inner(i) && W[i] > line && !(sd === s && pit.onEdge?.[i]);
+    world.add(strip(pit.path, inL, half, 0.85, edgeLine(1), solid('#f2f2f2')));
+    world.add(strip(pit.path, neg(half), inR, 0.85, edgeLine(-1), solid('#f2f2f2')));
     // "Box, box": a blue stripe down the entry road to the limiter line, lit while your stop is called and the entry is near
     const limI = Math.max(2, pit.cum.findIndex((c) => c >= pit.limStart));
     entryGuide = strip(pit.path, half.map(() => -0.5 * scale), half.map(() => 0.5 * scale), 0.9, (i) => inner(i) && i < limI, solid('#3b82f6'));
     entryGuide.visible = false;
     world.add(entryGuide);
     const lay = pitLayout(t);
-    // Fast lane | working lane (white) and the garage-row edge (yellow), along the garages
-    const onSpan = (i) => inner(i) && i >= lay.split.i0 && i < lay.split.i1;
-    world.add(strip(pit.path, half.map(() => -line / 2), half.map(() => line / 2), 0.86, onSpan, solid('#f2f2f2')));
-    // The concrete working lane: the garage-side half of the lane along the garages
-    const wFrom = half.map((h) => (s > 0 ? -(h - 2 * line) : line / 2)), wTo = half.map((h) => (s > 0 ? -line / 2 : h - 2 * line));
+    // Fast lane | working lane (white: PIT_WORK_LANE_M from the garage edge, as drive.js steers) and the garage-row edge (yellow)
+    const onSpan = (i) => inner(i) && i >= lay.split.i0 && i < lay.split.i1, work = PIT_WORK_LANE_M * scale;
+    const div = half.map((h) => -s * (h - work)); // the line's centre, + = the lane's left
+    world.add(strip(pit.path, div.map((d) => d - line / 2), div.map((d) => d + line / 2), 0.86, onSpan, solid('#f2f2f2')));
+    // The concrete working lane: from the garage edge to that line
+    const wFrom = half.map((h, i) => (s > 0 ? -(h - 2 * line) : div[i] + line / 2)), wTo = half.map((h, i) => (s > 0 ? div[i] - line / 2 : h - 2 * line));
     world.add(strip(pit.path, wFrom, wTo, 0.68, onSpan, solid('#8a8f96')));
     const yA = half.map((h) => -s * (h - line)), yB = half.map((h) => -s * (h - 2 * line));
     world.add(strip(pit.path, s > 0 ? yA : yB, s > 0 ? yB : yA, 0.86, onSpan, solid('#ffd400')));
@@ -1484,11 +1491,7 @@ function buildWorld(t) {
     // their own material clones and name tags are freed. Disposing that geometry with the old world broke every later session
     // on a new track: the next cars drew from destroyed GPU buffers and the canvas froze on the old track's last frame
     for (const id in cars) {
-        cars[id].root.traverse((o) => {
-            if (!o.material) return;
-            if (o.isSprite) o.material.map?.dispose();
-            o.material.dispose();
-        });
+        cars[id].root.traverse((o) => { if (o.material && !o.isSprite) o.material.dispose(); }); // name tags: dropCar
         dropCar(id);
     }
     if (world && world.userData.trackId === t.id && world.userData.level === level && world.userData.night === night) {
@@ -1628,11 +1631,15 @@ function buildWorld(t) {
     // White lines on the track limits (t.edgeR / edgeL: judged there), kerbs (build data: style, colours; 1 m stripes)
     const R = t.edgeR, L = t.edgeL;
     const lineMat = paintMaterial(tex, scale);
-    // Painted run-off (build data: one polygon per colour stripe), crisp over the ground
-    for (const sf of t.build.surfaces) if (sf.kind === 'paint') {
+    // Painted run-off (build data: one polygon per colour stripe), crisp over the ground; and the FIA markings (markings.js:
+    // the pit entry gore, SC lines, the T4 yellow line)
+    const marks = markings(t);
+    for (const sf of [...t.build.surfaces.filter((s) => s.kind === 'paint'), ...marks.paint]) {
         const P = sf.poly, tri = THREE.ShapeUtils.triangulateShape(P.map((q) => new THREE.Vector2(q.x, q.y)), []);
+        if (!tri.length) continue; // no area (bad data): skipped, not the whole world
         const g = new THREE.BufferGeometry();
-        g.setAttribute('position', new THREE.Float32BufferAttribute(P.flatMap((q) => [q.x, roadY(q.x, q.y) + 0.35, q.y]), 3));
+        const y = sf.feature ? LAYER_Y.mark : 0.35; // markings lie on asphalt (road, lane, apron); run-off paint on the grass
+        g.setAttribute('position', new THREE.Float32BufferAttribute(P.flatMap((q) => [q.x, roadY(q.x, q.y) + y, q.y]), 3));
         const [a, b, c] = tri[0].map((i) => P[i]), up = (b.y - a.y) * (c.x - a.x) - (b.x - a.x) * (c.y - a.y) > 0; // three's y = up, z = our y
         g.setIndex(tri.flatMap(([i, j, k]) => (up ? [i, j, k] : [i, k, j]))); // wound to face up
         g.computeVertexNormals();
@@ -1640,6 +1647,14 @@ function buildWorld(t) {
         Object.assign(mat, { polygonOffset: true, polygonOffsetFactor: depthBias(-1, reversed), polygonOffsetUnits: depthBias(-2, reversed) });
         const m = new THREE.Mesh(g, mat);
         m.receiveShadow = true;
+        world.add(m);
+    }
+    // Bollards, bumps and polystyrene blocks: plain boxes standing on the ground
+    for (const b of marks.solids) {
+        const m = new THREE.Mesh(new THREE.BoxGeometry(b.len * scale, b.h * scale, b.w * scale), new THREE.MeshStandardMaterial({ color: b.color, roughness: 0.7 }));
+        m.position.set(b.x, roadY(b.x, b.y) + (b.h / 2) * scale, b.y);
+        m.rotation.y = -b.angle; // our angle is from +x toward +y (three's +z)
+        m.castShadow = m.receiveShadow = true;
         world.add(m);
     }
     for (const l of [G.lines.R, G.lines.L]) world.add(ribbonMesh(l, { material: lineMat, layer: 2 }));
@@ -1689,7 +1704,11 @@ let carTemplate = null; // the current level's (wheel batches are built from it)
 const liveryTexture = (teamId) => carLivery(teamId, Q.anisotropy);
 
 function dropCar(id) {
-    if (cars[id]) world?.remove(cars[id].root);
+    const c = cars[id];
+    if (c) { // its own name tag goes with it (the team's materials are shared, freed with the world): a leak per car dropped
+        world?.remove(c.root);
+        c.root.traverse((o) => { if (o.isSprite) { o.material.map?.dispose(); o.material.dispose(); } });
+    }
     delete cars[id];
 }
 
@@ -2351,13 +2370,11 @@ function updateCamera(dt) {
 
 // ---------- HUD + minimap ----------
 const kmh = (speed) => Math.round((Math.abs(speed) / scale) * 3.6);
-const lapLabel = (lap) => Math.min(lap + 1, clientState.settings.maxLaps);
+const lapLabel = (lap) => lapLabelOf(lap, clientState.settings.maxLaps, clientState.status === 'QUALIFYING');
 const $ = (id) => document.getElementById(id);
 
 function fmtTime(s) {
-    if (s === null || s === undefined) return '--';
-    const m = Math.floor(s / 60);
-    return `${m}:${(s - m * 60).toFixed(3).padStart(6, '0')}`;
+    return s === null || s === undefined ? '--' : fmtLap(s);
 }
 function fmtClock(ms) {
     const s = Math.max(0, Math.ceil(ms / 1000));
@@ -2655,8 +2672,8 @@ function updateHUD(withTower = true) {
     if (pickKey !== hudPick) {
         hudPick = pickKey;
         const t = cardText({ compound: comp, next, fitted });
-        // The wear ring lives in the dash; this card only opens for a stop (or holds the BOX button on touch screens)
-        $('tyre-card').classList.toggle('hidden', spectator || !(open || me?.boxCall || (document.body.classList.contains('touch') && clientState.status === 'RACE')));
+        // The wear ring lives in the dash; in a race this card holds the BOX button (B), and opens the tyre pick for a stop
+        $('tyre-card').classList.toggle('hidden', spectator || !(open || me?.boxCall || clientState.status === 'RACE'));
         $('tc-tyre').className = `tc-tyre tyre-${comp}${wearPct < 20 ? ' worn' : ''}`;
         $('tc-tyre').style.setProperty('--wear', wearPct);
         $('tc-tyre').firstElementChild.textContent = comp;
@@ -2676,6 +2693,10 @@ function updateHUD(withTower = true) {
     else if (!bc && hudBox && !['lane', 'guide', 'service'].includes(predictor?.car?.stop?.phase)) { window.showBanner?.('BOX CANCELLED'); boxConfirmAt = 0; }
     if (bc && boxConfirmAt && nowB >= boxConfirmAt) { boxConfirmAt = 0; window.showBanner?.(boxBanner(bc, boxPick || me.nextCompound || nextHarder(me.compound)), true); }
     hudBox = bc;
+    // Two-compound rule: a banner each lap from half distance until the stop is called (Game.finishCar: +22 s otherwise)
+    const warn = racing && me ? stopWarning({ status: clientState.status, maxLaps: clientState.settings.maxLaps, tyreWear: clientState.settings.tyreWear,
+        lap: me.lap ?? 0, compoundsUsed: me.compoundsUsed, boxCall: me.boxCall, inPit: !!me.inPit, finished: !!me.finished }) : null;
+    if (warn && hudStopWarnLap !== me.lap) { hudStopWarnLap = me.lap; window.showBanner?.(warn, true); }
     const entryNear = bc === 'this' && !me?.inPit && toEntryM <= 300;
     if (entryGuide) entryGuide.visible = entryNear;
     const cue = entryNear ? `PIT ENTRY ${Math.round(toEntryM / 10) * 10} m` : '';
@@ -2879,6 +2900,7 @@ const ownFrame = { rpm: 0, load: 0, limiter: false, pit: false, speedMs: 0 };
 const listenerFrame = { x: 0, y: 0, fx: 1, fy: 0, vx: 0, vy: 0 }, sndFrame = { own: null, others: soundOthers, listener: listenerFrame };
 const silentFrame = { own: null, others: [], listener: listenerFrame };
 const camDir = new THREE.Vector3();
+let hudStopWarnLap = null; // the lap the two-compound warning was last shown on
 let hudQClock = '', hudBox = null, lastDrs = false, hudLit = -1, hudFlash = null, hudGear = '', hudPick = '', pickIdx = null, hudHadStop = false, hudGoUntil = 0, hudLastStop, hudPrevPhase = null, hudGhost = false, bannerText = '', bannerUntil = 0;
 function updateSound(dt) {
     const gs = clientState.gameState, me = gs[clientState.me], racing = !!me && !isSpectator();
@@ -3058,7 +3080,7 @@ window.initGameVisuals = () => {
     window.syncForm(); // the formation lap's grid slot (and phase, for a late joiner)
     predictor.gripEvo = clientState.status === 'QUALIFYING' ? clientState.qualiClock?.evo : undefined;
     clearInterval(qbTimer); document.getElementById('quali-break')?.classList.add('hidden'); koPos = null; hudQClock = null;
-    hudBox = null; boxConfirmAt = 0; boxPick = null;
+    hudBox = null; boxConfirmAt = 0; boxPick = null; hudStopWarnLap = null;
     lastPick = null; hudLastStop = undefined; hudPrevPhase = null; hudGhost = false; $('ghost-tag')?.classList.add('hidden'); clearTimeout(stewardTimer); $('steward-card')?.classList.add('hidden'); bannerUntil = 0; // the first meta seen is the baseline, not a new stop
     clearTimeout(coachTimer); $('coach-line')?.classList.add('hidden'); stewardAtS = contactAtS = -Infinity;
     window.syncTyres();

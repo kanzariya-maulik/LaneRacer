@@ -17,6 +17,12 @@
         "value": "17px",
         "createdAt": "2026-10-24T14:11:21.573Z",
         "reason": "User confirmed 17px is intentional: HUD base size clamp ceiling"
+      },
+      {
+        "rule": "design-system-color",
+        "value": "#facc15",
+        "createdAt": "2026-10-26T07:55:41.732Z",
+        "reason": "FIA bollard/bump yellow in the 3D scene (user confirmed)"
       }
     ]
   }

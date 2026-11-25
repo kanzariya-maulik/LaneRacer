@@ -72,9 +72,11 @@ function state(p) {
 const FRONT_M = 80, FRONT_W = 2.5; // a car this close ahead and this close sideways is in front of me whatever my plan
 const CAR_M = 5.6, PASS_M = 3.5, DEFEND_M = 3, BLUE_M = 3.5; // metres
 const OPENING_AGG = 0.5, OPENING_EDGE_MS = 3; // opening lap after turn 1: aggression × this; a move needs this much more speed
+const LAUNCH_S = 1.5; // after its own launch a car starts no pass for this long (the whole grid is still pulling away)
 const START_AGG = 0.25, START_LATE = 1.03, START_MAX_S = 25; // the run to turn 1: more willing to attack, alongside brakes a touch later; never past 25 s
 const AIM_S = 0.3, AIM_MIN_M = 8; // steer for the point this far ahead on my lane (as lineFollower.js)
 const CRAWL_MS = 8; // below this the throttle keeps a floor (crawling out of gravel)
+const PATH_AHEAD = 10, PATH_STEP = 2, PATH_DEC = 20; // off the line: its own corners over PATH_AHEAD steps of PATH_STEP path points (~200 m), braked for at m/s²
 const LOCK_K = 1.2; // the arc to the aim point wants this much more than full lock: it can't make it, slow down (as a driver)
 const OVER_K = 1.1; // this far over the target speed: brake whatever the turn takes (run wide off a move, or shoved)
 const OFF_LINE_LANE_M = 1; // driving a lane this far off the line (passing, defending) or side by side: the line's true limits aren't this path's
@@ -97,13 +99,25 @@ function scan(p, ctx, v) {
         const ex = c.x - a.x, ey = c.y - a.y, l = Math.hypot(ex, ey) || 1;
         return { s: (t.cum[n.i] + n.t * (t.cum[n.i + 1] - t.cum[n.i])) / sc, off: ((o.x - n.px) * -ey + (o.y - n.py) * ex) / l / sc, i: n.i };
     };
-    const me = where(p), mine = me.off, r = { ahead: null, behind: null, alongside: null, lapper: null, close: false };
+    // Two cars in the pit lane: along the lane, not the track (Interlagos' exit runs 25-42 m outside a bend: 40 m of lane on
+    // 18 m of track, cars 12 m apart read as touching and the queue stopped)
+    const pit = t.pit, wherePit = (o) => {
+        const n = Physics.nearestOnPath(o.x, o.y, pit.path, false), a = pit.path[n.i], c = pit.path[n.i + 1], ex = c.x - a.x, ey = c.y - a.y, l = Math.hypot(ex, ey) || 1;
+        return { s: (pit.cum[n.i] + n.t * (pit.cum[n.i + 1] - pit.cum[n.i])) / sc, off: ((o.x - n.px) * -ey + (o.y - n.py) * ex) / l / sc };
+    };
+    // Speed along the track (m/s, >= 0): a car reversing or sliding backwards isn't pulling away
+    const alongV = (o, i) => {
+        const a = t.path[i], c = t.path[(i + 1) % t.path.length], l = Math.hypot(c.x - a.x, c.y - a.y) || 1;
+        return Math.max(0, ((o.vx ?? 0) * (c.x - a.x) + (o.vy ?? 0) * (c.y - a.y)) / l / sc);
+    };
+    const me = where(p), meLane = p.inPit && pit ? wherePit(p) : null, mine = me.off, r = { ahead: null, behind: null, alongside: null, lapper: null, close: false };
     for (const o of ctx.mode === 'quali' ? [] : ctx.cars) { // qualifying cars are ghosts: no traffic to race
         if (o === p || o.finished || (o.ghost && !b.start) || (o.inPit && o.stop && !p.inPit)) continue; // ghosts can't be hit (but at the start they're raced as if solid); in the lane, lane cars count
-        const w = where(o), oi = w.i, oo = w.off;
+        const w = where(o), oi = w.i, oo = w.off, lane = meLane && o.inPit ? wherePit(o) : null;
         let f = (((w.s - me.s) % total) + total) % total;
         if (f > total / 2) f -= total;
-        const e = { o, f, l: oo - mine, off: oo, v: Math.abs(o.speed) / sc };
+        if (lane) f = lane.s - meLane.s;
+        const e = { o, f, l: lane ? lane.off - meLane.off : oo - mine, off: oo, v: Math.abs(o.speed) / sc, va: alongV(o, oi) };
         if (o === b.passCar) r.target = e;
         if (o === b.passedBy?.car) r.passer = e;
         // Switchback: a car right behind me a moment ago that's now ahead has just passed me
@@ -141,7 +155,10 @@ function racecraft(p, b, ctx, v, here, r, vt) {
     if (a) {
         // Opening lap: only a real speed edge (in the nose-to-tail train every car has a tow, and all of them pulled out)
         const faster = opening ? vt > a.v + OPENING_EDGE_MS : vt > a.v + 0.5 || p.tow > 0 || p.drsAvailable;
-        if (!b.passSide && ph === 0 && faster && !r.alongside && a.f < Math.max((0.5 + 0.5 * agg) * v, FOLLOW_GAP_M + 6) + CAR_M) { // held up, even from a standstill
+        // (not in the launch itself: every car ahead is "slower" while the grid pulls away, and a swing into the other column,
+        // 7.6 m behind the car there and capped to its ~0 m/s, stopped the whole field)
+        const launching = b.start && ctx.time < (ai.reaction || 0) + LAUNCH_S;
+        if (!b.passSide && !launching && ph === 0 && faster && !r.alongside && a.f < Math.max((0.5 + 0.5 * agg) * v, FOLLOW_GAP_M + 6) + CAR_M) { // held up, even from a standstill
             const inside = insideSide(t, here);
             b.passSide = Math.sign(a.l) === inside ? -inside : inside; // the inside, unless they're already on it
             b.passCar = a.o;
@@ -152,6 +169,9 @@ function racecraft(p, b, ctx, v, here, r, vt) {
         if (b.passSide && ph === 1 && a.f > CAR_M && !r.alongside) b.passSide = 0;
         const dec = FOLLOW_DEC_BY[ai.level] ?? FOLLOW_DEC, gap = FOLLOW_GAP_BY[ai.level] ?? FOLLOW_GAP_M; // pros follow closer: they trust their brakes
         cap = Math.sqrt(Math.max(0, a.v * a.v + 2 * dec * (a.f - CAR_M - gap))); // no ramming: can always stop behind it
+        // Inside the gap: their speed, less the closer I am (never closing in), not a standstill behind a car still moving: the
+        // whole queue stopped one by one, an accordion (the start; Sakhir's turn 1 on the opening lap)
+        cap = Math.max(cap, a.va * clamp((a.f - CAR_M) / gap, 0, 1));
         // Going round a car that's (almost) stopped (stalled, AFK, still loading): creep, don't stop. Held at 0 m/s right behind
         // it the car can't steer out, and the race never ended
         if (b.passSide && a.o === b.passCar && a.v < 2) cap = Math.max(cap, CREEP_MS);
@@ -247,13 +267,34 @@ function drive(p, ctx) {
     // on, up to 10 m, made the arc look gentler than the turn and the pedals took grip the corner needed)
     const look = Math.max(AIM_MIN_M, v * AIM_S) * sc;
     const offAt = (i) => {
-        let o = clamp(toPit < PIT_SETUP_M ? L.pitOff : t.racingLine.offset[i] + b.lane * sc, L.lo[i], L.hi[i]);
+        let o = toPit < PIT_SETUP_M ? L.pitOff : t.racingLine.offset[i] + b.lane * sc;
         if (r.alongside) { // room: their side of the track stays theirs through the corner
             const lim = (r.alongside.off - Math.sign(r.alongside.l) * ROOM_M) * sc;
             o = r.alongside.l > 0 ? Math.min(o, lim) : Math.max(o, lim);
         }
+        o = clamp(o, L.lo[i], L.hi[i]); // last: room given on the track (after it, it aimed past the line into Spa's pit mouth)
         return { x: t.path[i].x + L.N[i].x * o, y: t.path[i].y + L.N[i].y * o };
     };
+    // Off the line (a lane, room for a car alongside) the path driven can be tighter than the line its speeds are for: its own
+    // corner speeds over the next PATH_AHEAD points, braked for in time. Through Suzuka's right-left flick a lane held at the
+    // edges kept the line's 83 m/s on a path that needed 55: full lock, the brake on mid-corner, and off
+    // Only where the target is already the grip model's (boxing: a lane over OFF_LINE_LANE_M, a car alongside): a lane just
+    // off the line keeps the calibrated speeds, and the car follows its aim within tenths of the line (read against the
+    // raw model a 0.6 m lane braked a bot flat through Copse). Curvature over a 2-point (~20 m) step: a lane's clamp at
+    // the edge (a sub-metre kink near an apex) isn't a corner
+    let vPath = Infinity;
+    if (boxing !== 1) {
+        const step = (i) => (i + PATH_STEP) % n;
+        let A = offAt(li), i1 = step(li), B = offAt(i1), d = 0;
+        for (let k = 0; k < PATH_AHEAD; k++) {
+            const i2 = step(i1), Q = offAt(i2), ab = Math.hypot(B.x - A.x, B.y - A.y), bq = Math.hypot(Q.x - B.x, Q.y - B.y), aq = Math.hypot(Q.x - A.x, Q.y - A.y);
+            const cr = Math.abs((B.x - A.x) * (Q.y - A.y) - (B.y - A.y) * (Q.x - A.x)), k1 = ab && bq && aq ? ((2 * cr) / (ab * bq * aq)) * sc : 0; // 1/m
+            d += ab / sc;
+            vPath = Math.min(vPath, Math.sqrt(RacingLine.cornerSpeed(k1) ** 2 + 2 * PATH_DEC * d));
+            A = B; B = Q; i1 = i2;
+        }
+    }
+    const vGo = Math.min(vt, vPath);
     // Measured along the path being driven (a lane, the pit side): through a chicane the racing line cuts across it, and
     // distances to the line's points put the aim on the wrong side of the chicane (bang-bang steering, off at Suzuka's)
     const da = (i) => { const q = offAt(i); return Math.hypot(q.x - p.x, q.y - p.y); };
@@ -268,11 +309,11 @@ function drive(p, ctx) {
     // The turn as the calibration's driver judges it: the pursuit arc too once more than OFF_LINE_M from the nearest line
     // point (it's what the limits were found with; the bot's own finer test let it throttle where that one didn't)
     const turn = Math.sqrt(d2(li)) / sc > OFF_LINE_M ? Math.max(lineCurv(t)[li], arc) : lineCurv(t)[li];
-    let { throttle, brake } = pedals(p, sc, vt, turn, steer);
+    let { throttle, brake } = pedals(p, sc, vGo, turn, steer);
     if (v < CRAWL_MS && vt > v) throttle = Math.max(throttle, 0.2); // crawling out of gravel it needs the power
     // The friction circle leaves no braking when the turn takes all the grip: right at the limit, but a car far over it
     // then sailed into the wall at full speed (Monaco's pool exit, off a passing lane). Shedding speed is the way out
-    if (v > vt * OVER_K) { throttle = 0; brake = Math.max(brake, Math.min(1, (v - vt) / 2)); }
+    if (v > vGo * OVER_K) { throttle = 0; brake = Math.max(brake, Math.min(1, (v - vGo) / 2)); }
     if (need > LOCK_K && v > CRAWL_MS) { throttle = 0; brake = Math.max(brake, Math.min(1, need - LOCK_K)); }
     return { throttle: bogging ? Math.min(throttle, 0.6) : throttle, brake, steer, drs: !!p.drsAvailable && brake === 0 };
 }

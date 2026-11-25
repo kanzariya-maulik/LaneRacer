@@ -183,3 +183,18 @@ test('one-shot: aborting the flying lap into the pits ends the run (no second tr
     assert.ok(a.qualiDone);
     assert.ok(!g.canLeaveBox(a));
 });
+
+// A run ends at the pit entry line. The next one starts clean: its full out-laps again (the count carried on, so run 2
+// of outLaps 2 was timed after 1), and a lap not deleted by a Parabolica excursion on the aborted one
+test('after a run ends in the pits: the next run needs its out-laps again and starts with a valid lap', () => {
+    const g = new Game({ emit() {}, volatile: { emit() {} } }, [{ id: 'a', username: 'A', teamId: 'ferrari' }], monza, { maxLaps: 3, qualifying: true, qualiFormat: 'short', outLaps: 2 }, () => {}, 'quali');
+    const a = g.players.a, cp = monza.checkpoints;
+    Object.assign(a, { stop: null, inPit: false });
+    const cross = () => { a.checkpoint = cp.length - 1; g.time += 100; a.x = cp[0].x; a.y = cp[0].y; a.lapS = null; g.checkLapProgress(a); };
+    const untilTimed = () => { let n = 0; while (a.lapStart === null && n < 5) { cross(); n++; } return n; };
+    assert.strictEqual(untilTimed(), 2, 'run 1');
+    a.voidNext = true; // off at the Parabolica on this lap
+    g.endRunAtPitEntry(a);
+    assert.strictEqual(untilTimed(), 2, 'run 2: out-laps counted again');
+    assert.strictEqual(a.lapValid, true, 'the aborted lap\'s penalty stays with it');
+});

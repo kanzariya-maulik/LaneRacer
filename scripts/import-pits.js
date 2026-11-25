@@ -141,12 +141,17 @@ async function importPit(src) {
     pit = resample(pit, STEP_M);
     const file = path.join(OUT_DIR, `${src.id}.json`);
     const track = JSON.parse(fs.readFileSync(file, 'utf8'));
-    pit = await fitToCars(src, pit, P, track.width / SCALE / 2);
-    pit = smoothLane(pit);
-    pit = clearOfRoad(pit, P, track.width / SCALE / 2); // last: room for the pit wall beside the drawn (widened) road
+    // circuits.json pitSurveyedMouths (Monza): the survey as it is, its entry and exit roads included (Track.js builds the
+    // mouths from it); pitWidthM: the real lane's width
+    const circuit = JSON.parse(fs.readFileSync(path.join(OUT_DIR, 'circuits.json'), 'utf8'))[src.id] || {};
+    if (!circuit.pitSurveyedMouths) {
+        pit = await fitToCars(src, pit, P, track.width / SCALE / 2);
+        pit = smoothLane(pit);
+        pit = clearOfRoad(pit, P, track.width / SCALE / 2); // last: room for the pit wall beside the drawn (widened) road
+    }
     track.pit = {
         path: pit.map(([x, y]) => ({ x: +(x * SCALE).toFixed(1), y: +(-y * SCALE).toFixed(1) })),
-        width: PIT_WIDTH_M * SCALE,
+        width: (circuit.pitWidthM ?? PIT_WIDTH_M) * SCALE,
         osmWay: cfg.way,
         fitM: +fit.median.toFixed(2),
     };

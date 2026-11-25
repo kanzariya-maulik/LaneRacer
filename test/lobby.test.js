@@ -155,3 +155,13 @@ test('sanitizeSettings keeps formationLap booleans and ignores other types', () 
     assert.strictEqual(lobby.sanitizeSettings(base, { formationLap: false }, ['monza']).formationLap, false);
     assert.strictEqual(lobby.sanitizeSettings(base, { formationLap: 'no' }, ['monza']).formationLap, true);
 });
+
+// Joins aren't rate limited: many sockets joining under one name must not freeze the server (each join walked k upward,
+// rescanning every player per k: 1000 joins took 32 s)
+test('uniqueName stays fast with many players sharing one name', () => {
+    const { uniqueName } = require('../src/lobby'), players = {}, t0 = Date.now();
+    for (let i = 0; i < 1000; i++) players['s' + i] = { id: 's' + i, username: uniqueName('Bob', players, 's' + i) };
+    assert.strictEqual(new Set(Object.values(players).map((p) => p.username.toLowerCase())).size, 1000);
+    assert.strictEqual(players.s999.username, 'Bob 1000');
+    assert.ok(Date.now() - t0 < 1500, `${Date.now() - t0} ms`);
+});

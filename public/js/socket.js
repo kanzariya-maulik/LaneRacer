@@ -265,7 +265,7 @@ socket.on('settings_updated', (settings) => {
 });
 
 socket.on('chat_msg', (data) => {
-    window.appendChat(data.username, data.color, data.msg);
+    window.appendChat(data.username, data.color, data.msg, !!data.from);
 });
 
 // GAME SYNCS

@@ -41,3 +41,9 @@ test('grid: Q3 order, then Q2 knock-outs, then Q1 knock-outs', () => {
 test('racing line has a lap time on every circuit', () => {
     for (const id of Track.TRACK_IDS) { const t = Track.load(id); assert.ok(t.racingLine.lapS > 30 && t.racingLine.lapS < 200, `${id} ${t.racingLine.lapS}`); }
 });
+
+test('a lone driver is never knocked out (Q2 with one car knocked it out, then ran an empty Q3 on its full clock)', () => {
+    assert.strictEqual(Q.knockoutCount(1), 0);
+    assert.strictEqual(Q.knockoutCount(0), 0);
+    for (let n = 2; n <= 22; n++) assert.ok(Q.knockoutCount(n) >= 1 && Q.knockoutCount(n) <= n - 1, `${n} drivers`);
+});

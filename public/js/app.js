@@ -512,9 +512,10 @@ window.updateSettingsUI = () => {
 };
 window.updateSettingsUI();
 
-window.appendChat = (username, color, msg) => {
+// fromPlayer: a player's message (the server tags it): never drawn as SYSTEM, whatever lookalike name it carries
+window.appendChat = (username, color, msg, fromPlayer = false) => {
     const div = document.createElement('div');
-    div.className = 'chat-msg';
+    div.className = fromPlayer ? 'chat-msg' : 'chat-msg chat-system';
     const author = document.createElement('span');
     author.className = 'chat-author';
     author.style.color = color;

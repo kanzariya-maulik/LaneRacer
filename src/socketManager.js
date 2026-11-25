@@ -48,6 +48,7 @@ function clearTimers() {
 
 // Live sockets by id, so the host can tell a kicked player
 const sockets = {};
+const limits = new Map(); // address -> { conns, buckets }: rate limits per device (see allow)
 // Drivers whose browser hasn't drawn the new session's world yet; the lights start when it empties
 let notDrawn = new Set(), onAllDrawn = null;
 function drawn(id) {
@@ -104,6 +105,19 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
         sockets[socket.id] = socket;
         netlog.log(`[CONNECT] ${socket.id} | ${socket.handshake?.address || '?'} | ${socket.handshake?.headers?.['user-agent'] || '?'}`);
         let lastTelemetry = 0;
+        // A throw in one handler (bad input nobody foresaw) is logged, never the end of the server for everyone
+        const on = socket.on.bind(socket);
+        socket.on = (ev, fn) => on(ev, (...args) => { try { fn(...args); } catch (e) { console.error(`[${ev}] ${socket.id}:`, e); } });
+        // Per address, shared by all its connections: a burst, then perSec (a flooding client can't make the server send to
+        // everyone at will, nor buy more by opening more sockets). Dropped when the address's last connection goes.
+        const addr = socket.handshake?.address || socket.id, lim = limits.get(addr) || { conns: 0, buckets: {} };
+        lim.conns++; limits.set(addr, lim);
+        const buckets = lim.buckets;
+        const allow = (key, burst, perSec) => {
+            const now = Date.now(), b = (buckets[key] ||= { n: burst, at: now });
+            b.n = Math.min(burst, b.n + ((now - b.at) / 1000) * perSec); b.at = now;
+            return b.n >= 1 && b.n-- >= 1;
+        };
         // WebRTC signalling over Socket.IO; inputs arriving on the UDP DataChannel go to the game like socket inputs
         net.setupPeer(socket, (id, inputData) => {
             applyInputLater(id, inputData);
@@ -121,7 +135,7 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
             const own = lobby.sanitizeAssist(data.assist);
             state.players[socket.id] = {
                 id: socket.id,
-                username: lobby.sanitizeUsername(data.username),
+                username: lobby.uniqueName(lobby.sanitizeUsername(data.username), state.players, socket.id),
                 teamId: check.team.id,
                 color: check.team.chatColor,
                 ownAssist: own,                                     // the driver's own choice, kept while the host fixes help
@@ -144,14 +158,14 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
         // Change name and/or team after joining: lobby only (mid-session the car and livery are in use)
         socket.on('update_profile', (data) => {
             const player = state.players[socket.id];
-            if (!player || state.status !== 'LOBBY' || !data || typeof data !== 'object') return;
+            if (!player || state.status !== 'LOBBY' || !data || typeof data !== 'object' || !allow('lobby', 10, 5)) return;
             if (typeof data.teamId === 'string' && data.teamId !== player.teamId) {
                 const check = lobby.canJoinTeam(state.players, data.teamId, socket.id);
                 if (!check.ok) return socket.emit('profile_error', check.reason);
                 player.teamId = check.team.id;
                 player.color = check.team.chatColor;
             }
-            if (typeof data.username === 'string' && data.username.trim()) player.username = lobby.sanitizeUsername(data.username);
+            if (typeof data.username === 'string' && data.username.trim()) player.username = lobby.uniqueName(lobby.sanitizeUsername(data.username), state.players, socket.id);
             io.emit('lobby_state_sync', lobbySnapshot());
         });
 
@@ -192,7 +206,7 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
             io.emit('paused', { paused: false }); // after the new game_init, which already says not paused: no resume banner
         });
         socket.on('kick_player', (id) => {
-            if (!isHost() || id === socket.id || !state.players[id]) return;
+            if (!isHost() || id === socket.id || typeof id !== 'string' || !Object.hasOwn(state.players, id)) return; // own keys: '__proto__' threw
             netlog.log(`[KICK] ${state.players[id].username} (${id}) by host`);
             sockets[id]?.emit('kicked');
             removePlayer(io, id); // their connection stays open: they're back on the join screen and may join again
@@ -202,8 +216,8 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
         socket.on('chat_msg', (msg) => {
             const player = state.players[socket.id];
             const clean = lobby.sanitizeChat(msg);
-            if (!player || !clean) return;
-            io.emit('chat_msg', { username: player.username, color: player.color, msg: clean });
+            if (!player || !clean || !allow('chat', 5, 2)) return;
+            io.emit('chat_msg', { from: socket.id, username: player.username, color: player.color, msg: clean }); // from: a player, never SYSTEM
         });
 
         socket.on('toggle_ready', (isReady) => {
@@ -213,7 +227,8 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
         });
 
         // The lobby builds and compiles the selected track ahead of the start (game3d.js lobbyPrebuild): same data as game_init
-        socket.on('track_data', (id, ack) => { if (typeof ack === 'function') ack(TRACKS[id] || null); });
+        // (~260 KB each: a couple, then one a second; a flood froze the server for everyone)
+        socket.on('track_data', (id, ack) => { if (typeof ack === 'function') ack(allow('track', 2, 1) && Object.hasOwn(TRACKS, id) ? TRACKS[id] : null); });
         socket.on('update_settings', (settings) => {
             if (socket.id !== state.hostId || state.status !== 'LOBBY') return;
             state.settings = lobby.sanitizeSettings(state.settings, settings, Track.TRACK_IDS);
@@ -251,7 +266,7 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
             const player = state.players[socket.id];
             if (!player) return;
             player.compound = lobby.sanitizeCompound(c); // start compound for the next session
-            io.emit('lobby_state_sync', lobbySnapshot());
+            if (allow('lobby', 10, 5)) io.emit('lobby_state_sync', lobbySnapshot()); // the change always lands, its broadcast is limited
         });
 
         socket.on('tyre_next', (c) => gameInstance?.setNextCompound(socket.id, c));
@@ -263,7 +278,7 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
             player.assist = lobby.effectiveAssist(state.settings, player.ownAssist); // fixed by the host: unchanged
             const car = gameInstance?.players[socket.id];
             if (car) car.assist = player.assist; // takes effect on the next tick
-            io.emit('lobby_state_sync', lobbySnapshot());
+            if (allow('lobby', 10, 5)) io.emit('lobby_state_sync', lobbySnapshot()); // (Q pressed fast mid-race: every press counts)
         });
 
         socket.on('net_ping', (t, ack) => { if (typeof ack === 'function') ack(t); }); // RTT for the stats overlay (TCP link)
@@ -288,6 +303,7 @@ function setupSocketManager(io, transport = require('./webrtcManager')) {
         socket.on('world_drawn', () => drawn(socket.id));
 
         socket.on('disconnect', () => {
+            if (--lim.conns === 0) limits.delete(addr);
             drawn(socket.id); // no one waits for a browser that left
             console.log(`Player disconnected: ${socket.id}`);
             netlog.log(`[DISCONNECT] ${state.players[socket.id]?.username ?? 'visitor'} (${socket.id})`);

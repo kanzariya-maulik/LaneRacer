@@ -26,6 +26,16 @@ test('call far before the entry: this lap; within 200 m: next lap; cancel clears
     assert.strictEqual(p.boxCall, 'next');
 });
 
+test('last lap: a call within 200 m is for this lap (there is no next; it was never served and +22 s came anyway)', () => {
+    const g = race(), p = g.players.a;
+    p.lap = RACE.maxLaps - 1;
+    before(g, p, 150); g.setBoxCall('a', true);
+    assert.strictEqual(p.boxCall, 'this');
+    p.lap = RACE.maxLaps - 2; g.setBoxCall('a', false);
+    before(g, p, 150); g.setBoxCall('a', true);
+    assert.strictEqual(p.boxCall, 'next', 'earlier laps: next lap, as before');
+});
+
 test('next lap becomes this lap at the start line', () => {
     const g = race(), p = g.players.a;
     before(g, p, 150); g.setBoxCall('a', true);

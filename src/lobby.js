@@ -4,9 +4,17 @@ const { snapAssist } = require('./game/CarPhysics');
 
 const MAX_RACERS = 22; // grid slots per track (src/game/Track.js GRID_SLOTS)
 
+// Control, format (direction overrides, zero-width) and line/paragraph separators out: a name is one plain line
 function sanitizeUsername(name) {
-    const clean = typeof name === 'string' ? name.trim().slice(0, 15) : '';
+    const clean = typeof name === 'string' ? name.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, '').trim().slice(0, 15) : '';
     return clean || `Player${Math.floor(Math.random() * 1000)}`;
+}
+
+// A name nobody else in the lobby has (case aside), and never SYSTEM (the server's own chat name): "Alice 2", "Alice 3"...
+function uniqueName(name, players, selfId) {
+    const used = new Set(Object.values(players).filter((p) => p.id !== selfId).map((p) => p.username.toLowerCase())).add('system');
+    const taken = (n) => used.has(n.toLowerCase());
+    for (let k = 2, n = name; ; n = `${name.slice(0, 14 - String(k).length)} ${k++}`) if (!taken(n)) return n;
 }
 
 function sanitizeChat(msg) {
@@ -102,4 +110,4 @@ function effectiveAssist(settings, own) {
     return h?.mode === 'fixed' ? snapAssist(h.steer / 100, h.brake / 100) : own;
 }
 
-module.exports = { sanitizeHelp, effectiveAssist, sanitizeCompound, TEAMS, MAX_RACERS, sanitizeUsername, sanitizeChat, sanitizeSettings, sanitizeInput, sanitizeInputs, sanitizeAssist, canJoinTeam, pickRacers };
+module.exports = { uniqueName, sanitizeHelp, effectiveAssist, sanitizeCompound, TEAMS, MAX_RACERS, sanitizeUsername, sanitizeChat, sanitizeSettings, sanitizeInput, sanitizeInputs, sanitizeAssist, canJoinTeam, pickRacers };

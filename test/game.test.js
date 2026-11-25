@@ -264,6 +264,25 @@ test('pit wall blocks the straight → pit and pit → straight', () => {
     assert.ok(Physics.nearestOnTrack(p.x, p.y, monza).dist > wallOff, 'car got out of the pit lane through the wall');
 });
 
+// The pit wall stopped only the car's centre: nose-on, half the car (2.8 m) passed through it and sat there, the wall
+// drawn through the cockpit. Now the whole body stays on its own side, either way
+test('pit wall: a car driven square into it stays out of it, body and all', () => {
+    const pit = monza.pit, sc = monza.scale, w = pit.wall[pit.wall.length >> 1];
+    const c = Physics.nearestOnTrack(w.x, w.y, monza), q = Physics.nearestOnPath(w.x, w.y, pit.path, false);
+    const toPit = Math.atan2(w.y - c.py, w.x - c.px), toWall = Math.hypot(w.x - c.px, w.y - c.py);
+    for (const [from, angle] of [[{ x: w.x - Math.cos(toPit) * 6 * sc, y: w.y - Math.sin(toPit) * 6 * sc }, toPit], [{ x: q.px, y: q.py }, toPit + Math.PI]]) {
+        const g = new Game(io, [lp('a')], monza, RACE, () => {}), p = g.players.a;
+        place(p, { ...from, angle }, 15);
+        p.input = FULL;
+        for (let k = 0; k < 120; k++) {
+            g.drive(p);
+            const ov = Physics.wallOverlap(p, pit.wall, sc);
+            assert.ok(!ov || ov.depth < 0.05 * sc, `tick ${k}: ${(ov?.depth / sc).toFixed(2)} m into the pit wall`);
+        }
+    }
+    assert.ok(toWall > 0);
+});
+
 test('tracks without a pit lane still drive', () => {
     const pts = Array.from({ length: 100 }, (_, i) => ({ x: Math.cos(i / 50 * Math.PI) * 3000, y: Math.sin(i / 50 * Math.PI) * 3000 }));
     const ring = Track.build({ id: 'ring', name: 'Ring', scale: 6, width: 80, path: pts });
@@ -346,18 +365,18 @@ test('race: a lap through the pit lane counts even where checkpoints are out of 
     assert.strictEqual(p.lap, 1);
 });
 
-test('car just off the straight before the pit wall starts is not limited', () => {
+test('Monza pit entry, past the limiter line before the wall: on the track not limited, over the entry line limited', () => {
     const g = new Game(io, [lp('a')], monza, QUALI, () => {}, 'quali');
     const p = g.players.a, pit = monza.pit;
-    const i = pit.cum.findIndex(c => c >= 80 * monza.scale); // inside 60 m limiter line, before the wall
+    const i = pit.cum.findIndex(c => c >= 80 * monza.scale); // inside the 60 m limiter line, before the wall: the entry road splitting off
     const q = pit.path[i], c = Physics.nearestOnTrack(q.x, q.y, monza);
-    const d = Math.hypot(q.x - c.px, q.y - c.py);
-    const off = monza.width / 2 + 1 * monza.scale;
-    p.x = c.px + ((q.x - c.px) / d) * off; p.y = c.py + ((q.y - c.py) / d) * off;
-    p.lapStart = 3;
-    g.updatePit(p);
-    assert.ok(!p.limiter, 'limiter on beside the track with no pit wall');
+    const d = Math.hypot(q.x - c.px, q.y - c.py), edge = Track.edgeAt(monza, c, q.x, q.y);
+    const at = (off) => { p.x = c.px + ((q.x - c.px) / d) * off; p.y = c.py + ((q.y - c.py) / d) * off; p.lapStart = 3; g.updatePit(p); };
+    at(edge - 0.5 * monza.scale); // on the track's edge, left of the line
+    assert.ok(!p.limiter, 'limiter on, on the track');
     assert.strictEqual(p.lapStart, 3);
+    at(edge + 1 * monza.scale); // over the line, on the entry road
+    assert.ok(p.limiter, 'not limited on the pit entry road');
 });
 
 const pitS = (p) => {
@@ -827,9 +846,9 @@ test('slipstream: right behind another car cuts drag; alongside or far behind do
 test('fast update: compact per-car arrays with flags, at most CAR_BYTES per car (velocity, tow, lastSeq for prediction, wear, pit stop)', () => {
     let pkt = null;
     const io2 = { emit() {}, volatile: { emit(ev, d) { if (ev === 'game_state') pkt = d; } } };
-    const g = new Game(io2, [lp('a'), lp('b', 'haas')], monza, QUALI, () => {}, 'quali');
+    const g = new Game(io2, [lp('a'), lp('b', 'haas')], monza, QUALI, () => {}, 'quali'), s0 = g.seq; // numbers on from earlier sessions
     g.update();
-    assert.strictEqual(pkt.s, 1);
+    assert.strictEqual(pkt.s, s0 + 1);
     assert.strictEqual(typeof pkt.t, 'number');
     assert.strictEqual(pkt.c.length, 2);
     const a = pkt.c.find(e => e[0] === g.index.a);
@@ -964,6 +983,20 @@ test('input queue: one input per tick in order; a missing input is guessed in it
     assert.strictEqual(a.lastSeq, 10, 'an input older than one already applied is never applied');
 });
 
+// A bogus far-ahead seq (a modded client, a corrupt packet) once made every real input after it "old": the car ran on
+// guessed repeats of its last input for the rest of the session
+test('input queue: one absurd seq does not lock the driver out of their own car', () => {
+    const g = new Game(io, [lp('a')], monza, RACE, () => {});
+    g.frozen = false;
+    const a = g.players.a, inp = (seq, steer) => ({ seq, steer, throttle: 1, brake: 0, drs: false });
+    g.handleInputs('a', [inp(1, 0.1), inp(2, 0.1)]);
+    g.update(); g.update();
+    g.handleInputs('a', [inp(1e15, 1)]);
+    for (let s = 3; s < 40; s++) { g.handleInputs('a', [inp(s, -0.5)]); g.update(); }
+    assert.strictEqual(a.input.steer, -0.5, `steer ${a.input.steer}, lastSeq ${a.lastSeq}`);
+    assert.ok(a.lastSeq < 100, `lastSeq ${a.lastSeq}`);
+});
+
 test('input queue: a lasting latency rise (WiFi gets busier) never locks out the driver\'s controls', () => {
     const g = new Game(io, [lp('a')], monza, RACE, () => {});
     g.frozen = false;
@@ -1050,7 +1083,7 @@ test('fast update carries velocity, tow and the last applied input for reconcili
 test('start() runs the fixed-step loop and reports net_stats once a second', async () => {
     const stats = [];
     const io2 = { emit(ev, d) { if (ev === 'net_stats') stats.push(d); }, volatile: { emit() {} } };
-    const g = new Game(io2, [lp('a')], monza, RACE, () => {});
+    const g = new Game(io2, [lp('a')], monza, RACE, () => {}), s0 = g.seq; // seq numbers on from earlier sessions
     g.start();
     await new Promise((r) => setTimeout(r, 1150));
     g.stop();
@@ -1058,7 +1091,7 @@ test('start() runs the fixed-step loop and reports net_stats once a second', asy
     assert.strictEqual(stats.length, 1);
     assert.strictEqual(typeof stats[0].tickMs, 'number');
     assert.deepStrictEqual(Object.keys(stats[0].starve), ['a']);
-    assert.ok(g.seq >= 66 && g.seq <= 71, `${g.seq} ticks in 1.15 s`);
+    assert.ok(g.seq - s0 >= 66 && g.seq - s0 <= 71, `${g.seq - s0} ticks in 1.15 s`);
 });
 
 test('input queue: re-align after a stall never re-applies inputs from the redundant window', () => {
@@ -1391,4 +1424,154 @@ test('attack (late braking help): a driver beside a car just ahead is attacking;
     attacking(15, 2.5);
     const entry = g.fastPacket().c.find((e) => e[0] === g.index.a);
     assert.ok(entry[6] & Game.FLAGS.attack, 'attack flag in the fast packet');
+});
+
+test('track limits judge the tyres, not the car centre: angled with the inside rear tyre still on the white line is legal (FIA: off only with no part on the track)', () => {
+    const g = new Game(io, [lp('a')], monza, RACE, () => {});
+    g.release();
+    const p = g.players.a, i = 5, q = monza.path[i], sc = monza.scale;
+    const h = Math.atan2(monza.path[i + 1].y - q.y, monza.path[i + 1].x - q.x);
+    const place = (offM, yaw) => { const off = monza.edgeR[i] + offM * sc; Object.assign(p, { x: q.x - Math.sin(h) * off, y: q.y + Math.cos(h) * off, angle: h + yaw, offLimits: false, lapValid: true }); g.checkLimits(p, Physics.nearestOnTrack(p.x, p.y, monza)); return p.lapValid; };
+    // centre a car's half-width + 0.1 m past the line: pointing straight, every tyre is past it; drifting out at 15° the inside
+    // rear tyre (the wheelbase reaches back across the line) is still on it
+    const past = Physics.CAR_HALF_WIDTH_M + 0.1;
+    assert.strictEqual(place(past, 0), false, 'straight and fully past: off');
+    assert.strictEqual(place(past, 15 * Math.PI / 180), true, 'angled out, inside rear tyre on the line: still on track');
+});
+
+test('Parabolica (T11): off on the outside deletes that lap and the next (FIA); off elsewhere only that lap', () => {
+    const offAt = (lapM, outside, pushed = false) => {
+        const g = new Game(io, [lp('a')], monza, RACE, () => {});
+        g.release();
+        const p = g.players.a, sc = monza.scale, total = monza.cum[monza.path.length];
+        if (pushed) g.incidents.push({ striker: 'b', victim: 'a', at: g.time, off: false, before: false });
+        const s = (monza.startS + lapM * sc) % total, i = monza.cum.findIndex((c) => c >= s), a = monza.path[i], b = monza.path[(i + 1) % monza.path.length];
+        const h = Math.atan2(b.y - a.y, b.x - a.x), k = Math.sign(Game.bendAt(monza, i)) * (outside ? -1 : 1) || 1;
+        const edge = k > 0 ? monza.edgeR[i] : monza.edgeL[i], off = edge + (Physics.CAR_HALF_WIDTH_M + 2) * sc;
+        Object.assign(p, { x: a.x - Math.sin(h) * k * off, y: a.y + Math.cos(h) * k * off, angle: h, lapS: s - monza.startS });
+        g.checkLimits(p, Physics.nearestOnTrack(p.x, p.y, monza));
+        const now = p.lapValid;
+        g.newLap(p); const next = p.lapValid;
+        g.newLap(p); const after = p.lapValid;
+        return [now, next, after];
+    };
+    assert.deepStrictEqual(offAt(5300, true), [false, false, true], 'Parabolica outside: this lap and the next');
+    assert.deepStrictEqual(offAt(2900, true), [false, true, true], 'elsewhere: this lap only');
+    assert.deepStrictEqual(offAt(5300, true, true), [true, true, true], 'pushed off there by a rival: neither lap (the striker answers)');
+});
+
+// Pit entry gore (painted area between the track and the entry road) and pit exit line: FIA, crossing either is penalised
+const lanePoint = (s, lateralM) => { const q = Track.pointAt(monza.pit.path, monza.pit.cum, s, false); return { x: q.x - Math.sin(q.angle) * lateralM * monza.scale, y: q.y + Math.cos(q.angle) * lateralM * monza.scale, angle: q.angle }; };
+test('Monza pit entry: the gore lies between the track edge and the entry road; a car on it gets 5 s, once a lap', () => {
+    const pit = monza.pit, sc = monza.scale;
+    assert.ok(pit.gore && pit.gore.to - pit.gore.from >= 15 * sc && pit.gore.to - pit.gore.from <= 80 * sc, `gore ${pit.gore && ((pit.gore.to - pit.gore.from) / sc).toFixed(0)} m`);
+    const { events, io: sio } = spy(), g = new Game(sio, [lp('a')], monza, RACE, () => {});
+    g.release();
+    const p = g.players.a, s = (pit.gore.from + pit.gore.to) / 2, w = Drive.pitHalf(pit, Physics.nearestOnPath(...Object.values(Track.pointAt(pit.path, pit.cum, s, false)).slice(0, 2), pit.path, false)) / sc;
+    const on = lanePoint(s, pit.trackSide * (w + 0.8)); // just outside the lane on the track side: the painted gore
+    const n = Physics.nearestOnTrack(on.x, on.y, monza);
+    assert.ok(n.dist > Track.edgeAt(monza, n, on.x, on.y), 'probe is off the track');
+    Object.assign(p, on);
+    g.checkPitLines(p, n);
+    assert.strictEqual(p.penalty, 5);
+    g.checkPitLines(p, n);
+    assert.strictEqual(p.penalty, 5, 'once a lap');
+    assert.ok(events.some(([ev, d]) => ev === 'chat_msg' && /pit entry/i.test(d.msg)));
+    // in the lane itself, or on the track: nothing
+    const g2 = new Game(io, [lp('b')], monza, RACE, () => {}); g2.release();
+    const q = g2.players.b;
+    for (const at of [lanePoint(s, 0), lanePoint(s, pit.trackSide * (w + 0.8 + 8))]) { Object.assign(q, at); g2.checkPitLines(q, Physics.nearestOnTrack(q.x, q.y, monza)); }
+    assert.strictEqual(q.penalty, 0);
+});
+
+test('Monza pit exit: leaving the exit road onto the track before the line ends is 5 s; at its end it is not', () => {
+    const pit = monza.pit, sc = monza.scale;
+    const g = new Game(io, [lp('a')], monza, RACE, () => {}); g.release();
+    const p = g.players.a;
+    const cross = (s) => { // from the exit road straight onto the track beside it
+        Object.assign(p, lanePoint(s, 0), { exiting: true, penalty: 0 });
+        g.checkPitLines(p, Physics.nearestOnTrack(p.x, p.y, monza));
+        const n = Physics.nearestOnTrack(p.x, p.y, monza), toTrack = pit.trackSide * ((n.dist - Track.edgeAt(monza, n, p.x, p.y)) / sc + 1.5);
+        Object.assign(p, lanePoint(s, toTrack));
+        g.checkPitLines(p, Physics.nearestOnTrack(p.x, p.y, monza));
+        return p.penalty;
+    };
+    assert.strictEqual(cross(pit.len - 60 * sc), 5, 'across the line');
+    assert.strictEqual(cross(pit.len - 20 * sc), 0, 'across the dashes where the road blends into the track');
+    assert.strictEqual(cross(pit.len - 1 * sc), 0, 'at the end of the line');
+});
+
+// A host restart is a new Game; its packets must number on from the old one's. Numbered from 0 again, a late UDP packet
+// from the old session (seq 5000) made each browser's predictor ignore the new session's until it passed 5000: the own
+// car froze for as long as the old session had run
+test('packet seq runs on across sessions, in step with the tick periods', () => {
+    const a = new Game(io, [lp('a')], monza, RACE, () => {});
+    a.release();
+    for (let k = 0; k < 125; k++) a.update();
+    const old = a.seq;
+    const b = new Game(io, [lp('a')], monza, RACE, () => {});
+    assert.ok(b.seq > old, `new session starts at ${b.seq}, the old one reached ${old}`);
+    assert.strictEqual(b.seq % 60, 0, 'same phase for the once-a-second / 10 Hz jobs');
+});
+
+// Drive a lap by its checkpoints, ending at startTime + seconds
+function lapBy(g, p, startTime, seconds) {
+    const cps = g.track.checkpoints;
+    for (let k = 1; k <= cps.length; k++) {
+        const target = (p.checkpoint + 1) % cps.length;
+        g.time = startTime + (seconds * k) / cps.length;
+        p.x = cps[target].x; p.y = cps[target].y; p.lapS = null;
+        g.checkLapProgress(p);
+    }
+}
+
+// FIA: once the leader has the flag, every car finishes the next time it crosses the line (a lapped car was made to run
+// the full distance, and the 60 s window then classified it DNF)
+test('a lapped car takes the flag behind the leader: classified, a lap down, not DNF', () => {
+    const { events, io: sio } = spy();
+    const g = new Game(sio, [lp('a'), lp('b', 'haas')], monza, { maxLaps: 3, qualifying: false }, () => {});
+    g.release();
+    const { a, b } = g.players;
+    lapBy(g, a, 0, 100); lapBy(g, a, 100, 100); lapBy(g, b, 0, 150);
+    lapBy(g, a, 200, 100); // the leader finishes at 300
+    lapBy(g, b, 150, 160); // b crosses the line at 310, one lap down
+    assert.ok(b.finished && !b.dnf, 'b took the flag');
+    g.update();
+    const rows = events.find(([e]) => e === 'race_results')[1].rows;
+    assert.deepStrictEqual(rows.map((r) => [r.id, r.position, r.dnf, r.lapsDown]), [['a', 1, false, 0], ['b', 2, false, 1]]);
+});
+
+test('equal totals: classified in the order they crossed the line, whoever joined first', () => {
+    for (const order of [['a', 'b'], ['b', 'a']]) {
+        const { events, io: sio } = spy();
+        const g = new Game(sio, order.map((id, i) => lp(id, i ? 'haas' : 'ferrari')), monza, { maxLaps: 1, qualifying: false }, () => {});
+        g.release();
+        const { a, b } = g.players;
+        a.penalty = 5;
+        lapBy(g, a, 0, 100); lapBy(g, b, 0, 105); // both 105 s
+        g.update();
+        assert.deepStrictEqual(events.find(([e]) => e === 'race_results')[1].rows.map((r) => r.id), ['a', 'b'], `joined ${order}`);
+    }
+});
+
+test('live order: a lapped car that took the flag stays behind a lead-lap car still on its last lap', () => {
+    const cps = monza.checkpoints;
+    const b = { id: 'b', finished: true, finishOrder: 2, lap: 2, checkpoint: 0, x: cps[0].x, y: cps[0].y }; // lapped, flagged
+    const c = { id: 'c', finished: false, lap: 2, checkpoint: 5, x: cps[6].x, y: cps[6].y };                // lead lap, last lap
+    const a = { id: 'a', finished: true, finishOrder: 1, lap: 3, checkpoint: 0, x: cps[0].x, y: cps[0].y }; // the winner
+    assert.deepStrictEqual(Game.rankPlayers([b, c, a], cps).map((p) => p.id), ['a', 'c', 'b']);
+});
+
+test('results: no penalty arrows without penalties when a lapped car takes the flag between lead-lap cars', () => {
+    const { events, io: sio } = spy();
+    const g = new Game(sio, [lp('a'), lp('b', 'haas'), lp('l', 'mclaren')], monza, { maxLaps: 3, qualifying: false }, () => {});
+    g.release();
+    const { a, b, l } = g.players;
+    lapBy(g, a, 0, 100); lapBy(g, a, 100, 100); lapBy(g, b, 0, 101); lapBy(g, b, 101, 101); lapBy(g, l, 0, 150);
+    lapBy(g, a, 200, 100); // a wins at 300
+    lapBy(g, l, 150, 155); // l, a lap down, flagged at 305
+    lapBy(g, b, 202, 101); // b at 303... crossing after l
+    g.update();
+    const rows = events.find(([e]) => e === 'race_results')[1].rows;
+    assert.deepStrictEqual(rows.map((r) => [r.id, r.change]), [['a', 0], ['b', 0], ['l', 0]]);
 });

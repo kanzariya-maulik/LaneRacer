@@ -71,3 +71,20 @@ test('rayToWall measures the distance to the first wall', () => {
     assert.ok(Math.abs(W.rayToWall(index, 0, 0, 1, 0, 400 * SC) - 10 * SC) < 1e-6);
     assert.strictEqual(W.rayToWall(index, 0, 0, -1, 0, 400 * SC), Infinity);
 });
+
+// A corner where two barriers meet (or a loop closes) holds the nose too, as one inside a single barrier does: there the
+// last segment of one and the first of the next each left the joint to the other, and 2.4 m of car went through
+test('a convex corner where two barriers meet stops the nose', () => {
+    const S = 6, K = require('../src/game/Physics').CAR_SCALE;
+    for (const walls of [
+        [{ kind: 'wall', pts: [{ x: -100 * S, y: 0 }, { x: 0, y: 0 }] }, { kind: 'wall', pts: [{ x: 0, y: 0 }, { x: 0, y: 100 * S }] }], // end to start
+        [{ kind: 'wall', pts: [{ x: -100 * S, y: 0 }, { x: 0, y: 0 }] }, { kind: 'wall', pts: [{ x: 0, y: 100 * S }, { x: 0, y: 0 }] }], // end to end
+        [{ kind: 'wall', pts: [{ x: 0, y: 0 }, { x: 0, y: 100 * S }, { x: -100 * S, y: 100 * S }, { x: -100 * S, y: 0 }, { x: 0, y: 0 }] }], // a closed loop
+    ]) {
+        const index = W.wallIndex(walls, S), d = 1.2 * K * S;
+        const p = { x: d, y: -d, angle: (135 * Math.PI) / 180, vx: 0, vy: 0, speed: 0 }; // outside the corner, nose at it
+        W.collideWalls(p, p.x, p.y, index, S);
+        const reach = require('../src/game/Physics').carReach(p, -Math.SQRT1_2, Math.SQRT1_2, S), dist = Math.hypot(p.x, p.y) - 1e-6;
+        assert.ok(dist >= reach - 0.01 * S, `${walls.length} barrier(s): nose ${((reach - dist) / S).toFixed(2)} m into the corner`);
+    }
+});

@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const Game = require('../src/game/Game');
 const Track = require('../src/game/Track');
-const { fillGrid } = require('../src/game/bots/roster');
+const { fillGrid, rngOf } = require('../src/game/bots/roster');
 
 const io = { emit() {}, volatile: { emit() {} } };
 const tracks = Object.fromEntries(['monza', 'monaco', 'silverstone', 'interlagos'].map((id) => [id, Track.load(id)]));
@@ -185,7 +185,7 @@ test('review: in the pit lane a bot brakes for a slower car just ahead in the la
 // Standing start, ghost start on (the lobby default): a real launch from the grid, then a fight into turn 1
 test('standing start: bots hold their grid columns off the line, race each other into turn 1, then take the line', () => {
     const bots = fillGrid([], 'medium', 7).slice(0, 20);
-    const g = new Game(io, bots, tracks.monza, { ...RACE, maxLaps: 2, ghostStart: true });
+    const g = new Game(io, bots, tracks.monza, { ...RACE, maxLaps: 2, ghostStart: true, rng: rngOf(1) }); // seeded: on Math.random about 1 run in 25 kept every place
     g.update(); g.release();
     const cars = () => Object.values(g.players);
     const order = () => cars().sort((a, b) => a.rank - b.rank).map((p) => p.id).join();
@@ -275,7 +275,7 @@ function loneLap(t, tyreGrip = null) {
     let wide = 0;
     const g = new Game({ emit: (e, d) => { if (e === 'track_limits' && d.kind === 'wide') wide++; }, volatile: { emit() {} } }, fillGrid([], 'pro', 3, 1), t, { ...RACE, maxLaps: 4 }, () => {});
     const p = Object.values(g.players)[0];
-    p.ai.pace = 1;
+    p.ai.pace = 1; p.ai.mistake = 0; // a clean lap: no random driver error (one in 1000 corners ran it wide now and then)
     g.update(); g.release();
     const spent = new Array(t.path.length).fill(0), speed = new Array(t.path.length).fill(0);
     for (let k = 0; k < 60 * 400 && p.lap < 3; k++) {
@@ -379,4 +379,95 @@ test('a bot queued at the pit entry behind a stopped car holds still, never reve
     const ctx = { track: t, cars: [me, front], mode: 'race', time: 300, dt: 1 / 60, rng: () => 0.5, frozen: false, toEntryM: (p) => g.toEntryM(p) };
     assert.ok(g.toEntryM(me) < 30, `${g.toEntryM(me)} m to the entry`);
     assert.strictEqual(drive(me, ctx).brake, 0, 'brake at a standstill reverses');
+});
+
+// Room for a car alongside is given inside the white lines: applied after the lane limits it aimed a bot past the line,
+// into Spa's pit mouth (an unplanned stop, a third compound, a pit-line penalty)
+test('a bot giving room to a car alongside never aims off the track', () => {
+    const { drive } = require('../src/game/bots/driver'), Drive = require('../public/js/sim/drive.js');
+    const t = tracks.monza, i = 300, sc = t.scale, e = t.edgeR[i] / sc;
+    const me = mk(t, i, e - 1.0, 60, { id: 'me', ai: { pace: 1, aggression: 0.5, mistake: 0, reaction: 0 }, steer: 0, tyreGrip: 1, assist: { steer: 1, brake: 0 } });
+    Object.assign(me, { vx: Math.cos(me.angle) * me.speed, vy: Math.sin(me.angle) * me.speed });
+    let worst = -Infinity;
+    for (let k = 0; k < 120; k++) {
+        const n = Physics.nearestOnTrack(me.x, me.y, t), P = t.path[n.i], Q = t.path[(n.i + 1) % t.path.length], h = Math.atan2(Q.y - P.y, Q.x - P.x);
+        const lat = (-Math.sin(h) * (me.x - n.px) + Math.cos(h) * (me.y - n.py)) / sc; // + = right
+        worst = Math.max(worst, lat - Track.edgeAt(t, n, me.x, me.y) / sc);
+        const side = { ...mk(t, n.i, lat - 0.4, me.speed / sc, { id: 'side', rank: 2 }), x: me.x - Math.sin(h) * -0.4 * sc, y: me.y + Math.cos(h) * -0.4 * sc, angle: me.angle };
+        me.input = drive(me, ctxOf(t, [me, side], 50 + k / 60));
+        Drive.driveCar(me, me.input, t, 1 / 60);
+    }
+    assert.ok(worst <= 0, `centre ${worst.toFixed(2)} m past the white line`);
+});
+
+// In the pit lane, gaps are measured along the lane: along the track, Interlagos' exit lane (25-42 m outside a bend) put
+// 40 m of lane on 18 m of track; cars 12 m apart read as touching and the queue braked to a standstill for 12 s
+test('pit lane traffic is measured along the lane', () => {
+    const { scan } = require('../src/game/bots/driver'), t = Track.load('interlagos'), pit = t.pit, sc = t.scale;
+    const at = (m) => { const q = Track.pointAt(pit.path, pit.cum, m * sc, false); return { x: q.x, y: q.y, angle: q.angle, inPit: true, speed: 10 * sc, lap: 1, rank: 2, tyreGrip: 1 }; };
+    const me = { ...at(800), id: 'me', ai: { pace: 1, aggression: 0.5 } }, o = { ...at(812), id: 'o' };
+    const r = scan(me, ctxOf(t, [me, o], 50), 10);
+    assert.ok(r.ahead && Math.abs(r.ahead.f - 12) < 1, `ahead at ${r.ahead?.f.toFixed(2)} m`);
+    assert.ok(!r.alongside, 'not alongside');
+});
+
+// Off the line nobody starts a pass in the first moments: every car ahead is "slower" while the grid pulls away, and a
+// swing into the other column put each car 7.6 m behind its neighbour there, capped to its ~0 m/s: the field stopped
+test('standing start: the field pulls away, nobody parks behind the car alongside-ahead', () => {
+    const t = Track.load('sakhir'), g = new Game(io, fillGrid([], 'easy', 3, 22), t, { ...RACE, maxLaps: 2, rng: rngOf(1) });
+    g.update(); g.release();
+    const parked = {};
+    let worst = 0;
+    for (let k = 0; k < 60 * 15; k++) {
+        g.update();
+        if (g.frozen) continue;
+        for (const p of Object.values(g.players)) {
+            parked[p.id] = g.time > (p.ai.reaction || 0) + 0.5 && Math.abs(p.speed) / t.scale < 0.5 ? (parked[p.id] || 0) + 1 / 60 : 0;
+            worst = Math.max(worst, parked[p.id]);
+        }
+    }
+    assert.ok(worst < 2, `a car sat still ${worst.toFixed(1)} s after the start`);
+});
+
+// Slowing for a car ahead in mid-corner goes through the grip-aware pedals: the "far over the target" full brake read the
+// traffic cap as the target, and full brake on top of full lock slid cars off Suzuka's esses (13-22 a race)
+test('suzuka esses: bots held up mid-corner stay on the track', () => {
+    const t = Track.load('suzuka'), g = new Game(io, fillGrid([], 'pro', 3, 22), t, { maxLaps: 5, qualifying: false, rng: rngOf(2) });
+    g.update(); g.release();
+    let offs = 0;
+    const was = {};
+    for (let k = 0; k < 60 * 240; k++) {
+        g.update();
+        for (const p of Object.values(g.players)) {
+            const n = Physics.nearestOnTrack(p.x, p.y, t), off = n.dist > Track.edgeAt(t, n, p.x, p.y) + 1 * t.scale;
+            if (off && !was[p.id] && n.i >= 226 && n.i <= 240 && !p.inPit) offs++;
+            was[p.id] = off;
+        }
+    }
+    assert.ok(offs <= 2, `${offs} offs in the esses`);
+});
+
+// The path-speed limit reads the line's calibration as the speed target does: on the line's calibrated speed with a lane
+// just off it (0.3-1 m, every lane change), the raw grip-model corner speed (up to 23 % lower) braked a bot flat out mid-Copse
+test('a bot a little off the line through a fast corner brakes no harder than on it', () => {
+    const { drive } = require('../src/game/bots/driver'), t = Track.load('silverstone'), i = 38, sc = t.scale, v = t.racingLine.speed[i + 2];
+    const brakeAt = (lane) => {
+        const me = mk(t, i, t.racingLine.offset[i] / sc + lane, v, { id: 'me', ai: { pace: 1, aggression: 0.5, mistake: 0, reaction: 0 }, steer: 0, assist: { steer: 1, brake: 0 } });
+        Object.assign(me, { vx: Math.cos(me.angle) * me.speed, vy: Math.sin(me.angle) * me.speed });
+        me.bot = { idx: null, lane, passSide: 0, defend: 0, defended: false, err: null, prevPhase: 0, followS: 0, press: false, wantPit: false, bog: false };
+        return drive(me, ctxOf(t, [me], 50)).brake;
+    };
+    const on = brakeAt(0), off = brakeAt(0.6);
+    assert.ok(off <= on + 0.05, `brake ${off.toFixed(2)} at 0.6 m off the line, ${on.toFixed(2)} on it`);
+});
+
+// The follow cap's "their speed" is along the track: a car reversing at me isn't moving away
+test('a bot right behind a car reversing at it does not drive into it', () => {
+    const { drive, ahead } = require('../src/game/bots/driver'), t = tracks.monza, i = 300, sc = t.scale, off = t.racingLine.offset[i] / sc;
+    const me = mk(t, i, off, 0, { id: 'me', ai: { pace: 1, aggression: 0, mistake: 0, reaction: 0 } });
+    Object.assign(me, { vx: 0, vy: 0 });
+    const j = ahead(t, i, 7.6), front = mk(t, j, t.racingLine.offset[j] / sc, -3, { id: 'f', rank: 2 }); // 2 m bumper gap, reversing at 3 m/s
+    Object.assign(front, { vx: Math.cos(front.angle) * -3 * sc, vy: Math.sin(front.angle) * -3 * sc });
+    const input = drive(me, ctxOf(t, [me, front], 50));
+    assert.strictEqual(input.throttle, 0, `throttle ${input.throttle}`);
 });

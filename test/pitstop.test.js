@@ -57,6 +57,9 @@ for (const id of Track.TRACK_IDS) {
     });
 }
 
+// Entered 5 m in at 50, 60 and 70 m/s: the faster car is through Spa's 32° entry connector sooner, and how far each one
+// overshoots it (the assist slows for the curve it steers, 6-8 m/s) varies a little. 0.33 s spread on the old edges, 0.6 s
+// since the edges stopped being held in by the raw survey (the lane refit 6 m shorter): a few tenths, never seconds
 test('pit assist: the same circuit, the same pit-lane time (fair)', () => {
     const t = Track.load('spa'), times = [];
     for (let n = 0; n < 3; n++) {
@@ -64,7 +67,7 @@ test('pit assist: the same circuit, the same pit-lane time (fair)', () => {
         enterPit(t, g, p, 50 + n * 10);
         times.push(runStop(t, g, p).ticks / 60);
     }
-    assert.ok(Math.max(...times) - Math.min(...times) <= 0.5, times.join(', '));
+    assert.ok(Math.max(...times) - Math.min(...times) <= 0.7, times.join(', '));
 });
 
 test('drive-through: a car that has already stopped this lap is driven straight through', () => {
@@ -131,7 +134,7 @@ test('safety net: a lane car shoved out of the lane is handed back after 1 s; a 
     { // shoved 15 m sideways off the lane, at rest
         const g = start(t, [lp('a')]), p = g.players.a;
         enterPit(t, g, p, 30);
-        for (let k = 0; k < 60 && p.stop?.phase !== 'lane'; k++) g.update();
+        for (let k = 0; k < 180 && p.stop?.phase !== 'lane'; k++) g.update(); // taken over at the limiter line (Monza's lane splits off the track first)
         assert.strictEqual(p.stop?.phase, 'lane');
         const n = -Math.sin(p.angle), m = Math.cos(p.angle), q = pitPoint(t, p.pitS);
         const side = Physics.nearestOnTrack(q.x + n * 15 * sc, q.y + m * 15 * sc, t).dist < Physics.nearestOnTrack(q.x - n * 15 * sc, q.y - m * 15 * sc, t).dist ? 1 : -1;
@@ -143,7 +146,7 @@ test('safety net: a lane car shoved out of the lane is handed back after 1 s; a 
     }
     { // pinned in place in the lane: never reaches its box. No progress for 5 s: the driver gets it back
         const g = start(t, [lp('a')]), p = g.players.a;
-        enterPit(t, g, p, 30, 20);
+        enterPit(t, g, p, 30, 80); // in the lane, past Monza's split from the track
         const pin = { x: p.x, y: p.y, angle: p.angle };
         let k = 0;
         for (; k < 60 * 62 && p.stop?.phase !== 'out'; k++) { Object.assign(p, pin, { vx: 0, vy: 0, speed: 0 }); if (k && !p.stop) break; g.update(); }
@@ -191,10 +194,20 @@ test('team-mates get different boxes', () => {
 
 test('race finish on one compound costs 22 s; two compounds none; tyre wear off none', () => {
     for (const [used, wearOn, want] of [[['M'], true, 22], [['M', 'S'], true, 0], [['M'], false, 0]]) {
-        const t = Track.load('monza'), g = start(t, [lp('a')], { ...RACE, maxLaps: 2, tyreWear: wearOn }), p = g.players.a;
+        const t = Track.load('monza'), g = start(t, [lp('a')], { ...RACE, maxLaps: 5, tyreWear: wearOn }), p = g.players.a;
         p.compoundsUsed = used; p.lap = 1;
         g.finishCar(p);
         assert.strictEqual(p.penalty, want, `${used} wear ${wearOn}`);
+    }
+});
+
+// Under 5 laps a race is a sprint: no mandatory second compound (3-lap races called the whole field in on the last lap)
+test('short races: no compound rule under 5 laps; from 5 laps on, one compound costs 22 s', () => {
+    for (const [laps, want] of [[2, 0], [4, 0], [5, 22]]) {
+        const t = Track.load('monza'), g = start(t, [lp('a')], { ...RACE, maxLaps: laps }), p = g.players.a;
+        p.compoundsUsed = ['M']; p.lap = laps - 1;
+        g.finishCar(p);
+        assert.strictEqual(p.penalty, want, `${laps} laps`);
     }
 });
 
@@ -283,8 +296,8 @@ test('unsafe release: a moving car within 10 m behind the box holds the release,
 test('race finish through the line: one compound +22 s exactly once, two compounds none; the stop is cleared', () => {
     for (const [used, want] of [[['M'], 22], [['M', 'S'], 0]]) {
         const msgs = [], sio = { emit(ev, d) { if (ev === 'chat_msg') msgs.push(d.msg); }, volatile: { emit() {} } };
-        const t = Track.load('monza'), g = new Game(sio, [lp('a')], t, { ...RACE, maxLaps: 2, tyreWear: true }, () => {}), p = g.players.a;
-        g.frozen = false; p.compoundsUsed = used;
+        const t = Track.load('monza'), g = new Game(sio, [lp('a')], t, { ...RACE, maxLaps: 5, tyreWear: true }, () => {}), p = g.players.a;
+        g.frozen = false; p.compoundsUsed = used; p.lap = 3; // the last two laps of a race long enough for the rule
         const cps = t.checkpoints;
         for (let lapN = 0; lapN < 2; lapN++) for (let k = 1; k <= cps.length; k++) {
             if (lapN === 1 && k === cps.length) p.stop = { phase: 'guide', t: 2.7, age: 0 };
@@ -306,7 +319,7 @@ test('quali: a fresh set every pit visit; race: one service per lap', () => {
         const t = Track.load('monza'), g = new Game(io, [lp('a')], t, mode === 'quali' ? { qualiLaps: 2 } : RACE, () => {}, mode), p = g.players.a, sc = t.scale;
         // In the lane: a due car is taken to its box ('lane'), otherwise driven through ('out') or left alone (same visit)
         const visit = () => {
-            Object.assign(p, { inPit: true, pitS: 40 * sc, vx: 0, vy: 0, input: { throttle: 0, brake: 0, steer: 0 } }); // in the open lane
+            Object.assign(p, { inPit: true, pitS: t.pit.cum[t.pit.widthAt.findIndex((w) => w >= 0.9 * t.pit.width)] + 10 * sc, vx: 0, vy: 0, input: { throttle: 0, brake: 0, steer: 0 } }); // in the open lane
             g.updateStop(p);
             if (p.stop?.phase !== 'lane') { p.stop = null; return false; }
             p.stop = { phase: 'service', t: 1e-6, age: 0, parkedAt: g.clock }; g.updateStop(p);
@@ -379,7 +392,7 @@ test('tyre picks: unknown driver or compound are ignored', () => {
 });
 
 test('grid change to softs, then no stop: still a one-compound finisher (+22 s)', () => {
-    const g = new Game(io, [lp('a')], Track.load('monza'), RACE, () => {});
+    const g = new Game(io, [lp('a')], Track.load('monza'), { ...RACE, maxLaps: 5 }, () => {});
     g.setNextCompound('a', 'S');
     g.finishCar(g.players.a);
     assert.strictEqual(g.players.a.penalty, 22);

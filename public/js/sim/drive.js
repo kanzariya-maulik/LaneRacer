@@ -66,7 +66,8 @@ export const bounce = (p, nx, ny) => Physics.bounce(p, nx, ny);
 export function updatePitState(p, t, near, nearPit) {
     const pit = t.pit;
     p.pitS = pitAlong(pit, nearPit);
-    p.inPit = nearPit.dist <= pitHalf(pit, nearPit) && surfaceUnder(t, near, p.x, p.y) !== 'road'
+    p.inPit = nearPit.dist < pitHalf(pit, nearPit) && // strictly: a mouth's zero-width tip holds no car
+        surfaceUnder(t, near, p.x, p.y) !== 'road'
         && !Physics.crossWall(p.x, p.y, nearPit.px, nearPit.py, pit.wall);
     p.limiter = p.inPit && p.pitS >= pit.limStart && p.pitS <= pit.limEnd;
     if (p.limiter) {
@@ -91,6 +92,10 @@ export function canStopOnMark(p, t, metres) {
 // Pit assist (Game.updateStop phases 'lane' and 'out'): along the pit lane's centre line at up to the limiter speed. 'lane'
 // slows to ASSIST_ARRIVE_MS by ASSIST_HANDOVER_M before the box (guideToBox parks from there); 'out' runs to the limiter
 // end. Stateless — steering and speed from the car and the track alone, so the client predictor makes the same choice
+// Pit lane: a working lane this wide along the garage side (the boxes in its middle), the fast lane the rest. Cars drive the
+// fast lane's centre (half a working lane from the line between them) along the garages, easing onto it over PIT_LANE_EASE_M
+export const PIT_WORK_LANE_M = 5, PIT_LANE_EASE_M = 25;
+const BOX_TURN_M = 30; // heading for its box, the car moves across from the fast lane over this, before the guide takes it in
 export const ASSIST_HANDOVER_M = 12, ASSIST_ARRIVE_MS = 15 / 3.6;
 const ASSIST_DEC = 7;          // m/s² planned braking (the car manages ~15)
 const ASSIST_LOOK_S = 0.35, ASSIST_LOOK_MIN_M = 8, ASSIST_GAIN = 2; // pedal per m/s of speed error
@@ -111,8 +116,17 @@ export function pointOnPath(pit, s) {
 
 export function pitAssist(p, t) {
     const pit = t.pit, sc = t.scale, v = p.speed / sc, s = pitAlong(pit, Physics.nearestOnPath(p.x, p.y, pit.path, false)); // own lookup: pitS/pitI are last tick's (unset in the predictor)
-    // Steering: pure pursuit onto the lane centre a moment ahead (pulls a car out of its box, too)
-    const aim = pointOnPath(pit, s + Math.max(ASSIST_LOOK_MIN_M, ASSIST_LOOK_S * Math.abs(v)) * sc);
+    // Steering: pure pursuit onto the lane a moment ahead (pulls a car out of its box, too): its centre, and along the garages
+    // the fast lane's centre, never the line between the fast and working lanes
+    const as = s + Math.max(ASSIST_LOOK_MIN_M, ASSIST_LOOK_S * Math.abs(v)) * sc, on = pointOnPath(pit, as);
+    const [g0, g1] = pit.garageSpan || [0, 0], ease = PIT_LANE_EASE_M * sc;
+    let o = pit.trackSide * (PIT_WORK_LANE_M / 2) * sc * Math.max(0, Math.min(1, (as - g0 + ease) / ease, (g1 + ease - as) / ease));
+    if (p.stop?.phase === 'lane' && p.box) { // onto its box's line, gradually: across 6 m in the guide's last 12 m it arrived 50° askew
+        const b = pointOnPath(pit, p.box.s), bo = -(p.box.x - b.x) * Math.sin(b.angle) + (p.box.y - b.y) * Math.cos(b.angle);
+        const w = Math.max(0, Math.min(1, (as - (p.box.s - (ASSIST_HANDOVER_M + BOX_TURN_M) * sc)) / (BOX_TURN_M * sc)));
+        o += (bo - o) * w;
+    }
+    const aim = { x: on.x - Math.sin(on.angle) * o, y: on.y + Math.cos(on.angle) * o };
     const dx = (aim.x - p.x) / sc, dy = (aim.y - p.y) / sc, ld = Math.max(1, Math.hypot(dx, dy));
     const err = Math.atan2(Math.sin(Math.atan2(dy, dx) - p.angle), Math.cos(Math.atan2(dy, dx) - p.angle));
     const k = (2 * Math.sin(err)) / ld; // 1/m
@@ -302,6 +316,9 @@ export function driveCar(p, input, t, dt) {
         p.y = y0 + hit.ny * 0.5;
         bounce(p, hit.nx, hit.ny);
     }
+    // ...and so is the body poking through it (the centre alone held: nose-on, 2.5 m of car sat through the wall)
+    const ov = pit && beforePit.dist < pit.width + 10 * scale && Physics.wallOverlap(p, pit.wall, scale); // the wall: within the lane's width of it
+    if (ov) { p.x += ov.nx * ov.depth; p.y += ov.ny * ov.depth; bounce(p, ov.nx, ov.ny); }
 
     // Bridges (Suzuka): parapets on the deck and the walls of the underpass, each only for cars on its own level
     if (t.bridges && t.bridges.length) {

@@ -17,6 +17,9 @@ test('lap banners', () => {
     assert.strictEqual(T.lapBanner({ valid: true, pos: 1, prevPos: 2, pole: true }, 4), 'PROVISIONAL POLE');
     assert.strictEqual(T.lapBanner({ valid: false }, 4), null);
     assert.strictEqual(T.fmtLap(81.403), '1:21.403');
+    assert.strictEqual(T.fmtLap(3600 * (1 / 60) - 2e-12), '1:00.000', 'a minute summed from ticks: never 0:60.000');
+    assert.strictEqual(T.fmtLap(119.9999), '2:00.000');
+    assert.strictEqual(T.fmtLap(59.9994), '0:59.999');
 });
 
 test('box banner names the tyres', () => {

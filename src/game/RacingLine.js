@@ -108,4 +108,4 @@ function compute(t, scale = null) {
     return { offset, speed: prof.speed.map((v) => Math.floor(v * 10) / 10), phase: prof.phase, limit, modelLimit: base.map((v) => Math.floor(v * 10) / 10), lapS: Math.round(prof.lap * 10) / 10 };
 }
 
-module.exports = { compute, profile, linePoints, curvatures, latMax, MARGIN_M };
+module.exports = { compute, profile, linePoints, curvatures, latMax, cornerSpeed, MARGIN_M };

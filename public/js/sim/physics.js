@@ -133,11 +133,18 @@ class Physics {
     // or null. Past either end of the segment the neighbouring segment answers: only the polyline's own two ends act as
     // points (a joint judged from both sides pushed the car out diagonally, 35° off square on a graze)
     // joinedStart / joinedEnd: the polyline carries on in another one there (a barrier split where its kind changes)
-    static segOverlap(car, wall, i, scale, joinedStart = false, joinedEnd = false) {
+    // next: past a joined end, the point just after the joint on the barrier carrying on (walls.js), or null
+    static segOverlap(car, wall, i, scale, joinedStart = false, joinedEnd = false, next = null) {
         const a = wall[i], b = wall[i + 1], ex = b.x - a.x, ey = b.y - a.y, l2 = ex * ex + ey * ey;
         if (!l2) return null;
         const raw = ((car.x - a.x) * ex + (car.y - a.y) * ey) / l2;
-        if ((raw < 0 && (i > 0 || joinedStart)) || (raw > 1 && (i + 2 < wall.length || joinedEnd))) return null;
+        if (raw < 0 && (i > 0 || joinedStart)) return null;
+        if (raw > 1 && (i + 2 < wall.length || joinedEnd)) { // past the joint with the next segment: its own unless the car is
+            const c = i + 2 < wall.length ? wall[i + 2] : next; // before that one too (the corner's outside: neither covered it)
+            if (!c) return null;
+            const fx = c.x - b.x, fy = c.y - b.y;
+            if ((car.x - b.x) * fx + (car.y - b.y) * fy >= 0) return null;
+        }
         const t = Math.max(0, Math.min(1, raw));
         const dx = car.x - (a.x + t * ex), dy = car.y - (a.y + t * ey), d = Math.hypot(dx, dy);
         if (d < 1e-9) return null;
@@ -194,6 +201,7 @@ class Physics {
             a.vx += j * nx; a.vy += j * ny;
             b.vx -= j * nx; b.vy -= j * ny;
         }
+        for (const c of [a, b]) c.speed = c.vx * Math.cos(c.angle) + c.vy * Math.sin(c.angle); // read before the next step
         return true;
     }
 }

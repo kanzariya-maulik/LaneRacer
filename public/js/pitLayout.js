@@ -1,4 +1,4 @@
-import { nextHarder } from './sim/tyres.js';
+import { nextHarder, stopRule } from './sim/tyres.js';
 // Pit lane layout for drawing (game3d.js buildPit) and the pit crews. Pure — no three.js, no DOM — so node
 // tests cover every circuit. World units (metres × track.scale); t = a built track, t.pit from Track.build; the garages are
 // on the -pit.trackSide side of the lane.
@@ -45,6 +45,14 @@ export function pitLayout(t) {
     })));
     const canopy = garages.filter((g) => !g.skip).map((g) => ({ ...side(g.front, g.angle, s * (CANOPY_DEEP_M / 2) * sc), angle: g.angle }));
     return { split, edge: { ...split }, boxes, garages, canopy };
+}
+
+// "Stop required": a race of 5+ laps with tyre wear needs two compounds (tyres.js stopRule) (Game.finishCar adds 22 s at the flag otherwise).
+// From half distance, rounded down (lap: laps done; a 5-lap race warns from its 3rd lap) until the car has run a second compound or has its stop called; null: nothing to say
+export function stopWarning({ status, maxLaps, tyreWear, lap, compoundsUsed, boxCall, inPit, finished }) {
+    if (status !== 'RACE' || !stopRule(maxLaps, tyreWear) || finished || inPit || boxCall) return null;
+    if ((compoundsUsed?.length ?? 0) >= 2 || lap < Math.floor(maxLaps / 2)) return null;
+    return lap >= maxLaps - 1 ? 'LAST LAP: BOX NOW (B) OR +22 S' : 'STOP REQUIRED: RACE 2 TYRE COMPOUNDS (B TO BOX)';
 }
 
 // When the tyre picker pops out (spec §1)

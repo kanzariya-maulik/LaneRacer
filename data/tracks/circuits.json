@@ -1,5 +1,8 @@
 {
   "monza": {
+    "pitSurveyedMouths": true,
+    "pitWidthM": 12,
+    "doubleDeleteM": [5100, 5480],
     "startLineM": 13,
     "gridLineM": 307,
     "poleSide": "left",

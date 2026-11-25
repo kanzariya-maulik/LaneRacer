@@ -10,9 +10,19 @@ export function wallIndex(walls, scale) {
     // ends that meet another barrier's end: the barrier carries on there (build.js splits loops where the kind changes)
     const ends = new Map(), key = (q) => `${q.x},${q.y}`;
     for (const w of walls) for (const q of [w.pts[0], w.pts.at(-1)]) ends.set(key(q), (ends.get(key(q)) || 0) + 1);
+    // next: the point just past the end's joint on the barrier carrying on (a loop: its own second point), so the corner's
+    // outside there is answered as one inside a barrier is (physics.js segOverlap)
+    const after = (w, q) => {
+        if (key(w.pts[0]) === key(w.pts.at(-1))) return w.pts[1];
+        for (const u of walls) if (u !== w) {
+            if (key(u.pts[0]) === key(q)) return u.pts[1];
+            if (key(u.pts.at(-1)) === key(q)) return u.pts.at(-2);
+        }
+        return null;
+    };
     const joined = walls.map((w) => {
         const closed = key(w.pts[0]) === key(w.pts.at(-1));
-        return { start: closed || ends.get(key(w.pts[0])) > 1, end: closed || ends.get(key(w.pts.at(-1))) > 1 };
+        return { start: closed || ends.get(key(w.pts[0])) > 1, end: closed || ends.get(key(w.pts.at(-1))) > 1, next: after(w, w.pts.at(-1)) };
     });
     walls.forEach((w, k) => {
         for (let i = 0; i + 1 < w.pts.length; i++) {
@@ -58,7 +68,7 @@ export function collideWalls(p, x0, y0, index, scale, accept = null) {
         }
         let best = null;
         for (const i of segs) {
-            const ov = Physics.segOverlap(p, w.pts, i, scale, j.start, j.end);
+            const ov = Physics.segOverlap(p, w.pts, i, scale, j.start, j.end, j.next);
             if (ov && (!best || ov.depth > best.depth)) best = ov;
         }
         if (best) { p.x += best.nx * best.depth; p.y += best.ny * best.depth; Physics.bounce(p, best.nx, best.ny); hit = true; }

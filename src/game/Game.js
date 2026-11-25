@@ -1,4 +1,5 @@
 const Physics = require('./Physics');
+const { C } = require('./CarPhysics');
 const netlog = require('../netlog');
 const Tyres = require('../../public/js/sim/tyres.js');
 const Drive = require('../../public/js/sim/drive.js');
@@ -22,11 +23,13 @@ const CONTACT_GAP_S = 1;         // contact again within this: still the same co
 const INCIDENT_JUDGE_S = 2;      // the victim is watched this long: pushed off or spun makes it worse
 const COLLISION_PENALTY_S = 5, COLLISION_OFF_PENALTY_S = 10;
 const LIMIT_PENALTY_S = 5;
+const GORE_MAX_M = 3; // the pit entry gore's widest (Track.js GORE_GAP_M)
 const JUMP_PENALTY_S = 10;    // moving before lights out
 const JUMP_MOVE_M = 0.5;      // further than this from the grid slot = moved
 const FINISH_WINDOW_S = 60;   // after the winner finishes, the rest have this long before they're classified DNF
 const INPUT_TIMEOUT_S = 0.3;  // no input for this long = controls released
 const INPUT_QUEUE_MAX = 8;    // inputs buffered per player; a burst beyond this drops its oldest
+const BOGUS_SEQ_GAP = 600;    // a packet's inputs all this far (10 s of ticks) behind the newest seen: that newest was bogus
 const REALIGN_BEHIND = 4;     // newest input this many slots behind the server's: re-align at once
 const SLACK_TICKS = 30;       // input cushion report window: the fewest spare inputs held over this many ticks
 const LAG_REALIGN_BATCHES = 30; // input packets in a row landing behind the server's slots (~0.5 s) = lasting lag: re-align
@@ -45,11 +48,14 @@ const STALL_S = 5, STALL_M = 1;        // lane/out: not this much further along 
 // whole lap ends by FORMATION_MAX_S whatever happens; then anyone still out is put on their slot
 const FORMATION_WAIT_S = 30, FORMATION_MAX_S = 180, FORMATION_HALF = [0.35, 0.65], FORMATION_PASS_M = 2; // further ahead than this = an overtake
 const FORMATION_BOT_PARK_M = 250, FORMATION_BOT_DEC = 5; // bots: from this far behind their slot, steer onto its line and brake to stop on it
-const STOP_CODE = { guide: 1, service: 2, hold: 3, lane: 4, out: 5, wait: 6 };
+const STOP_CODE = { guide: 1, service: 2, hold: 3, lane: 4, out: 5, wait: 6 }, HELD_CODE = 7; // 7: a throttle held from the formation lap (drive)
 
 const FLAGS = { inPit: 1, limiter: 2, drs: 4, drsAvailable: 8, finished: 16, lapValid: 32, ghost: 64, attack: 128 };
 const META_FIELDS = ['lap', 'checkpoint', 'rank', 'gap', 'lapsDown', 'lastLap', 'bestLap', 'lapStart', 'bestLapSectors', 'lastValid', 'penalty', 'compound', 'nextCompound', 'stops', 'compoundsUsed', 'wearPerM', 'lastStop', 'segBest', 'qualiOut', 'boxCall', 'isBot', 'form', 'grid'];
 const META_EVERY = 6; // ticks: info updates at 10 Hz
+// The newest packet seq sent by any session in this server run: the next session numbers on from it, so a late packet
+// from a restarted session is always older than the new one's (browsers drop packets older than the newest they've had)
+let lastSeq = 0;
 // Attacking: a car up to ATTACK_M ahead (or alongside), the driver pulled out from behind it: from ATTACK_SIDE_M to its side
 // (a car is 1.6 m wide), held down to ATTACK_HOLD_M so it doesn't flicker on and off in the braking zone
 const ATTACK_M = 30, ATTACK_BACK_M = 3, ATTACK_SIDE_M = 2, ATTACK_HOLD_M = 1.5;
@@ -67,6 +73,17 @@ function bendAt(t, i) {
 }
 
 const fmtLap = (t) => `${Math.floor(t / 60)}:${(t % 60).toFixed(3).padStart(6, '0')}`;
+
+// Every tyre's outer corner past the white line (each against the edge at its own point of the track)
+const TYRE_HALF_BASE_M = (C.WHEELBASE * Physics.CAR_SCALE) / 2;
+function tyresOff(t, p) {
+    const sc = t.scale, c = Math.cos(p.angle), s = Math.sin(p.angle);
+    for (const a of [TYRE_HALF_BASE_M, -TYRE_HALF_BASE_M]) for (const l of [Physics.CAR_HALF_WIDTH_M, -Physics.CAR_HALF_WIDTH_M]) {
+        const x = p.x + (c * a - s * l) * sc, y = p.y + (s * a + c * l) * sc, n = Physics.nearestOnTrack(x, y, t, p.roadI);
+        if (n.dist <= edgeAt(t, n, x, y)) return false;
+    }
+    return true;
+}
 
 class Game {
     // net: optional transport (src/webrtcManager.js) that sends game_state over the UDP DataChannel
@@ -101,7 +118,7 @@ class Game {
 
         const cpCount = track.checkpoints.length;
         this.players = {};
-        this.index = {}; this.seq = 0; this.sentMeta = {};
+        this.index = {}; this.seq = Math.ceil(lastSeq / TICK_RATE) * TICK_RATE; this.sentMeta = {}; // on from the last session (see lastSeq)
         const boxes = track.pit ? Game.garageSlots(players, track) : null;
         players.forEach((p, index) => {
             this.index[p.id] = index;
@@ -168,8 +185,11 @@ class Game {
             return Math.hypot(p.x - cp.x, p.y - cp.y);
         };
         return [...players].sort((a, b) => {
-            if (a.finished !== b.finished) return a.finished ? -1 : 1;
-            if (a.finished) return a.finishOrder - b.finishOrder;
+            if (a.finished !== b.finished) { // flagged is ahead only with more laps done (a lapped finisher isn't)
+                const [f, o] = a.finished ? [a, b] : [b, a];
+                return (f.lap > o.lap) === a.finished ? -1 : 1;
+            }
+            if (a.finished) return b.lap - a.lap || a.finishOrder - b.finishOrder;
             if (a.lap !== b.lap) return b.lap - a.lap;
             if (a.checkpoint !== b.checkpoint) return b.checkpoint - a.checkpoint;
             return distToNext(a) - distToNext(b);
@@ -294,10 +314,10 @@ class Game {
         p.servicedVisit = p.pitVisits;
     }
 
-    // A race finisher who never ran a second compound (races of 2+ laps, tyre wear on)
+    // A race finisher who never ran a second compound (Tyres.stopRule: races of 5+ laps, tyre wear on)
     finishCar(p) {
         p.boxCall = null;
-        if (this.mode !== 'race' || this.settings.tyreWear === false || (this.settings.maxLaps || 1) < 2 || p.compoundsUsed.length >= 2) return;
+        if (this.mode !== 'race' || !Tyres.stopRule(this.settings.maxLaps || 1, this.settings.tyreWear) || p.compoundsUsed.length >= 2) return;
         p.penalty += COMPOUND_PENALTY_S;
         this.io.emit('chat_msg', { username: 'SYSTEM', color: '#ff0000', msg: `${p.username}: +${COMPOUND_PENALTY_S}s, raced on one tyre compound (total +${p.penalty}s)` });
     }
@@ -320,7 +340,7 @@ class Game {
                 | (p.attack && FLAGS.attack);
             c.push([this.index[id], r1(p.x), r1(p.y), +p.angle.toFixed(4), r1(p.speed), +p.steer.toFixed(3), flags,
                     r1(p.vx), r1(p.vy), +(p.tow || 0).toFixed(2), p.lastSeq, +(p.wear || 0).toFixed(4),
-                    p.stop ? STOP_CODE[p.stop.phase] : 0, p.stop ? +p.stop.t.toFixed(1) : 0, p.slack ?? 1]);
+                    p.stop ? STOP_CODE[p.stop.phase] : p.held ? HELD_CODE : 0, p.stop ? +p.stop.t.toFixed(1) : 0, p.slack ?? 1]);
         }
         return { s: this.seq, t: +this.clock.toFixed(3), g: +this.time.toFixed(3), c };
     }
@@ -377,6 +397,9 @@ class Game {
         // reconnect): re-align now. A little behind for a while (a lasting latency rise of even one tick): every input
         // would land in an already-guessed slot and the car repeat a stale input forever, so re-align too. A brief jitter
         // spike recovers by itself and is left alone. Resends/reordered packets carry nothing new and count for neither.
+        // A whole packet far behind the newest seq ever seen: that seq was bogus (a corrupt or modded packet) or the client
+        // restarted its count. Forget it and its queue, or every real input reads as old and the car runs on repeats for good.
+        if (list.length && Math.max(...list.map((i) => i.seq)) < (p.maxSeen ?? -1) - BOGUS_SEQ_GAP) { p.maxSeen = undefined; p.queue = []; }
         const fresh = list.filter((i) => i.seq > (p.maxSeen ?? -1));
         if (fresh.length) {
             const newest = Math.max(...fresh.map((i) => i.seq));
@@ -508,9 +531,14 @@ class Game {
     // Motion is shared with the browser (driveCar); the rest is the referee's job
     drive(p) {
         const t = this.track, wasLimited = p.limiter;
-        const after = Drive.driveCar(p, p.input, t, this.dt);
+        // Before the start, a foot still down from the formation lap (not lifted since the car was put on its slot) neither
+        // counts as a jump start (checkJumpStart) nor drives: held through the lights it rolled 144 m off the slot
+        const held = this.frozen && !this.wantsFormation && p.throttleArmed === false && p.input.throttle > 0;
+        p.held = held; // (sent as stop code 7: the predictor holds the car too)
+        const after = Drive.driveCar(p, held ? { ...p.input, throttle: 0 } : p.input, t, this.dt);
         if (this.mode === 'quali' && p.limiter && !wasLimited) this.endRunAtPitEntry(p); // crossing the pit entry line ends a timed lap
         this.checkLimits(p, after);
+        if (this.mode === 'race' && t.pit?.gore) this.checkPitLines(p, after);
         const total = t.cum[t.path.length];
         const lapS = (((t.cum[after.i] + after.t * (t.cum[after.i + 1] - t.cum[after.i]) - t.startS) % total) + total) % total;
         this.updateDrs(p, p.lapS ?? lapS, lapS);
@@ -615,7 +643,7 @@ class Game {
         }
         this.updateRanks();
 
-        this.seq++;
+        lastSeq = ++this.seq;
         const packet = this.fastPacket();
         if (this.net) this.net.broadcastGameState(packet, this.io); // UDP, Socket.IO until a peer's channel opens
         else this.io.volatile.emit('game_state', packet);
@@ -657,7 +685,8 @@ class Game {
     setBoxCall(id, on) {
         const p = this.players[id];
         if (!p || this.mode !== 'race' || !this.track.pit || p.finished || p.inPit || this.formation) return; // no stops on the formation lap
-        p.boxCall = on ? (this.toEntryM(p) < BOX_NEXT_M ? 'next' : 'this') : null;
+        const last = p.lap >= (this.settings.maxLaps || 1) - 1; // the flag comes before a next lap's entry: this lap or never
+        p.boxCall = on ? (!last && this.toEntryM(p) < BOX_NEXT_M ? 'next' : 'this') : null;
         p.boxMissedLap = null;
     }
     // Drove past the entry with the call on: stays called for the next lap, told once
@@ -694,6 +723,7 @@ class Game {
     endRunAtPitEntry(p) {
         const flying = p.lapStart !== null;
         p.lapStart = p.sectorStart = null;
+        p.outLaps = 0; p.voidNext = false; // the next run starts clean: its own out-laps, and this lap's penalty stays with it
         if (this.quali.phase === 'flag' || (this.quali.format === 'oneshot' && flying)) p.qualiDone = true; // one-shot: an aborted flying lap is the shot
     }
     // A completed timed lap: segment best, positions, provisional pole
@@ -755,7 +785,7 @@ class Game {
     resetToBoxes() {
         for (const p of Object.values(this.players)) {
             if (p.box) Object.assign(p, { x: p.box.x, y: p.box.y, angle: p.box.angle });
-            Object.assign(p, { vx: 0, vy: 0, speed: 0, stop: { phase: 'wait', t: 0, age: 0 }, inPit: true, lapStart: null, sectorStart: null, outLaps: 0, finished: false });
+            Object.assign(p, { vx: 0, vy: 0, speed: 0, stop: { phase: 'wait', t: 0, age: 0 }, inPit: true, lapStart: null, sectorStart: null, outLaps: 0, voidNext: false, finished: false });
         }
     }
 
@@ -958,16 +988,55 @@ class Game {
 
     // All four wheels past the real white line (t.limit), once per excursion; pit lane, quali out-lap exempt, and so is
     // rejoining from the pit exit until the car is first back inside the line
+    // FIA (Race Director's notes): the painted gore between the track and the pit entry, and the white line beside the pit
+    // exit road, may not be crossed: 5 s, once a lap for the gore, once per exit for the line. Circuits with a surveyed pit
+    // (Track.js pit.gore: Monza)
+    checkPitLines(p, near) {
+        const t = this.track, pit = t.pit, sc = t.scale;
+        if (this.frozen || p.finished || p.stop) return;
+        const np = Physics.nearestOnPath(p.x, p.y, pit.path, false), s = Drive.pitAlong(pit, np), half = Drive.pitHalf(pit, np);
+        const onRoad = near.dist <= edgeAt(t, near, p.x, p.y);
+        if (p.inPit) p.exiting = s > pit.len / 2; // in the second half of the lane: on the way out
+        const a = pit.path[np.i], b = pit.path[Math.min(np.i + 1, pit.path.length - 1)];
+        const trackward = Math.sign(-(b.y - a.y) * (p.x - np.px) + (b.x - a.x) * (p.y - np.py)) === pit.trackSide;
+        const fine = (what) => {
+            p.penalty += LIMIT_PENALTY_S;
+            this.io.emit('track_limits', { id: p.id, kind: 'pitline' });
+            this.io.emit('chat_msg', { username: 'SYSTEM', color: '#f59e0b', msg: `${p.username}: +${LIMIT_PENALTY_S}s, crossed the ${what} (total +${p.penalty}s)` });
+        };
+        if (!onRoad && !p.inPit && trackward && np.dist > half && np.dist < half + (GORE_MAX_M + 1) * sc && s >= pit.gore.from && s <= pit.gore.to && p.goreLap !== p.lap) {
+            p.goreLap = p.lap;
+            fine('pit entry gore');
+        }
+        if (p.exiting && !p.inPit) {
+            if (s >= pit.lineEnd || np.dist > 30 * sc) p.exiting = false; // out where the solid line ends (the dashes: legal), or nowhere near it
+            else if (onRoad && s >= pit.gore.exitFrom) { p.exiting = false; fine('pit exit line'); }
+        }
+    }
+
+    // FIA: a car has left the track when no part of it is on the track, the white line being part of it (Race Director's
+    // notes: "all four wheels over the white track edge line"). Judged on the tyres' outer corners, each against the line where
+    // it is: from the centre (as if pointing straight down the road) an angled car still on the line with its inside rear
+    // tyre was called off, all four wheels on the kerb but touching the line as on TV
     checkLimits(p, near) {
         const t = this.track;
         if (p.inPit) p.fromPit = true;
         const line = edgeAt(t, near, p.x, p.y); // the real white line on this side, here
         if (near.dist <= line) { p.offLimits = false; p.fromPit = false; return; } // inside it (the run-off beyond is asphalt)
         if (this.frozen) return; // lights still on: jump starts are judged separately
-        if (p.offLimits || p.inPit || p.fromPit || near.dist <= line + Physics.CAR_HALF_WIDTH_M * t.scale) return;
+        if (p.offLimits || p.inPit || p.fromPit || !tyresOff(t, p)) return;
         if (this.mode === 'quali' && (p.lapStart === null || p.finished)) return;
         p.offLimits = true;
+        // Inside of a bend = a cut (gains time): a strike. Outside, or on a straight = wide (loses time): the lap just
+        // doesn't count for the fastest lap
+        const k = bendAt(t, near.i), P = t.path, a = P[near.i], b = P[(near.i + 1) % P.length];
+        const right = -(b.y - a.y) * (p.x - near.px) + (b.x - a.x) * (p.y - near.py) > 0; // same side test as edgeAt
+        const cut = Math.abs(k) >= STRAIGHT_PER_M && (k > 0) === right;
+        // Off on the outside where the circuit says so (Monza's Parabolica): the next lap is deleted too
+        const total = t.cum[P.length], lapM = ((((t.cum[near.i] + near.t * (t.cum[near.i + 1] - t.cum[near.i]) - t.startS) % total) + total) % total) / t.scale;
+        const twice = !cut && t.doubleDeleteM && lapM >= t.doubleDeleteM[0] && lapM <= t.doubleDeleteM[1];
         if (this.mode === 'quali') {
+            if (twice) p.voidNext = true;
             p.lapValid = false; // quali: lap deleted (race: warnings / penalties only)
             this.io.emit('track_limits', { id: p.id, kind: 'deleted' });
             this.refreshBests(); // its sectors stop counting: purple goes back to the previous holder
@@ -975,11 +1044,7 @@ class Game {
         }
         if (this.time - (p.contactAt ?? -Infinity) < INCIDENT_JUDGE_S) return; // racing incident just now
         if (this.incidents.some((i) => i.victim === p.id)) return; // pushed off: the driver who hit them answers for it
-        // Inside of a bend = a cut (gains time): a strike. Outside, or on a straight = wide (loses time): the lap just
-        // doesn't count for the fastest lap
-        const k = bendAt(t, near.i), P = t.path, a = P[near.i], b = P[(near.i + 1) % P.length];
-        const right = -(b.y - a.y) * (p.x - near.px) + (b.x - a.x) * (p.y - near.py) > 0; // same side test as edgeAt
-        const cut = Math.abs(k) >= STRAIGHT_PER_M && (k > 0) === right;
+        if (twice) p.voidNext = true; // only once the lap itself is lost (a victim keeps both)
         if (p.lapValid) { p.lapValid = false; this.refreshBests(); } // a purple sector set earlier on this lap goes back
         if (!cut) { this.io.emit('track_limits', { id: p.id, kind: 'wide' }); return; }
         p.limits++;
@@ -1001,16 +1066,20 @@ class Game {
     classify() {
         this.classified = true;
         const all = Object.values(this.players);
-        const list = all.filter((p) => !p.dnf).sort((a, b) => a.finishTime + a.penalty - (b.finishTime + b.penalty))
+        // laps done first (a lapped finisher behind every car on the lead lap), then total time, then who crossed the line first
+        const list = all.filter((p) => !p.dnf).sort((a, b) => b.lap - a.lap || a.finishTime + a.penalty - (b.finishTime + b.penalty) || a.finishOrder - b.finishOrder)
             .concat(all.filter((p) => p.dnf).sort((a, b) => b.progress - a.progress)); // DNF last, furthest first
-        const winner = list[0] && !list[0].dnf ? list[0].finishTime + list[0].penalty : null;
+        const winner = list[0] && !list[0].dnf ? list[0].finishTime + list[0].penalty : null, leadLaps = list[0]?.lap ?? 0;
+        // places won or lost to penalties: against the order without them (laps, then time), not the crossing order (a
+        // lapped car flagged between two lead-lap cars got an arrow with no penalty anywhere)
+        const road = list.filter((p) => !p.dnf).sort((a, b) => b.lap - a.lap || a.finishTime - b.finishTime || a.finishOrder - b.finishOrder);
         const rows = list.map((p, i) => {
             const total = p.dnf ? null : p.finishTime + p.penalty;
             return {
                 id: p.id, position: i + 1, finishTime: p.dnf ? null : p.finishTime, penalty: p.penalty, total,
                 gap: i === 0 || total === null ? null : total - winner,
-                change: p.dnf || !p.finishOrder ? 0 : p.finishOrder - (i + 1), // places won (+) or lost (−) to penalties
-                laps: p.lap, bestLap: p.bestLap, dnf: !!p.dnf,
+                change: p.dnf ? 0 : road.indexOf(p) - i, // places won (+) or lost (−) to penalties
+                laps: p.lap, lapsDown: p.dnf ? null : leadLaps - p.lap, bestLap: p.bestLap, dnf: !!p.dnf,
             };
         });
         list.forEach((p, i) => { p.finishOrder = i + 1; });
@@ -1046,7 +1115,8 @@ class Game {
 
     newLap(p) {
         p.sectors = [null, null, null];
-        p.lapValid = true;
+        p.lapValid = !p.voidNext; // deleted in advance (off at the Parabolica last lap)
+        p.voidNext = false;
         p.sectorStart = this.time;
     }
 
@@ -1084,7 +1154,7 @@ class Game {
             p.lap++;
             if (p.boxCall === 'next') p.boxCall = 'this';
             this.recordLap(p);
-            if (p.lap >= this.settings.maxLaps) {
+            if (p.lap >= this.settings.maxLaps || this.winnerCount > 0) { // the leader has the flag: everyone finishes at the line
                 p.finished = true;
                 p.finishTime = this.time;
                 p.stop = null; // parked where it is: no stop code in the packet forever

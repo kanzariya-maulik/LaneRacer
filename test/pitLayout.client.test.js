@@ -28,9 +28,9 @@ for (const id of Track.TRACK_IDS) {
         assert.strictEqual(lay.boxes.length, nBoxes, 'every box painted, skipped garages included');
         for (const b of lay.boxes) {
             assert.ok(/^[A-Z]{2,3}$/.test(b.code), `code ${b.code}`);
-            const o = lateral(t, b);
-            assert.ok(o > 0 && o + L.BOX_M.wide / 2 <= 5 + 0.05, `box ${b.teamId} at ${o.toFixed(2)} m: not in the working lane`);
-            assert.ok(Math.abs(lateral(t, b.codeAt)) <= 5, `code ${b.code} outside the lane`);
+            const o = lateral(t, b), half = pit.width / sc / 2; // the working lane: the 5 m beside the garages (drive.js PIT_WORK_LANE_M)
+            assert.ok(o - L.BOX_M.wide / 2 >= half - 5 - 0.05 && o + L.BOX_M.wide / 2 <= half + 0.05, `box ${b.teamId} at ${o.toFixed(2)} m: not in the working lane`);
+            assert.ok(Math.abs(lateral(t, b.codeAt)) <= half, `code ${b.code} outside the lane`);
         }
         const boxEdge = Math.max(...lay.boxes.map((b) => lateral(t, b) + L.BOX_M.wide / 2));
         for (const c of lay.canopy) assert.ok(lateral(t, c) - 0.75 >= boxEdge + 1 - 0.05, 'canopy over the boxes');
@@ -52,7 +52,7 @@ for (const id of Track.TRACK_IDS) {
             });
             const crew = L.crew17(b, sc, t.pit.trackSide);
             assert.deepStrictEqual(crew.map((c) => c.role).sort(), [...roles17].sort());
-            for (const c of crew) for (const at of [c.idle, c.work]) assert.ok(Math.abs(lateral(t, at)) <= 5 + 0.05, `${c.role} outside the lane`);
+            for (const c of crew) for (const at of [c.idle, c.work]) assert.ok(Math.abs(lateral(t, at)) <= t.pit.width / sc / 2 + 0.05, `${c.role} outside the lane`);
             for (const c of crew) if (/^(jackF|jackR|lollipop)$/.test(c.role)) assert.ok(lateral(t, c.idle) > 0, `${c.role} idles on the wrong side`);
             // Waiting crew stand clear of the car's way in and out (2.2 m corridor along the box)
             for (const c of crew) {
@@ -100,4 +100,38 @@ test('pickerOpen: a box call opens the tyre choice anywhere on the lap', () => {
     assert.strictEqual(L.pickerOpen({ ...base }), false);
     assert.strictEqual(L.pickerOpen({ ...base, boxCall: 'this' }), true);
     assert.strictEqual(L.pickerOpen({ ...base, boxCall: 'next', spectator: true }), false);
+});
+
+test('stop warning: from half distance on one compound, until boxed; last lap says so; nothing when the rule is off', () => {
+    const base = { status: 'RACE', maxLaps: 6, tyreWear: true, lap: 3, compoundsUsed: ['M'], boxCall: null, inPit: false, finished: false };
+    assert.match(L.stopWarning(base), /STOP REQUIRED/);
+    assert.strictEqual(L.stopWarning({ ...base, lap: 2 }), null, 'before half distance');
+    assert.match(L.stopWarning({ ...base, lap: 5 }), /LAST LAP/);
+    assert.strictEqual(L.stopWarning({ ...base, compoundsUsed: ['M', 'H'] }), null, 'two compounds run');
+    assert.strictEqual(L.stopWarning({ ...base, boxCall: 'this' }), null, 'stop called');
+    assert.strictEqual(L.stopWarning({ ...base, inPit: true }), null, 'in the pits');
+    assert.strictEqual(L.stopWarning({ ...base, tyreWear: false }), null, 'tyre wear off: no rule');
+    assert.strictEqual(L.stopWarning({ ...base, maxLaps: 1, lap: 0 }), null, '1-lap race: no rule');
+    assert.strictEqual(L.stopWarning({ ...base, status: 'QUALIFYING' }), null);
+    assert.strictEqual(L.stopWarning({ ...base, maxLaps: 4, lap: 3 }), null, 'under 5 laps: a sprint, no rule');
+    assert.match(L.stopWarning({ ...base, maxLaps: 5, lap: 4 }), /LAST LAP/, '5 laps: the rule applies');
+    assert.strictEqual(L.stopWarning({ ...base, maxLaps: 5, lap: 1 }), null, '5 laps: not before half distance');
+});
+
+// No barrier through a garage: the generated barrier kept the pit lane's run-off (2 m) on both sides, the line the
+// garage fronts stand on, so a concrete wall and its 3 m fence ran through the open bays of 12 circuits
+for (const id of Track.TRACK_IDS) test(`${id}: no barrier runs through a garage`, () => {
+    const t = tracks[id], sc = t.scale, bad = [];
+    for (const g of L.pitLayout(t).garages.filter((g) => !g.skip)) {
+        const fx = Math.cos(g.angle), fy = Math.sin(g.angle);
+        for (const b of t.build.barriers) for (let i = 0; i + 1 < b.pts.length; i++) {
+            const A = b.pts[i], B = b.pts[i + 1], len = Math.hypot(B.x - A.x, B.y - A.y), steps = Math.ceil(len / (0.5 * sc));
+            for (let k = 0; k <= steps; k++) {
+                const x = A.x + ((B.x - A.x) * k) / steps - g.x, y = A.y + ((B.y - A.y) * k) / steps - g.y;
+                const a = (x * fx + y * fy) / sc, l = (-x * fy + y * fx) / sc; // along the lane, across (m)
+                if (Math.abs(a) < 8.5 && Math.abs(l) < 2.3) { bad.push(g.teamId); k = steps; i = b.pts.length; }
+            }
+        }
+    }
+    assert.deepStrictEqual([...new Set(bad)], []);
 });

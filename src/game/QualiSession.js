@@ -2,7 +2,7 @@
 const SEGMENT_LAPS = { full: [5, 4, 3.5], short: [6] };
 const MIN_S = 120;
 
-const knockoutCount = (n) => Math.max(1, Math.floor(n / 4));
+const knockoutCount = (n) => (n < 2 ? 0 : Math.max(1, Math.floor(n / 4))); // a lone driver goes through (never out, then an empty segment)
 const effectiveFormat = (format, drivers) => (format === 'full' && drivers < 4 ? 'short' : format);
 const round30 = (s) => Math.round(s / 30) * 30;
 

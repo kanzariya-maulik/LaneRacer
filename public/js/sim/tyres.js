@@ -18,4 +18,9 @@ export const wearPerM = (compound, lapM, laps) => 1 / (COMPOUNDS[compound].life 
 // latUse: share of the cornering grip in use (0-1); brake: brake input (0-1); slip: slide angle (rad)
 export const wearLoad = (latUse, brake, slip) => (1 + 0.6 * latUse * latUse + 0.4 * brake + 0.8 * Math.min(1, slip / 0.21)) / LOAD_TYPICAL;
 
+// The two-compound rule (Game.finishCar adds 22 s at the flag otherwise): races of MIN_STOP_LAPS or more with tyre wear on.
+// Shorter races are sprints with no mandatory stop (3-lap races called the whole field into the pits on the last lap).
+export const MIN_STOP_LAPS = 5;
+export const stopRule = (maxLaps, tyreWear) => tyreWear !== false && maxLaps >= MIN_STOP_LAPS;
+
 export const nextHarder = (c) => (c === 'S' ? 'M' : c === 'M' ? 'H' : 'M');

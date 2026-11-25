@@ -189,7 +189,9 @@ body.touch #tyre-card { bottom: 180px; }
 #tc-box { width: 100%; min-height: 36px; margin: 0.5em 0 0.1em; border: 0; border-radius: 0.3em; background: rgba(61, 139, 255, 0.18); color: #9cc3ff;
     font-weight: 800; font-stretch: 112%; letter-spacing: 0.22em; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(61, 139, 255, 0.5); }
 #tc-box.on { background: var(--info); color: #fff; box-shadow: 0 0.4em 1.2em rgba(61, 139, 255, 0.35); }
-#tc-box.hidden, body:not(.touch) #tc-box { display: none; } /* keyboards box with B */
+#tc-box.hidden { display: none; }
+.tc-key { margin-left: 0.5em; padding: 0.05em 0.45em; border-radius: 0.2em; box-shadow: inset 0 0 0 1px currentColor; font-size: 0.8em; letter-spacing: 0; }
+body.touch .tc-key { display: none; } /* no keyboard */
 
 #fl-card { position: absolute; left: var(--pad); bottom: calc(var(--pad) + 14em); min-width: 17em; font-size: 0.9em; color: var(--text); box-shadow: var(--lift); animation: flIn 0.45s var(--ease); }
 #fl-card.hidden { display: none; }

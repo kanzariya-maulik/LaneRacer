@@ -19,9 +19,10 @@ function fakeIo() {
         },
         volatile: { emit() {} },
     };
-    io.connect = (id) => {
+    io.connect = (id, address) => {
         const s = {
             id,
+            handshake: address ? { address } : undefined,
             handlers: {},
             sent: [],
             on(ev, fn) { this.handlers[ev] = fn; },
@@ -476,4 +477,105 @@ test('race over → lobby → a race on another track: the new track is sent and
     advance(t, 1500);
     assert.ok(io.events('lights').length > lit, 'the start never came after b was ready');
     a.fire('disconnect'); b.fire('disconnect');
+});
+
+// Hostile clients (pen test): none of these may crash the server, freeze it, or flood everyone else
+test('kick by a prototype key: ignored, the server keeps running', () => {
+    const io = fakeIo();
+    setupSocketManager(io, noNet);
+    const a = join(io, 'a', 'ferrari'), b = join(io, 'b', 'haas');
+    for (const id of ['__proto__', 'constructor', 'toString', 'hasOwnProperty']) assert.doesNotThrow(() => a.fire('kick_player', id), id);
+    assert.deepStrictEqual(Object.keys(io.events('lobby_state_sync').at(-1).players).sort(), ['a', 'b']);
+    a.fire('disconnect'); b.fire('disconnect');
+});
+
+test('track_data: a flood from one connection gets the track a couple of times, then nothing (each is ~260 KB)', (t) => {
+    t.mock.timers.enable({ apis: ['Date'] });
+    const io = fakeIo();
+    setupSocketManager(io, noNet);
+    const v = io.connect('v'); // a visitor, never joined
+    let sent = 0;
+    for (let k = 0; k < 50; k++) v.fire('track_data', 'monza', (d) => { if (d) sent++; });
+    assert.ok(sent >= 1 && sent <= 2, `${sent} tracks sent`);
+    t.mock.timers.tick(5000);
+    v.fire('track_data', 'monza', (d) => { if (d) sent++; });
+    assert.ok(sent >= 2, 'a later request is answered again');
+    v.fire('track_data', '__proto__', (d) => assert.strictEqual(d, null, 'prototype key: no track'));
+    v.fire('disconnect');
+});
+
+test('chat and lobby changes from one connection are rate limited: a flood reaches nobody', (t) => {
+    t.mock.timers.enable({ apis: ['Date'] });
+    const io = fakeIo();
+    setupSocketManager(io, noNet);
+    const a = join(io, 'a', 'ferrari'), b = join(io, 'b', 'haas');
+    const chats = io.events('chat_msg').length, syncs = io.events('lobby_state_sync').length;
+    for (let k = 0; k < 200; k++) { a.fire('chat_msg', `spam ${k}`); a.fire('set_compound', k % 2 ? 'S' : 'H'); a.fire('update_profile', { username: `E${k}` }); a.fire('set_assist', 'off'); }
+    assert.ok(io.events('chat_msg').length - chats <= 5, `${io.events('chat_msg').length - chats} chats relayed`);
+    assert.ok(io.events('lobby_state_sync').length - syncs <= 12, `${io.events('lobby_state_sync').length - syncs} lobby broadcasts`);
+    t.mock.timers.tick(10000);
+    b.fire('chat_msg', 'hi'); a.fire('chat_msg', 'calm again');
+    assert.deepStrictEqual(io.events('chat_msg').slice(-2).map((m) => m.msg), ['hi', 'calm again']);
+    a.fire('disconnect'); b.fire('disconnect');
+});
+
+// One device, many connections: the limits are per address, so opening more sockets buys no more floods
+test('chat flood spread over many connections from one address is limited as one', (t) => {
+    t.mock.timers.enable({ apis: ['Date'] });
+    const io = fakeIo();
+    setupSocketManager(io, noNet);
+    const socks = ['a', 'b', 'c', 'd', 'e', 'f'].map((id, k) => { const s = io.connect(id, '10.0.0.9'); s.fire('join_lobby', { username: `S${k}`, teamId: ['redbull', 'mercedes', 'ferrari', 'mclaren', 'astonmartin', 'alpine'][k] }); return s; });
+    const chats = io.events('chat_msg').length;
+    for (let k = 0; k < 50; k++) for (const s of socks) s.fire('chat_msg', `spam ${k}`);
+    try {
+        assert.ok(io.events('chat_msg').length - chats <= 5, `${io.events('chat_msg').length - chats} chats relayed`);
+    } finally { for (const s of socks) s.fire('disconnect'); }
+});
+
+// A lookalike name (Cyrillic S) can't pass for the server: player chat says who sent it, server messages don't
+test('chat: player messages carry their sender, so the client never shows them as SYSTEM', () => {
+    const io = fakeIo();
+    setupSocketManager(io, noNet);
+    const a = join(io, 'a', 'ferrari');
+    a.fire('update_profile', { username: '\u0405YSTEM' });
+    a.fire('chat_msg', 'race restarted, everyone to the pits');
+    try {
+        const own = io.events('chat_msg').find((m) => m.msg.startsWith('race restarted'));
+        assert.strictEqual(own.from, 'a');
+    } finally { a.fire('disconnect'); }
+});
+
+test('assist: rapid changes all land on the car (only the lobby broadcast is rate limited)', (t) => {
+    t.mock.timers.enable({ apis: ['Date'] });
+    const io = fakeIo();
+    setupSocketManager(io, noNet);
+    const a = io.connect('a');
+    a.fire('join_lobby', { username: 'A', teamId: 'ferrari' });
+    a.fire('update_settings', { trackId: 'monza', maxLaps: 1, qualifying: true });
+    a.fire('start_game');
+    const init = io.events('game_init').at(-1);
+    try {
+        for (let k = 0; k < 30; k++) a.fire('set_assist', 'off');
+        a.fire('set_assist', 'full');
+        assert.deepStrictEqual(init.players.a.assist, { steer: 1, brake: 1 }, 'the car drives with the last level asked for');
+    } finally { a.fire('disconnect'); }
+});
+
+test('names: no two players (nor SYSTEM) share one; control and direction characters are stripped', () => {
+    const io = fakeIo();
+    setupSocketManager(io, noNet);
+    const a = io.connect('a'), b = io.connect('b'), c = io.connect('c');
+    a.fire('join_lobby', { username: 'Alice', teamId: 'ferrari' });
+    b.fire('join_lobby', { username: 'alice', teamId: 'haas' });
+    c.fire('join_lobby', { username: 'System', teamId: 'mclaren' });
+    let ps = io.events('lobby_state_sync').at(-1).players;
+    assert.strictEqual(ps.a.username, 'Alice');
+    assert.notStrictEqual(ps.b.username.toLowerCase(), 'alice');
+    assert.notStrictEqual(ps.c.username.toLowerCase(), 'system');
+    b.fire('update_profile', { username: 'x\n[KICK] A‮\u0000b' });
+    ps = io.events('lobby_state_sync').at(-1).players;
+    assert.strictEqual(ps.b.username, 'x[KICK] Ab'.slice(0, 15));
+    a.fire('update_profile', { username: 'Alice' }); // keeping your own name is fine
+    assert.strictEqual(io.events('lobby_state_sync').at(-1).players.a.username, 'Alice');
+    a.fire('disconnect'); b.fire('disconnect'); c.fire('disconnect');
 });

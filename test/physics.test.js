@@ -54,6 +54,25 @@ test('rear-ender: front car speeds up, rear car slows, momentum kept', () => {
     close(a.vx + b.vx, 50 * S);
 });
 
+test('after contact each car\'s speed is its new forward speed (the assists and bots read it before the next step)', () => {
+    const a = car(0, 0, 0, 30, 0), b = car(5.4, 0, 0, 20, 0);
+    a.speed = 30 * S; b.speed = 20 * S;
+    Physics.resolveCarCollision(a, b, S);
+    for (const c of [a, b]) close(c.speed, c.vx * Math.cos(c.angle) + c.vy * Math.sin(c.angle));
+});
+
+// A barrier's corner sticking out toward the car: each segment left the joint to the other, so nothing held the nose
+// until the centre reached the corner (2.4 m of car through a Monza barrier)
+test('a convex wall corner stops the nose, not just the centre', () => {
+    const wall = [{ x: -100 * S, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 100 * S }]; // an L: its outside corner at the origin
+    const d = 1.2 * K * S, c = { x: d, y: -d, angle: (135 * Math.PI) / 180 }; // on the outside, pointing at the corner
+    const ov = Physics.wallOverlap(c, wall, S);
+    assert.ok(ov && ov.depth > 0, 'corner inside the car, no overlap reported');
+    assert.ok(ov.nx > 0 && ov.ny < 0, 'pushed back out the way it came');
+    const far = { x: 6 * K * S, y: -6 * K * S, angle: c.angle };
+    assert.strictEqual(Physics.wallOverlap(far, wall, S), null, 'clear of it: nothing');
+});
+
 test('nearestOnTrack finds the closest point on the loop', () => {
     const track = { path: [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }] };
     const n = Physics.nearestOnTrack(50, -20, track);

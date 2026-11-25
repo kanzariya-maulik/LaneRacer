@@ -158,3 +158,16 @@ test('setForm copies the formation phase and grid slot onto the predicted car an
     pr.reset(e);
     assert.deepStrictEqual([pr.car.form, pr.car.grid], [form, grid]);
 });
+
+// A foot still down from the formation lap doesn't drive the car before the start (Game.drive's `held`, packet stop code
+// 7): the predictor knew nothing of it, crept the car forward on the throttle and was corrected back every packet
+test('held throttle on the grid: the predicted car stays put until the foot is lifted, as the server\'s', () => {
+    const t = Track.load('monza'), pr = new P.Predictor(t), sc = t.scale, a = t.path[10];
+    const e = [0, a.x, a.y, 0, 0, 0, 0, 0, 0, 0, -1, 0, 7, 0];
+    pr.reset(e); pr.onServer(e);
+    for (let k = 0; k < 30; k++) pr.step({ seq: k, steer: 0, throttle: 1, brake: 0, drs: false });
+    assert.ok(Math.hypot(pr.car.x - a.x, pr.car.y - a.y) / sc < 0.01, `crept ${(Math.hypot(pr.car.x - a.x, pr.car.y - a.y) / sc).toFixed(2)} m`);
+    pr.step({ seq: 30, steer: 0, throttle: 0, brake: 0, drs: false });
+    for (let k = 31; k < 60; k++) pr.step({ seq: k, steer: 0, throttle: 1, brake: 0, drs: false });
+    assert.ok(Math.hypot(pr.car.x - a.x, pr.car.y - a.y) / sc > 0.2, 'lifted and pressed again: it drives');
+});

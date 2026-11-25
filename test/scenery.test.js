@@ -296,3 +296,16 @@ test('every day sky has physical-sky settings and an exposure; nights have an ex
     assert.ok(SKIES.overcast.clouds > SKIES.clear.clouds && SKIES.hazy.turbidity > SKIES.clear.turbidity);
     for (const [id, n] of Object.entries(NIGHTS)) assert.ok(n.exposure > 0 && n.exposure <= 2, `${id} night exposure`);
 });
+
+// The pit lane's ground follows its own road: Monaco's lane (23-28 m from its road, more than twice the track width) lost
+// the road it was following, a global search took the harbour leg, and the lane sank 1.1 m under its own pit wall
+for (const id of Track.TRACK_IDS) test(`${id}: pit lane at the height of its pit wall`, async () => {
+    const E = await import('../public/js/sim/elevation.js'), t = tracks[id], pit = t.pit;
+    if (!t.z) return;
+    const lane = E.pathHeights(t, pit.path), wall = E.pathHeights(t, pit.wall), bad = [];
+    pit.wall.forEach((w, k) => {
+        const n = Physics.nearestOnPath(w.x, w.y, pit.path, false), z = lane[n.i] + (lane[n.i + 1] - lane[n.i]) * n.t;
+        if (Math.abs(z - wall[k]) > 0.3) bad.push(`wall ${k}: lane ${z.toFixed(2)} m, wall ${wall[k].toFixed(2)} m`);
+    });
+    assert.deepStrictEqual(bad, []);
+});

@@ -47,7 +47,8 @@ export class Predictor {
         c.gripEvo = this.gripEvo; // qualifying track evolution (quali_clock), undefined in races
         if (c.compound) c.tyreGrip = gripOf(c.compound, c.wear) * (c.gripEvo ?? 1); // predicted grip always from the server's wear
         const code = e[12] || 0; // pit stop (Game.updateStop): 1 guided in, 2 service, 3 held, 4 along the lane, 5 out, 6 quali wait
-        c.stop = code ? { phase: ['', 'guide', 'service', 'hold', 'lane', 'out', 'wait'][code], t: e[13] || 0 } : null;
+        c.stop = code && code < 7 ? { phase: ['', 'guide', 'service', 'hold', 'lane', 'out', 'wait'][code], t: e[13] || 0 } : null;
+        this.held = code === 7; // 7: a throttle held from the formation lap doesn't drive the car (Game.drive) until it's lifted
         c.lastSafeX = c.x; c.lastSafeY = c.y;
         this.finished = !!(e[6] & FIN);
     }
@@ -83,7 +84,15 @@ export class Predictor {
         if (this.finished) return;                        // the server parks finished cars
         this.pending.push(input);
         if (this.pending.length > MAX_PENDING) this.pending.splice(0, this.pending.length - MAX_PENDING);
-        if (this.pending.length <= MAX_UNACKED) driveCar(this.car, input, this.track, STEP_S);
+        if (this.pending.length <= MAX_UNACKED) driveCar(this.car, this.unheld(input), this.track, STEP_S);
+    }
+
+    // As the server: while held, the throttle doesn't drive; lifting it ends the hold
+    unheld(input) {
+        if (!this.held) return input;
+        if (input.throttle > 0) return { ...input, throttle: 0 };
+        this.held = false;
+        return input;
     }
 
     // s = the packet's server seq: an older packet arriving late (reordered UDP) is ignored — its replay inputs are gone.
@@ -97,7 +106,7 @@ export class Predictor {
         if (lastSeq !== undefined && lastSeq >= 0) while (this.pending.length && this.pending[0].seq <= lastSeq) this.pending.shift();
         const bx = this.car.x, by = this.car.y, ba = this.car.angle;
         this.load(e);
-        if (!this.finished) for (const input of this.pending) driveCar(this.car, input, this.track, STEP_S);
+        if (!this.finished) for (const input of this.pending) driveCar(this.car, this.unheld(input), this.track, STEP_S);
         const dx = bx - this.car.x, dy = by - this.car.y, err = Math.hypot(dx, dy);
         this.lastError = err;
         if (err < SNAP_M * this.track.scale) {

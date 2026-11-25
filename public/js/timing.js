@@ -82,7 +82,11 @@ export function lastLapClass(last, best, fastest, deleted) {
 
 // Race classification row: winner's final time (penalties included), gap for the rest, penalty, places won/lost to penalties
 export function resultCells(r, fmtTime) {
-    const time = r.dnf ? 'DNF' : r.position === 1 || r.gap === null ? fmtTime(r.total) : `+${r.gap.toFixed(3)}`;
+    const time = r.dnf ? 'DNF' : r.lapsDown > 0 ? `+${r.lapsDown} LAP${r.lapsDown > 1 ? 'S' : ''}`
+        : r.position === 1 || r.gap === null ? fmtTime(r.total) : `+${r.gap.toFixed(3)}`;
     const change = r.change > 0 ? `▲${r.change}` : r.change < 0 ? `▼${-r.change}` : '';
     return { time, pen: r.penalty ? `+${r.penalty}s` : '', change, changeCls: r.change > 0 ? 'up' : r.change < 0 ? 'down' : '' };
 }
+
+// LAP box: the lap being driven (lap: laps done), capped at the race distance; qualifying counts on
+export const lapLabel = (lap, maxLaps, quali) => (quali ? lap + 1 : Math.min(lap + 1, maxLaps));

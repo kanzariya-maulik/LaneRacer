@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const Drive = require('../../public/js/sim/drive.js');
 const Physics = require('./Physics');
 const Assist = require('./Assist');
 const RacingLine = require('./RacingLine');
@@ -25,6 +26,10 @@ const MOUTH_STEP_M = 5, MOUTH_MAX_M = 300; // mouths tried further from the gara
 const PIT_STEP_M = 4;           // spacing of the rebuilt lane's points
 const MIN_WIDTH_M = 11.5;      // narrow surveys widened to this median width (F1 circuits: about 11-15 m)
 const WALL_ROOM_M = 1.5;       // a widened edge stays this far from the barrier
+const EDGE_EASE = 0.04;         // a widened edge held in by the pit lane eases back out at most this much per metre (~2°)
+const SPLIT_ROAD_M = 6, SPLIT_TAPER_M = 50, SPLIT_WIDEN_M = 40, SPLIT_SOFT_M = 0.3; // a surveyed pit entry / exit road: its width, its taper into the track, its widening into the pit lane
+const GORE_GAP_M = 3;           // a surveyed pit entry's gore ends (and the pit wall starts) where lane and road are this far apart
+const WALL_END_GAP_M = 0.5;     // the pit wall's ends at least this far off the road edge (its box is 0.6 m thick)
 const PIT_SNAP_M = 0.5;         // lane points this little short of the wall room are moved out to it (see buildPit)
 const PIT_SMOOTH_PASSES = 400, PIT_SMOOTH_MAX_M = 3, PIT_KINK_DEG = 4; // smoothing the surveyed lane
 
@@ -149,7 +154,7 @@ function buildPit(raw, circuit, track) {
     // scripts/import-pits.js put the lanes exactly the wall room off the road as it smoothed it; this road (fair()) leaves
     // stretches a few cm (Monaco: 43 cm) short. Those points move out to the wall room, square to the road; real dips
     // (Zandvoort's lane passing another leg, Buddh's the last apex) stay where they are and break the garage lane
-    const lane = smoothLane(raw.pit.path, scale, 1, PIT_SMOOTH_MAX_M).map((p) => { // the surveyed lane's own joints smoothed first: connectors meet a smooth lane
+    let lane = smoothLane(raw.pit.path, scale, 1, PIT_SMOOTH_MAX_M).map((p) => { // the surveyed lane's own joints smoothed first: connectors meet a smooth lane
         const n = Physics.nearestOnTrack(p.x, p.y, track), c = n.dist - edgeAt(track, n, p.x, p.y);
         if (c >= room || c < room - PIT_SNAP_M * scale) return p;
         const k = (room - c) / n.dist;
@@ -167,6 +172,26 @@ function buildPit(raw, circuit, track) {
     if (b <= a) throw new Error(`${raw.id}: no stretch of pit lane clear of the road`);
     const mid = lane[(a + b) >> 1], mn = Physics.nearestOnPath(mid.x, mid.y, track.path), mp = pointAt(track.path, track.cum, along(track.cum, mn));
     const laneSide = Math.sign(-Math.sin(mp.angle) * (mid.x - mp.x) + Math.cos(mp.angle) * (mid.y - mp.y)) || 1; // lateral() sign of the lane
+    const surveyed = circuit.pitSurveyedMouths;
+    // A survey's ends meet the track's centreline (that's where the map joins its ways), not its edge: drawn as they are, the
+    // lane narrowing onto that point swung its outer edge in across the road edge and back (a notch at Monza's exit). Each
+    // end's run up to full width is squeezed sideways so its tip lands on the road edge, its along-track course as surveyed
+    if (surveyed) {
+        const side = (q) => { const n = Physics.nearestOnTrack(q.x, q.y, track), P = track.path, A = P[n.i], B = P[(n.i + 1) % P.length], l = Math.hypot(B.x - A.x, B.y - A.y) || 1;
+            const N = { x: (-(B.y - A.y) / l) * laneSide, y: ((B.x - A.x) / l) * laneSide };
+            return { n, N, o: (q.x - n.px) * N.x + (q.y - n.py) * N.y, e: edgeAt(track, n, q.x, q.y) }; };
+        const k0 = lane.findIndex((q) => clear(q) >= room - 1e-9), k1 = lane.length - 1 - [...lane].reverse().findIndex((q) => clear(q) >= room - 1e-9);
+        const squeeze = (from, to, tip) => { // indices from..to (to: full width), tip: the end
+            const T = side(lane[tip]).o, F = side(lane[to]).o;
+            for (let i = from; i !== to; i += Math.sign(to - from)) {
+                const { n, N, o, e } = side(lane[i]), o2 = e + ((o - T) * (F - e)) / (F - T);
+                lane[i] = { x: n.px + N.x * o2, y: n.py + N.y * o2 };
+            }
+        };
+        lane = lane.map((q) => ({ ...q }));
+        squeeze(0, k0, 0);
+        squeeze(lane.length - 1, k1, lane.length - 1);
+    }
 
     // A connector from the road edge at lap distance s (tangent to the road) to lane point k (tangent to the lane)
     const connector = (s, k, entry, step = PIT_STEP_M * scale) => {
@@ -209,13 +234,38 @@ function buildPit(raw, circuit, track) {
         }
         throw new Error(`${raw.id}: no pit ${entry ? 'entry' : 'exit'} connector fits`);
     };
-    const en = mouth(a, true), ex = mouth(b, false);
+    // The survey's own entry and exit roads, end to end (circuits.json pitSurveyedMouths): Monza's branches off the track at
+    // the real ~7° and rejoins it the same way, its first and last ~40 m on the track's own asphalt (the split, where the
+    // lane widens from nothing and its painted edge parts it from the track). The built connectors joined at twice that
+    const [en, ex] = surveyed ? [{ s: trackS(lane[0]), C: [lane[0]], k: 0 }, { s: trackS(lane.at(-1)), C: [lane.at(-1)], k: lane.length - 1 }]
+        : [mouth(a, true), mouth(b, false)];
     // A light last pass (≤ 1 m) evens the curvature where a connector meets the lane; the two points at each tip stay, so
     // each mouth keeps its place on the road edge and its tangent
     const pts = smoothLane([...en.C, ...lane.slice(en.k + 1, ex.k), ...ex.C].map(({ x, y }) => ({ x, y })), scale, 2, 1);
-    const cum = cumulative(pts), len = cum[pts.length - 1];
+    let cum = cumulative(pts), len = cum[pts.length - 1];
     // Full width where the wall fits beside it, narrowing in step with the gap to the road edge toward each mouth
-    const widthAt = pts.map((p) => { const c = clear(p); return c >= room - 1e-9 ? full : Math.max(0, (full * c) / room); });
+    let widthAt = pts.map((p) => { const c = clear(p); return c >= room - 1e-9 ? full : Math.max(0, (full * c) / room); });
+    if (surveyed) {
+        // Each split as at Monza: the pit lane's full width only along the pit wall; off it a single-car road (SPLIT_ROAD_M)
+        // that runs beside the track edge (one white line between them), tapering into the track at its tip and widening
+        // into the pit lane where the wall starts. A wedge narrowing from the full 12 m to a needle looked nothing like it
+        const f0 = widthAt.findIndex((w) => w >= full - 1e-6), f1 = widthAt.length - 1 - [...widthAt].reverse().findIndex((w) => w >= full - 1e-6);
+        const road = SPLIT_ROAD_M * scale, taper = SPLIT_TAPER_M * scale, widen = SPLIT_WIDEN_M * scale;
+        const ease = (u) => { u = Math.max(0, Math.min(1, u)); return u * u * (3 - 2 * u); }; // smoothstep: no corner where it changes
+        const prof = (d, D) => road * ease(d / taper) + (full - road) * ease((d - (D - widen)) / widen);
+        widthAt = cum.map((c, i) => (i <= f0 ? prof(c, cum[f0]) : i >= f1 ? prof(len - c, len - cum[f1]) : full));
+        // the narrow road beside the track: its inner edge on the track edge where the survey's course comes closer in than
+        // that, sliding off it smoothly where the survey draws away (softplus: never over the edge, no step, no notch)
+        const soft = SPLIT_SOFT_M * scale, softplus = (x) => (x > 20 * soft ? x : soft * Math.log1p(Math.exp(x / soft)));
+        pts.forEach((p, i) => {
+            if (i > f0 && i < f1) return;
+            const c = clear(p), half = widthAt[i] / 2, tip = ease((i <= f0 ? cum[i] : len - cum[i]) / taper), to = half + tip * softplus(c - half); // the tip itself on the edge
+            if (Math.abs(to - c) < 1e-6) return;
+            const n = Physics.nearestOnTrack(p.x, p.y, track), k = (to - c) / (n.dist || 1);
+            pts[i] = { x: p.x + (p.x - n.px) * k, y: p.y + (p.y - n.py) * k };
+        });
+        cum = cumulative(pts); len = cum[pts.length - 1];
+    }
     widthAt[0] = 0; widthAt[pts.length - 1] = 0;
     const entryS = en.s, exitS = ex.s, span = (((exitS - entryS) % total) + total) % total;
     const onPit = (rawM) => { const p = pointAt(lane, rawCum, rawM * scale, false); return along(cum, Physics.nearestOnPath(p.x, p.y, pts, false)); };
@@ -227,20 +277,50 @@ function buildPit(raw, circuit, track) {
     // Pit wall: the track-side edge of the full-width lane, one polyline
     const isFull = (i) => widthAt[i] >= full - 1e-6;
     const w0 = widthAt.findIndex((_, i) => isFull(i)), w1 = widthAt.length - 1 - [...widthAt].reverse().findIndex((_, i) => isFull(widthAt.length - 1 - i));
+    // Surveyed mouths: the entry's painted gore, between the road edge and the lane's track-side edge from where they part
+    // until they're GORE_GAP_M apart (Monza's blue triangle, its yellow bollard at the tip); the wall stands from there (and
+    // at the exit, until they close to that): a wall from where the lane first reached full width stood right at the split
+    let gore = null, wallFrom = w0, wallTo = w1;
+    if (surveyed) {
+        const gap = (i) => clear(pts[i]) - widthAt[i] / 2;
+        const g0 = pts.findIndex((_, i) => gap(i) > 1 * scale && cum[i] < len / 2); // parted: a metre (on the edge before)
+        const g1 = pts.findIndex((_, i) => i > g0 && gap(i) >= GORE_GAP_M * scale);
+        if (g0 < 0 || g1 < 0) throw new Error(`${raw.id}: surveyed pit entry never parts from the road in its first half: no gore`);
+        let x1 = pts.length - 1; while (x1 > 0 && !(gap(x1) >= GORE_GAP_M * scale)) x1--;
+        gore = { from: cum[g0], to: cum[g1], exitFrom: cum[x1] }; // exitFrom: the exit line runs from the wall's end to the lane's
+        wallFrom = Math.max(w0, g1); wallTo = Math.min(w1, x1);
+    }
+    // Its ends stand clear of the road edge: from where the lane first reached full width its nose sat on the white line
+    // (the box on the racing surface) and cars at the track's edge hit it head on at 80 m/s (Zandvoort, Buddh)
+    const wallGap = (i) => clear(lateral(pointAt(pts, cum, cum[i], false), trackSide * full / 2));
+    while (wallFrom < wallTo && wallGap(wallFrom) < WALL_END_GAP_M * scale) wallFrom++;
+    while (wallTo > wallFrom && wallGap(wallTo) < WALL_END_GAP_M * scale) wallTo--;
+    // Where crossing between lane and track is legal the track's white line beside it is dashed (the blend lines): into
+    // the entry road up to its gore, and out of the exit road along its taper, past lineEnd where the solid exit line stops
+    let blend = null, lineEnd = len;
+    if (surveyed) {
+        lineEnd = len - SPLIT_TAPER_M * scale;
+        const lapM = (s) => ((((s - track.startS) % total) + total) % total) / scale, sAt = (c) => trackS(pointAt(pts, cum, c, false));
+        const m = pts[pts.length >> 1], n = Physics.nearestOnTrack(m.x, m.y, track), P = track.path, a = P[n.i], b = P[(n.i + 1) % P.length];
+        const side = -(b.y - a.y) * (m.x - n.px) + (b.x - a.x) * (m.y - n.py) > 0 ? 'R' : 'L'; // as edgeAt tells right from left
+        blend = [{ side, fromM: lapM(entryS), toM: lapM(sAt(gore.from)) }, { side, fromM: lapM(sAt(lineEnd)), toM: lapM(exitS) }];
+    }
     const wall = [];
-    for (let i = w0; i <= w1; i++) { const w = lateral(pointAt(pts, cum, cum[i], false), trackSide * full / 2); wall.push({ x: w.x, y: w.y }); }
+    for (let i = wallFrom; i <= wallTo; i++) { const w = lateral(pointAt(pts, cum, cum[i], false), trackSide * full / 2); wall.push({ x: w.x, y: w.y }); }
 
     // Limiter: circuits.json metres along the surveyed lane, onto the rebuilt one, inside the walled stretch (the pit assist
     // brakes for it before it starts)
-    const limStart = Math.max(cum[w0], onPit(circuit.limiterStartM ?? 0));
-    const limEnd = Math.min(cum[w1], circuit.limiterEndM != null ? onPit(circuit.limiterEndM) : cum[w1]);
+    // (surveyed mouths: the real lines, where the lane may still be widening off the road)
+    const walled = !surveyed;
+    const limStart = Math.max(walled ? cum[w0] : 0, onPit(circuit.limiterStartM ?? 0));
+    const limEnd = Math.min(walled ? cum[w1] : len, circuit.limiterEndM != null ? onPit(circuit.limiterEndM) : cum[w1]);
 
     // Garages centred on the start line (slid to stay inside the limiter zone), garage 1 nearest the exit unless garagesFrom: "entry"
     const dir = circuit.garagesFrom === 'entry' ? -1 : 1, pitch = GARAGE_PITCH_M * scale, reach = 5.5 * pitch, margin = reach + 5 * scale;
     const centre = Math.max(limStart + margin, Math.min(startOnPit, limEnd - margin)); // limiter zone: inside the wall
     const garages = GARAGE_ORDER.map((teamId, k) => {
         const s = centre + dir * (5 - k) * pitch, c = pointAt(pts, cum, s, false);
-        const boxes = [-1, 1].map((d) => { const bs = s + (d * BOX_GAP_M * scale) / 2; return { ...lateral(pointAt(pts, cum, bs, false), (-trackSide * full / 2) / 2), s: bs }; });
+        const boxes = [-1, 1].map((d) => { const bs = s + (d * BOX_GAP_M * scale) / 2; return { ...lateral(pointAt(pts, cum, bs, false), -trackSide * (full / 2 - (Drive.PIT_WORK_LANE_M / 2) * scale)), s: bs }; }); // mid working lane
         return { teamId, s, x: c.x, y: c.y, angle: c.angle, boxes };
     });
     // Each mouth: where it leaves (rejoins) the road, on which side, and the lane's angle to the road 20 m in
@@ -249,7 +329,9 @@ function buildPit(raw, circuit, track) {
         return { s, side: laneSide, angleDeg: +((Math.abs(Math.atan2(Math.sin(q.angle - r.angle), Math.cos(q.angle - r.angle))) * 180) / Math.PI).toFixed(1) };
     };
     const mouths = { entry: mouthOf(en.s, 20 * scale), exit: mouthOf(ex.s, len - 20 * scale) };
-    return { path: pts, width: full, widthAt, cum, len, entryS, exitS, span, startOnPit, trackSide, limStart, limEnd, wall, garages, mouths,
+    // Where the lane runs on the track's edge: one white line there (the track's), not the lane's beside it
+    const onEdge = surveyed ? pts.map((p, i) => widthAt[i] > 0 && clear(p) - widthAt[i] / 2 < 0.3 * scale) : null;
+    return { path: pts, width: full, widthAt, cum, len, entryS, exitS, span, startOnPit, trackSide, limStart, limEnd, wall, garages, mouths, gore, onEdge, blend, lineEnd,
         garageSpan: [centre - reach, centre + reach], fitM: raw.pit.fitM, limitKmh: circuit.pitLimitKmh || null };
 }
 
@@ -391,18 +473,35 @@ function build(raw, circuit = {}, limits = readLimits(raw.id)) { // limits: null
     const widen = Math.max(1, MIN_WIDTH_M / surveyM);
     const edge = (k) => pts.map((_, i) => (raw.edges ? raw.edges[i][k] * scale * widen : width / 2)); // no survey: half the width
     const edgeR = edge(0), edgeL = edge(1);
-    if (raw.edges && raw.pit && widen > 1) { // ...but not into the surveyed pit lane beside it: the lane is built as before
-        const n = pts.length, half = raw.pit.width / 2, near = 10 * scale;
+    // ...but not into the pit lane beside it: first the survey's (the lane is built beside the road as it then is), then,
+    // where the build replaced the survey's ends with connectors, the lane as built (halfAt: its half width per point)
+    const clampToLane = (lane = raw.pit.path, halfAt = () => raw.pit.width / 2) => {
+        const n = pts.length, near = 10 * scale;
+        for (const [e, k] of [[edgeR, 0], [edgeL, 1]]) { const W = edge(k); for (let i = 0; i < n; i++) e[i] = W[i]; }
         for (let i = 0; i < n; i++) {
             const a = pts[(i - 1 + n) % n], b = pts[(i + 1) % n], l = Math.hypot(b.x - a.x, b.y - a.y) || 1, tx = (b.x - a.x) / l, ty = (b.y - a.y) / l;
-            for (const q of raw.pit.path) {
-                const dx = q.x - pts[i].x, dy = q.y - pts[i].y, along = dx * tx + dy * ty, lat = -dx * ty + dy * tx; // + = right
+            for (let j = 0; j < lane.length; j++) {
+                const q = lane[j], dx = q.x - pts[i].x, dy = q.y - pts[i].y, along = dx * tx + dy * ty, lat = -dx * ty + dy * tx; // + = right
                 if (Math.abs(along) > near) continue;
-                const room = Math.abs(lat) - half, [e, k] = lat > 0 ? [edgeR, 0] : [edgeL, 1];
+                const room = Math.abs(lat) - halfAt(j), [e, k] = lat > 0 ? [edgeR, 0] : [edgeL, 1];
                 e[i] = Math.max(raw.edges[i][k] * scale, Math.min(e[i], room));
             }
         }
-    }
+        // Past a surveyed lane's ends (it runs on the edge there) the clamp stopped dead: the edge jumped back out in one
+        // segment, a notch at Monza's exit. Built connectors start from the edge as it is (their apron covers the step)
+        // What the clamp took off fades out at EDGE_EASE per metre, both ways round the lap (twice: the lap wraps); the
+        // survey's own widening elsewhere stays as it is (easing the edge itself narrowed Monza's Lesmos by 1.1 m)
+        if (circuit.pitSurveyedMouths) for (const [e, k] of [[edgeR, 0], [edgeL, 1]]) {
+            const W = edge(k), d = e.map((v, i) => W[i] - v);
+            for (let pass = 0; pass < 2; pass++) {
+                for (let i = 1; i <= n; i++) d[i % n] = Math.max(d[i % n], d[i - 1] - (cum[i] - cum[i - 1]) * EDGE_EASE);
+                for (let i = n - 1; i >= 0; i--) d[i] = Math.max(d[i], d[(i + 1) % n] - (cum[i + 1] - cum[i]) * EDGE_EASE);
+            }
+            for (let i = 0; i < n; i++) e[i] = Math.max(W[i] - d[i], raw.edges[i][k] * scale); // never inside the survey's own edge
+        }
+    };
+    const clamps = raw.edges && raw.pit && widen > 1;
+    if (clamps) clampToLane();
     const edgeOf = (s, side) => { // at lap distance s; side +1 right, -1 left
         const total = cum[pts.length]; s = ((s % total) + total) % total;
         let i = 0; while (cum[i + 1] < s) i++;
@@ -427,6 +526,27 @@ function build(raw, circuit = {}, limits = readLimits(raw.id)) { // limits: null
     const tunnels = (raw.tunnels || []).map(([a, b]) => [onLap(a), onLap(b)]); // lap distances from point 0 (Monaco)
     const track = { id: raw.id, name: raw.name, scale, width: width * widen, tunnels, edgeR, edgeL, gridLine, path: pts, z: raw.z || null, grade: shape.grade, vcurv: shape.vcurv, cum, start, startS, drsZones, checkpoints, sectorCps, startPositions, safeSpeed: Assist.safeSpeeds(pts, scale, shape.vcurv), pit: null };
     if (raw.pit) track.pit = buildPit(raw, circuit, track);
+    // Built connectors: the survey's ends (50-100 m beside the road before it clears it) aren't in the lane any more, so
+    // they no longer hold the edge in (up to 1.9 m of Montreal's track was cut with the lane 16 m away; surveyed mouths
+    // keep the survey's course, eased out above). The clamp reads lane points 10 m ahead and behind as beside the road:
+    // one angling away ahead still held the edge in, so wherever the widened edge itself stands clear of the lane, it stays
+    // Each rebuilt lane can lie elsewhere (connectors refit to the new edges), so again until the edges settle
+    for (let round = 0; round < 3 && clamps && !circuit.pitSurveyedMouths; round++) {
+        const pit = track.pit, n = pts.length, before = [...edgeR, ...edgeL];
+        clampToLane(pit.path, (j) => pit.widthAt[j] / 2);
+        for (const [e, k, sd] of [[edgeR, 0, 1], [edgeL, 1, -1]]) {
+            const W = edge(k);
+            for (let i = 0; i < n; i++) {
+                if (e[i] >= W[i]) continue;
+                const a = pts[(i - 1 + n) % n], b = pts[(i + 1) % n], l = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+                const x = pts[i].x - ((b.y - a.y) / l) * sd * W[i], y = pts[i].y + ((b.x - a.x) / l) * sd * W[i]; // the widened edge
+                const q = Physics.nearestOnPath(x, y, pit.path, false), w = pit.widthAt[q.i] + (pit.widthAt[Math.min(q.i + 1, pit.widthAt.length - 1)] - pit.widthAt[q.i]) * q.t;
+                if (q.dist - w / 2 >= PIT_CLEAR_M * scale) e[i] = W[i];
+            }
+        }
+        if ([...edgeR, ...edgeL].every((v, i) => Math.abs(v - before[i]) < 1e-6)) break;
+        track.pit = buildPit(raw, circuit, track); // its connectors fitted to the road edges as they now are
+    }
     track.bridges = buildBridges(track);
     track.medians = buildMedians(track);
     // As built (data/tracks/<id>.build.json, else today's barrier rule generated): world units, sent with the track
@@ -463,6 +583,7 @@ function build(raw, circuit = {}, limits = readLimits(raw.id)) { // limits: null
     // a metre off it left the road. Shared sim, sent with the track
     track.helpLimit = modelLimit;
     track.lineScale = fit?.help || null; // per point: how far each corner's limit is above the grip model
+    track.doubleDeleteM = circuit.doubleDeleteM || null; // lap metres where off on the outside also deletes the next lap (FIA: Monza's Parabolica)
     return track;
 }
 

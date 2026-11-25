@@ -45,7 +45,12 @@
   { "type": "gore", "mouth": "entry", "color": "#1e5bd8", "src": "FIA photo: blue-painted gore triangle at the pit entry (SC1)" },
   { "type": "bollard", "mouth": "entry", "color": "#facc15", "src": "FIA photo: yellow bollard at the pit entry" },
   { "type": "line", "mouth": "exit", "toM": 600, "color": "#f2f2f2", "src": "FIA 2026: pit exit white line shortened to end at SC2 (position unconfirmed)" },
-  { "type": "blocks", "atM": 940, "side": "R", "rows": 4, "src": "FIA: four rows of polystyrene blocks on the Rettifilo escape road" }
+  { "type": "blocks", "atM": 940, "side": "R", "rows": 4, "src": "FIA: four rows of polystyrene blocks on the Rettifilo escape road" },
+  { "type": "bumps", "fromM": 2150, "toM": 2168, "side": "R", "src": "FIA notes: black and yellow bumps before the T5 apex kerb (position estimated: 20 m before the 2171 m apex)" },
+  { "type": "yellowLine", "fromM": 2100, "toM": 2190, "side": "R", "offM": 12, "src": "FIA notes: stay right of the yellow line and bollard in the T4 run-off (offset estimated)" },
+  { "type": "bollard", "atM": 2100, "side": "R", "offM": 12, "color": "#facc15", "src": "FIA notes: yellow bollard at the T4 escape road (position estimated)" },
+  { "type": "sc", "n": 1, "mouth": "entry", "src": "FIA: SC1 at the pit entry gore" },
+  { "type": "sc", "n": 2, "mouth": "exit", "src": "FIA 2026: pit exit line ends at SC2" }
  ],
  "sources": [
   "docs/superpowers/research/2026-10-17-track-surface/circuits-a.md §1 (FIA F1 race director notes 2025, 2026; the-race.com, planetf1 2024; grandprix.com 2014)",

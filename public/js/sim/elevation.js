@@ -8,7 +8,10 @@ const HINT_WINDOW = 10; // segments (~100 m) either side of a car's last road po
 // penalised, so a car stays on its own road; without one, plain nearest.
 // hint: the segment this car was on last time; then only nearby segments count, so a car sliding sideways across the
 // bridge keeps its own level (a far-off hint, after a reset, falls back to the full search)
-export function roadAt(t, x, y, angle, hint) {
+// span: [from, to] segment indices (round the lap) the full search keeps to: a path beside one stretch of the track (the pit
+// lane between its mouths) never takes another leg's road. Monaco's lane, 23-28 m from its own, lost the hint and the full
+// search took the harbour leg: the lane sank 1.1 m under its pit wall
+export function roadAt(t, x, y, angle, hint, span = null) {
     const P = t.path, n = P.length, ca = Math.cos(angle ?? 0), sa = Math.sin(angle ?? 0);
     if (hint !== undefined && hint !== null) {
         let best = Infinity, bi = 0, bt = 0;
@@ -20,7 +23,9 @@ export function roadAt(t, x, y, angle, hint) {
         if (best <= t.width * 2) return { i: bi, f: bt };
     }
     let best = Infinity, bi = 0, bt = 0;
-    for (let i = 0; i < n; i++) {
+    const count = span ? ((((span[1] - span[0]) % n) + n) % n) + 1 : n;
+    for (let c = 0; c < count; c++) {
+        const i = span ? (span[0] + c) % n : c;
         const a = P[i], b = P[(i + 1) % n], ex = b.x - a.x, ey = b.y - a.y, l2 = ex * ex + ey * ey;
         const k = l2 ? Math.max(0, Math.min(1, ((x - a.x) * ex + (y - a.y) * ey) / l2)) : 0;
         let s = Math.hypot(x - a.x - k * ex, y - a.y - k * ey);
@@ -33,9 +38,9 @@ export function roadAt(t, x, y, angle, hint) {
 const lerp = (arr, i, f) => arr[i] + (arr[(i + 1) % arr.length] - arr[i]) * f;
 
 // Road height (m) under (x, y), and the gradient (m per m) along that segment as a world-direction vector
-export function heightAt(t, x, y, angle, hint) {
+export function heightAt(t, x, y, angle, hint, span = null) {
     if (!t.z) return { h: 0, sx: 0, sy: 0 };
-    const { i, f } = roadAt(t, x, y, angle, hint), P = t.path, j = (i + 1) % P.length;
+    const { i, f } = roadAt(t, x, y, angle, hint, span), P = t.path, j = (i + 1) % P.length;
     const a = P[i], b = P[j], len = Math.hypot(b.x - a.x, b.y - a.y) || 1, g = (t.z[j] - t.z[i]) / (len / t.scale);
     return { h: t.z[i] + (t.z[j] - t.z[i]) * f, sx: (g * (b.x - a.x)) / len, sy: (g * (b.y - a.y)) / len, i };
 }
@@ -47,9 +52,12 @@ export function heightAt(t, x, y, angle, hint) {
 const PATH_MEDIAN = 2, PATH_MEAN = 6;
 export function pathHeights(t, path) {
     let hint;
+    // the pit lane (and its wall): beside the track between its mouths, a few segments either side
+    const at = (s) => { let i = 0; while (i + 1 < t.path.length && t.cum[i + 1] <= s) i++; return i; }, segs = t.path.length;
+    const span = t.pit ? [(at(t.pit.entryS) - 3 + segs) % segs, (at(t.pit.exitS) + 3) % segs] : null;
     const raw = path.map((p, k) => {
         const a = path[Math.max(0, k - 1)], b = path[Math.min(path.length - 1, k + 1)];
-        const r = heightAt(t, p.x, p.y, Math.atan2(b.y - a.y, b.x - a.x), hint);
+        const r = heightAt(t, p.x, p.y, Math.atan2(b.y - a.y, b.x - a.x), hint, span);
         hint = r.i;
         return r.h;
     });

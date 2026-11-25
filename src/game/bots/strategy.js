@@ -1,7 +1,7 @@
 // src/game/bots/strategy.js
 // AI strategy: a legal tyre plan per bot, box calls when the plan or the wear says so, undercuts, and the release press.
 // Uses only the controls a human has (setBoxCall, setNextCompound, the throttle).
-const { COMPOUNDS, gripOf } = require('../../../public/js/sim/tyres.js');
+const { COMPOUNDS, gripOf, stopRule } = require('../../../public/js/sim/tyres.js');
 const { state } = require('./driver');
 
 const WEAR_CAP = 0.75; // the grip cliff starts at 0.8 (kept for callers)
@@ -29,7 +29,7 @@ function planRace(level, maxLaps, tyreWear, rng, cost = { lapS: 90, pitLossS: 22
         stint[c] = [0];
         for (let k = 0; k < maxLaps; k++) stint[c].push(stint[c][k] + cost.lapS / Math.sqrt(gripOf(c, (k + 0.5) / (COMPOUNDS[c].life * maxLaps))));
     }
-    const all = [];
+    const all = stopRule(maxLaps, tyreWear) ? [] : [...'SMH'].map((c) => ({ seq: [c], laps: [maxLaps], t: stint[c][maxLaps] })); // a sprint: no stop is a plan too
     for (const seq of SEQS) {
         if (seq.length > maxLaps) continue;
         if (seq.length === 2) for (let a = 1; a < maxLaps; a++) all.push({ seq, laps: [a, maxLaps - a], t: stint[seq[0]][a] + stint[seq[1]][maxLaps - a] + cost.pitLossS });
@@ -53,12 +53,15 @@ function raceTick(p, ctx, b) {
     if (p.stops > b.stopsSeen) { b.stopsSeen = p.stops; b.stint = Math.min(b.stint + 1, b.plan.length - 1); b.stintLap = p.lap; }
     if (ctx.frozen || p.finished) return;
     // Tyre rule not met and the race nearly over (the leader's laps count: a lapped car gets the flag sooner): box now
-    const rule = p.compoundsUsed.length < 2 && g.settings.tyreWear !== false && maxLaps >= 2;
+    const rule = p.compoundsUsed.length < 2 && stopRule(maxLaps, g.settings.tyreWear);
     const mate = ctx.cars.some((o) => o !== p && o.teamId === p.teamId && (o.inPit || o.boxCall === 'this')); // one box per team: no double stack
     const busy = ctx.cars.filter((o) => o !== p && (o.inPit || o.boxCall)).length >= PIT_BUSY; // a full pit lane jams: wait a lap
     const toGo = maxLaps - Math.max(p.lap, ...ctx.cars.map((o) => o.lap)); // laps left for the leader
-    // The tyre rule's stop is never blocked late on: a teammate in the box or a busy lane costs seconds, the rule costs 22
-    if (rule && !p.boxCall && !p.inPit && (toGo <= 2 || (toGo <= 3 && !busy && !mate))) return box(p, g, b);
+    // Last resort, not the plan: always on the leader's last lap (a teammate in the box or a busy lane costs seconds, the rule
+    // 22); a lap earlier only once the planned stop is overdue and the lane's free. "3 to go" was true on a 3-lap race's grid,
+    // "2 to go" called the whole field in the same tick
+    const planPast = p.lap - b.stintLap >= b.plan[b.stint].laps;
+    if (rule && !p.boxCall && !p.inPit && (toGo <= 1 || (toGo <= 2 && planPast && !busy && !mate))) return box(p, g, b);
     if (p.lap === b.lapSeen) return;
     // Once a lap, on crossing the line: undercut bookkeeping, then the box decision
     b.lapSeen = p.lap;

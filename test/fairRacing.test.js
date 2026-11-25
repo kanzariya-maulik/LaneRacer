@@ -106,7 +106,12 @@ function insideSign(t, i) {
     const mx = (P[k].x + P[j].x) / 2 - a.x, my = (P[k].y + P[j].y) / 2 - a.y;
     return -Math.sin(h) * mx + Math.cos(h) * my > 0 ? 1 : -1; // + = the (-sin h, cos h) side: the path's right on screen (y down)
 }
-const strike = (g, p, at) => { p.x = at.x; p.y = at.y; p.offLimits = false; g.checkLimits(p, Physics.nearestOnTrack(p.x, p.y, g.track)); };
+// The car there, facing along the road (the limits are judged on its tyres)
+const strike = (g, p, at) => {
+    const n = Physics.nearestOnTrack(at.x, at.y, g.track), P = g.track.path, a = P[n.i], b = P[(n.i + 1) % P.length];
+    Object.assign(p, { x: at.x, y: at.y, angle: Math.atan2(b.y - a.y, b.x - a.x), offLimits: false });
+    g.checkLimits(p, n);
+};
 
 for (const id of Track.TRACK_IDS) {
     test(`${id}: the inside of the tightest bend is a cut, the outside is wide`, () => {
@@ -114,7 +119,7 @@ for (const id of Track.TRACK_IDS) {
         const { events, io: sio } = spy(), g = new Game(sio, [lp('a')], t, RACE, () => {});
         g.release();
         const p = g.players.a;
-        strike(g, p, pastLine(t, i, ins));
+        strike(g, p, pastLine(t, i, ins, 4)); // 4 m: inside a tight bend the line curves round, 2 m left a tyre on it (legal)
         assert.strictEqual(p.limits, 1, 'cut = strike');
         strike(g, p, pastLine(t, i, -ins));
         assert.strictEqual(p.limits, 1, 'wide = no strike');

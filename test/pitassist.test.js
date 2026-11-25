@@ -100,3 +100,47 @@ for (const id of Track.TRACK_IDS) {
         }
     });
 }
+
+// Fast lane | working lane (5 m, garage side): cars drive the fast lane's centre along the garages, never on the line between
+// the two, and turn into the working lane for their box only at the hand-over
+const lateralOf = (p, t) => { // metres from the lane centre, + = the track side
+    const P = t.pit.path, n = Physics.nearestOnPath(p.x, p.y, P, false), a = P[n.i], b = P[Math.min(n.i + 1, P.length - 1)];
+    const l = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+    return (t.pit.trackSide * ((p.x - n.px) * -(b.y - a.y) + (p.y - n.py) * (b.x - a.x))) / l / t.scale;
+};
+const FAST_TOL_M = 0.6;
+for (const id of Track.TRACK_IDS) {
+    test(`${id}: along the garages the car drives the fast lane's centre (in and out), and its box is mid working lane`, () => {
+        const t = tracks[id], sc = t.scale, [g0, g1] = t.pit.garageSpan, FAST_M = D.PIT_WORK_LANE_M / 2;
+        const { p } = car(t, 5 * sc, 20, 'lane');
+        const box = p.box, boxLat = lateralOf({ x: box.x, y: box.y }, t);
+        assert.ok(Math.abs(boxLat - -(t.pit.width / sc / 2 - FAST_M)) < 0.3, `box ${boxLat.toFixed(2)} m from the lane centre`);
+        const worst = { in: 0, out: 0 };
+        for (let k = 0; k < 60 * 90 && box.s - (p.pitS ?? 0) > D.ASSIST_HANDOVER_M * sc; k++) {
+            tick(p, t);
+            if (p.pitS > g0 + 30 * sc && p.pitS < box.s - 60 * sc) worst.in = Math.max(worst.in, Math.abs(lateralOf(p, t) - FAST_M));
+        }
+        Object.assign(p, { x: box.x, y: box.y, angle: box.angle, vx: 0, vy: 0, speed: 0, stop: { phase: 'out', t: 0, age: 0 } });
+        for (let k = 0; k < 60 * 60 && (p.pitS ?? 0) < Math.min(g1, t.pit.limEnd); k++) {
+            tick(p, t);
+            if (p.pitS > box.s + 40 * sc && p.pitS < g1 - 30 * sc) worst.out = Math.max(worst.out, Math.abs(lateralOf(p, t) - FAST_M));
+        }
+        assert.ok(worst.in < FAST_TOL_M && worst.out < FAST_TOL_M, `off the fast lane centre by ${worst.in.toFixed(2)} m in, ${worst.out.toFixed(2)} m out`);
+    });
+}
+
+test('Monza: the pit lane is 12 m wide (FIA grade 1: 5 m working lane + the fast lane)', () => {
+    assert.strictEqual(tracks.monza.pit.width / tracks.monza.scale, 12);
+});
+
+test('monza (12 m lane): from the fast lane a car reaches every box and parks within the guide time', () => {
+    const t = tracks.monza, sc = t.scale, boxes = t.pit.garages.flatMap((g) => g.boxes), slow = [];
+    for (const box of boxes) {
+        const { g, p } = car(t, t.pit.limStart + 10 * sc, 20, 'lane');
+        p.box = box;
+        let k = 0;
+        for (; k < 60 * 60 && p.stop?.phase !== 'service' && p.stop; k++) g.updateStop(p), tick(p, t);
+        if (p.stop?.phase !== 'service') slow.push(`${(box.s / sc).toFixed(0)} m: ${p.stop?.phase || 'released'}`);
+    }
+    assert.deepStrictEqual(slow, []);
+});

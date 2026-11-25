@@ -283,6 +283,7 @@ kbd {
 #chat-messages:empty::before { content: 'No messages yet. Say hi to the grid.'; margin: auto; color: var(--dim); font-size: 0.85rem; }
 .chat-msg { word-break: break-word; color: #dfe3e8; }
 .chat-author { font-weight: 700; margin-right: 4px; }
+.chat-system .chat-author { border: 1px solid currentColor; border-radius: 3px; padding: 0 4px; } /* server only: a player can't draw this */
 #chat-form { display: flex; gap: 8px; }
 #chat-form .btn { height: 42px; }
 

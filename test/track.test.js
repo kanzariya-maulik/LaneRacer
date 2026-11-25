@@ -56,6 +56,7 @@ for (const id of Track.TRACK_IDS) {
     });
 
     test(`${id}: pit lane only meets the road at its two mouths, full width clear of the real road edge`, () => {
+        if (circuits[id].pitSurveyedMouths) return; // its real split runs over the track's asphalt (pitGeometry.test.js checks it)
         const pit = t.pit;
         pit.path.forEach((q, i) => {
             const n = Physics.nearestOnTrack(q.x, q.y, t), half = Track.edgeAt(t, n, q.x, q.y); // the real edge on that side
@@ -87,8 +88,13 @@ for (const id of Track.TRACK_IDS) {
 
     test(`${id}: pit wall runs the whole full-width lane on the track side`, () => {
         const pit = t.pit, sOf = (w) => { const k = Physics.nearestOnPath(w.x, w.y, pit.path, false); return pit.cum[k.i] + k.t * (pit.cum[k.i + 1] - pit.cum[k.i]); };
-        const full = pit.widthAt.map((w) => w >= pit.width - 1e-6), first = full.indexOf(true), last = full.lastIndexOf(true);
-        assert.ok(sOf(pit.wall[0]) <= pit.cum[first] + 5 * t.scale && sOf(pit.wall.at(-1)) >= pit.cum[last] - 5 * t.scale);
+        // full width with its track side clear of the road edge by the wall's end gap (Track.js WALL_END_GAP_M: 0.5 m)
+        const side = (i) => { const a = pit.path[i], b = pit.path[Math.min(i + 1, pit.path.length - 1)], h = Math.atan2(b.y - a.y, b.x - a.x) || 0, o = (pit.trackSide * pit.width) / 2;
+            const q = { x: a.x - Math.sin(h) * o, y: a.y + Math.cos(h) * o }, n = Physics.nearestOnTrack(q.x, q.y, t); return (n.dist - Track.edgeAt(t, n, q.x, q.y)) / t.scale; };
+        const full = pit.widthAt.map((w, i) => w >= pit.width - 1e-6 && side(i) >= 0.5), first = full.indexOf(true), last = full.lastIndexOf(true);
+        // a surveyed entry (Monza): the wall starts where its painted gore ends, and stops where the exit line starts
+        const from = pit.gore ? pit.gore.to : pit.cum[first], to = pit.gore ? pit.gore.exitFrom : pit.cum[last];
+        assert.ok(sOf(pit.wall[0]) <= from + 5 * t.scale && sOf(pit.wall.at(-1)) >= to - 5 * t.scale);
         for (const w of pit.wall) { const n = Physics.nearestOnTrack(w.x, w.y, t); assert.ok(n.dist >= Track.edgeAt(t, n, w.x, w.y) - 0.01 * t.scale, 'wall on the road'); }
     });
 
@@ -308,4 +314,76 @@ test('limits file: used when its point count matches the track, ignored (scale 1
     const i = none.lineLimit.findIndex((v) => v < 40);
     assert.ok(up.lineLimit[i] >= none.lineLimit[i] * 1.09, 'the line drives the calibrated limits');
     assert.deepStrictEqual(up.helpLimit, none.lineLimit, 'the braking help keeps the grip model\'s');
+});
+
+// The widened road gives way to the surveyed pit lane beside it (Track.js build); where the lane ends the edge eases back
+// out to its widened place, no step: a 1.4 m jog in one 10 m segment drew a notch in the grass at Monza's pit exit
+test('monza: the track edge eases back out past each pit mouth, no notch', () => {
+    const t = tracks.monza, n = t.path.length, sc = t.scale, near = 100 * sc;
+    for (const s0 of [t.pit.entryS, t.pit.exitS]) {
+        for (const e of [t.edgeR, t.edgeL]) for (let i = 0; i < n; i++) {
+            if (Math.abs(t.cum[i] - s0) > near) continue;
+            const slope = Math.abs(e[(i + 1) % n] - e[i]) / (t.cum[i + 1] - t.cum[i]);
+            assert.ok(slope <= 0.06, `edge slope ${slope.toFixed(3)} at ${(t.cum[i] / sc).toFixed(0)} m`);
+        }
+    }
+});
+
+// ...and touches nothing else: the survey's own widening round the lap stays (an ease over the whole edge narrowed
+// Monza by up to 1.1 m in the Lesmos, moving its track limits). Built without surveyed mouths the edges aren't eased
+test('monza: the eased edge differs from the plain one only along the pit lane', () => {
+    const raw = JSON.parse(fs.readFileSync(path.join(DATA, 'monza.json'), 'utf8'));
+    const t = tracks.monza, plain = Track.build(raw, { ...circuits.monza, pitSurveyedMouths: false }, null), sc = t.scale;
+    const total = t.cum[t.path.length], lapM = (s) => ((((s - t.startS) % total) + total) % total) / sc;
+    const from = lapM(t.pit.entryS) - 60, to = lapM(t.pit.exitS) + 60; // the lane runs across the start line
+    const off = [];
+    for (const k of ['edgeR', 'edgeL']) t[k].forEach((e, i) => {
+        const m = lapM(t.cum[i]);
+        if (Math.abs(e - plain[k][i]) > 0.01 * sc && !(m >= from || m <= to)) off.push(`${k} ${m.toFixed(0)} m`);
+    });
+    assert.deepStrictEqual(off, []);
+});
+
+// A surveyed pit whose entry never parts from the track in its first half has no gore: an error when the track is built
+// (as a lane with no stretch clear of the road is), not a gore from undefined that crashed the client's markings
+test('surveyed pit entry with no gore: the build says so', () => {
+    const R = 3000, pts = Array.from({ length: 200 }, (_, i) => ({ x: Math.cos((i / 100) * Math.PI) * R, y: Math.sin((i / 100) * Math.PI) * R }));
+    // the lane hugs the edge for its first half, clear of it (wall room) only in its second
+    const off = (a) => (a < 0.05 ? (a / 0.05) * 54 : a < 0.4 ? 54 : a < 0.45 ? 54 + ((a - 0.4) / 0.05) * 102 : a < 0.55 ? 156 : a < 0.6 ? 156 * (1 - (a - 0.55) / 0.05) : 0);
+    const pit = Array.from({ length: 61 }, (_, k) => { const a = k / 100; return { x: Math.cos(a) * (R + off(a)), y: Math.sin(a) * (R + off(a)) }; });
+    assert.throws(() => Track.build({ id: 'ring', name: 'Ring', scale: 6, width: 72, path: pts, pit: { path: pit, width: 72 } }, { pitSurveyedMouths: true }, null), /ring: .*gore/);
+});
+
+
+// The pit wall's ends stand clear of the road edge: started where the lane first reached full width, its nose sat on the
+// white line (its 0.6 m box on the racing surface) and cars at the edge of the track hit it head on (Zandvoort, Buddh)
+for (const id of Track.TRACK_IDS) test(`${id}: both ends of the pit wall stand clear of the road edge`, () => {
+    const t = tracks[id], W = t.pit.wall;
+    for (const w of [W[0], W.at(-1)]) {
+        const n = Physics.nearestOnTrack(w.x, w.y, t), gap = (n.dist - Track.edgeAt(t, n, w.x, w.y)) / t.scale;
+        assert.ok(gap >= 0.5, `end ${gap.toFixed(2)} m off the road edge`);
+    }
+});
+
+// The widened edge gives way to the pit lane as built, not the raw survey: the built lane keeps only the survey's garage
+// stretch and joins the road by new connectors, so the survey's 50-100 m beside the road before it clears it is gone. The
+// edge was still held in by it: up to 1.9 m of track (Montreal) narrowed with the lane 4-16 m away, a notch in the limits
+test('the widened edge is held in only where the built pit lane is beside it (no notch where the survey ran)', () => {
+    const bad = [];
+    for (const id of Track.TRACK_IDS) {
+        if (circuits[id]?.pitSurveyedMouths) continue; // Monza: the surveyed mouths ease out by design (tests above)
+        const raw = JSON.parse(fs.readFileSync(path.join(DATA, `${id}.json`), 'utf8'));
+        if (!raw.pit) continue;
+        const t = tracks[id] || Track.load(id), sc = t.scale, pit = t.pit, plain = Track.build({ ...raw, pit: undefined }, circuits[id] || {}, null);
+        for (const [k, sd] of [['edgeR', 1], ['edgeL', -1]]) t[k].forEach((e, i) => {
+            const d = (plain[k][i] - e) / sc, bar = k === 'edgeR' ? t.barrierR : t.barrierL;
+            if (d < 0.05 || Math.abs(e - (bar[i] - 1.5 * sc)) < 0.01 * sc) return; // held off a barrier (Track.js WALL_ROOM_M), not the lane
+            const a = t.path[i], b = t.path[(i + 1) % t.path.length], h = Math.atan2(b.y - a.y, b.x - a.x);
+            const q = { x: a.x - Math.sin(h) * sd * plain[k][i], y: a.y + Math.cos(h) * sd * plain[k][i] }; // where the widened edge would be
+            const n = Physics.nearestOnPath(q.x, q.y, pit.path, false), w = pit.widthAt[n.i] + (pit.widthAt[Math.min(n.i + 1, pit.widthAt.length - 1)] - pit.widthAt[n.i]) * n.t;
+            const gap = (n.dist - w / 2) / sc; // from there to the lane's own edge
+            if (gap > 3) bad.push(`${id} ${k} pt ${i}: -${d.toFixed(2)} m, lane ${gap.toFixed(1)} m off`);
+        });
+    }
+    assert.deepStrictEqual(bad, []);
 });

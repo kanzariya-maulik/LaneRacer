@@ -213,23 +213,23 @@ export function bodyArrays(detail = 'mid') {
             nrm.push(...to3(normalAt(s, u, v % 1)));
             uv.push(rx + u * rw, ry + v * rh);
         }
-        // wind each quad so its face turns the same way as the outward normal
-        const P = (i, j) => { const o = (base + i * (nv + 1) + j) * 3; return [pos[o], pos[o + 1], pos[o + 2]]; };
-        const N = (i, j) => { const o = (base + i * (nv + 1) + j) * 3; return [nrm[o], nrm[o + 1], nrm[o + 2]]; };
-        // every quad wound to face its own outward normal (one test for the whole surface got some inside out)
+        // every triangle wound to face its own vertices' normals (one test per surface, then per quad, left some inside
+        // out: a non-planar quad's two halves can face apart)
+        const V = (k) => [pos[k * 3], pos[k * 3 + 1], pos[k * 3 + 2]], NV = (k) => [nrm[k * 3], nrm[k * 3 + 1], nrm[k * 3 + 2]];
+        const tri = (a, b, c) => {
+            const n = [0, 1, 2].map((q) => NV(a)[q] + NV(b)[q] + NV(c)[q]);
+            if (dot(cross(sub(V(b), V(a)), sub(V(c), V(a))), n) < 0) idx.push(a, c, b); else idx.push(a, b, c);
+        };
         for (let i = 0; i < nu; i++) for (let j = 0; j < nv; j++) {
             const a = base + i * (nv + 1) + j, b = a + nv + 1, c = b + 1, d = a + 1;
-            const n = [0, 1, 2].map((q) => N(i, j)[q] + N(i + 1, j)[q] + N(i + 1, j + 1)[q] + N(i, j + 1)[q]);
-            const flip = dot(cross(sub(P(i + 1, j + 1), P(i, j)), sub(P(i, j + 1), P(i + 1, j))), n) < 0; // diagonals' cross ∝ du × dv
-            if (flip) idx.push(a, c, b, a, d, c); else idx.push(a, b, c, a, c, d);
+            tri(a, b, c); tri(a, c, d);
         }
         if (s.caps) for (const [i, out] of [[0, -1], [nu, 1]]) { // flat caps: a fan from the ring's centre
             const ring = [], c = to3(s.c(i / nu)), du = to3(sub(s.c(Math.min(1, i / nu + 0.01)), s.c(Math.max(0, i / nu - 0.01))));
             const n = unit(du.map((q) => q * out)), cb = pos.length / 3;
             pos.push(...c); nrm.push(...n); uv.push(rx + (i / nu) * rw, ry + 0.25 * rh);
             for (let j = 0; j <= nv; j++) { const o = (base + i * (nv + 1) + j) * 3; pos.push(pos[o], pos[o + 1], pos[o + 2]); nrm.push(...n); uv.push(rx + (i / nu) * rw, ry + (j / nv) * rh); ring.push(cb + 1 + j); }
-            const p0 = P(i, 0), p1 = P(i, 1), w = dot(cross(sub(p0, c), sub(p1, c)), n) < 0;
-            for (let j = 0; j < nv; j++) w ? idx.push(cb, ring[j + 1], ring[j]) : idx.push(cb, ring[j], ring[j + 1]);
+            for (let j = 0; j < nv; j++) tri(cb, ring[j], ring[j + 1]); // each its own way (a cambered wing's cap isn't star-shaped)
         }
     });
     return { pos, nrm, uv, idx };

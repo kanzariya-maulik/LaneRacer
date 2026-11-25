@@ -224,3 +224,12 @@ test('a car\'s pit stop phase (entry index 12) and timer (13) survive the snapsh
     assert.deepStrictEqual(b.snaps[0].cars.get(0).slice(12), [2, 1.5]);
     assert.strictEqual(b.latest().cars.get(0)[12] || 0, 0);
 });
+
+// Packet seq numbers on across sessions (Game.js lastSeq), so a new session is told by its clock: a straggler from the old
+// one (session clock 83 s) arriving after game_init sat first in the new buffer, which then never trimmed (~5000 snapshots)
+test('a new session\'s packets push out a straggler from the old one (higher seq, clock back near 0)', () => {
+    const b = new N.SnapshotBuffer();
+    b.push(pkt(5000, 83.3, [car(0, 999)]), 100);
+    for (let k = 1; k <= 120; k++) b.push(pkt(5040 + k, k / 60, [car(0, k)]), 100 + k / 60);
+    assert.ok(b.snaps[0].t <= 1 && b.snaps.length <= 70, `${b.snaps.length} snapshots, first at t ${b.snaps[0].t}`);
+});
